@@ -1,11 +1,14 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package main
 
 import (
 	"context"
 	"log"
 
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
-	"github.com/hashicorp/terraform-provider-scaffolding-framework/internal/provider"
+	"github.com/hashicorp/terraform-plugin-framework/providerserver"
+	"terraform-provider-cpanel/internal/provider"
 )
 
 // Run "go generate" to format example terraform files and generate the docs for the registry/website
@@ -20,20 +23,19 @@ import (
 
 var (
 	// these will be set by the goreleaser configuration
-	// to appropriate values for the compiled binary
+	// to appropriate values for the compiled binary.
 	version string = "dev"
 
-	// goreleaser can also pass the specific commit if you want
-	// commit  string = ""
+	// goreleaser can pass other information to the main package, such as the specific commit
+	// https://goreleaser.com/cookbooks/using-main.version/
 )
 
 func main() {
-	opts := tfsdk.ServeOpts{
-		// TODO: Update this string with the published name of your provider.
-		Name: "registry.terraform.io/hashicorp/scaffolding",
+	opts := providerserver.ServeOpts{
+		Address: "registry.terraform.io/LoicBoursin/cpanel",
 	}
 
-	err := tfsdk.Serve(context.Background(), provider.New(version), opts)
+	err := providerserver.Serve(context.Background(), provider.New(version), opts)
 
 	if err != nil {
 		log.Fatal(err.Error())

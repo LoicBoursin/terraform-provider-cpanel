@@ -1,0 +1,1 @@
+terraform import cpanel_postgresql_database.database sc1john1234_database
