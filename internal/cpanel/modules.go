@@ -6,6 +6,7 @@ const (
 	ModuleCron             = "Cron"
 	ModuleDenyIP           = "DenyIp"
 	ModuleDirectoryIndexes = "DirectoryIndexes"
+	ModuleDirectoryPrivacy = "DirectoryPrivacy"
 	ModuleDNS              = "DNS"
 	ModuleDomainInfo       = "DomainInfo"
 	ModuleDynamicDNS       = "DynamicDNS"

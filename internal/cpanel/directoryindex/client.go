@@ -19,7 +19,7 @@ func NewClient(client *cpanel.Client) *Client {
 }
 
 func (c *Client) Get(ctx context.Context, directory string) (*Index, error) {
-	absoluteDirectory, exists, err := c.resolveDirectory(ctx, directory)
+	absoluteDirectory, exists, err := c.ResolveDirectory(ctx, directory)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +62,7 @@ func (c *Client) Set(
 		return nil, fmt.Errorf("unsupported directory indexing type %q", indexType)
 	}
 
-	absoluteDirectory, exists, err := c.resolveDirectory(ctx, directory)
+	absoluteDirectory, exists, err := c.ResolveDirectory(ctx, directory)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +122,7 @@ func (c *Client) HomeDirectory(ctx context.Context) (string, error) {
 	return path.Clean(response.Data.Home), nil
 }
 
-func (c *Client) resolveDirectory(
+func (c *Client) ResolveDirectory(
 	ctx context.Context,
 	directory string,
 ) (string, bool, error) {

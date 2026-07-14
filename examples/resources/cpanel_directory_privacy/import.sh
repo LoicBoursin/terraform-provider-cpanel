@@ -1,0 +1,1 @@
+terraform import cpanel_directory_privacy.downloads public_html/downloads

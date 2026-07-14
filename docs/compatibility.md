@@ -30,9 +30,9 @@ The o2switch certification environment uses the cPanel account API over HTTPS
 on port 2083. Certification covers authentication, full-access API tokens, cron
 jobs, DNS records, Dynamic DNS domains, addon domains, domain aliases, web
 subdomains, HTTP redirects, email accounts, forwarders and autoresponders, FTP
-accounts, directory indexes, custom MIME types, Apache handlers, website IP
-blocks, MySQL or MariaDB databases and users, PostgreSQL databases and users,
-imports, drift detection, and cleanup.
+accounts, directory indexes and privacy, custom MIME types, Apache handlers,
+website IP blocks, MySQL or MariaDB databases and users, PostgreSQL databases
+and users, imports, drift detection, and cleanup.
 
 ## API policy
 
@@ -94,6 +94,13 @@ relative to the account home through `Variables::get_user_information` and
 `Fileman::list_files`, so it can distinguish a deleted directory from an API
 failure. Removing the Terraform resource preserves the directory and restores
 its indexing mode to `inherit`.
+
+Directory Privacy operations use UAPI
+`DirectoryPrivacy::is_directory_protected` and
+`DirectoryPrivacy::configure_directory_protection`. Paths use the same
+account-home resolution as directory indexes. Removing the Terraform resource
+disables HTTP Basic protection without deleting the directory, its contents,
+or separately managed Directory Privacy users.
 
 DNS record reads and mutations use UAPI `DNS::parse_zone` and
 `DNS::mass_edit_zone`. Every mutation uses the current SOA serial and is

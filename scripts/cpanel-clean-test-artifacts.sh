@@ -207,6 +207,7 @@ deleted_addon_domains=0
 deleted_domain_aliases=0
 deleted_subdomains=0
 deleted_domain_directories=0
+deleted_directory_privacy_password_directories=0
 deleted_cron_lines=0
 
 get_request 'execute/Tokens/list' 'API token inventory'
@@ -635,6 +636,45 @@ while IFS= read -r directory; do
 done <<<"${test_domain_directories}"
 
 get_request \
+  'execute/Fileman/list_files?dir=&show_hidden=1&limit=1000' \
+  'cPanel home directory inventory'
+if jq -e \
+  '.data[] | select(.type == "dir" and .file == ".htpasswds")' \
+  "${response_file}" >/dev/null; then
+  get_request \
+    'execute/Fileman/list_files?dir=.htpasswds&show_hidden=1&limit=1000' \
+    'Directory Privacy password root inventory'
+  if jq -e \
+    '.data[] | select(.type == "dir" and .file == "public_html")' \
+    "${response_file}" >/dev/null; then
+    get_request \
+      'execute/Fileman/list_files?dir=.htpasswds/public_html&show_hidden=1&limit=1000' \
+      'Directory Privacy test password directory inventory'
+    test_directory_privacy_password_directories="$(
+      jq -r \
+        '.data[]
+          | select(.type == "dir")
+          | .file
+          | select(startswith("tfcpanel-privacy-"))' \
+        "${response_file}"
+    )"
+    while IFS= read -r directory; do
+      if [[ -z "${directory}" ]]; then
+        continue
+      fi
+      api2_post \
+        'Fileman' \
+        'fileop' \
+        "Delete Directory Privacy test password directory ${directory}" \
+        'op=unlink' \
+        "sourcefiles=.htpasswds/public_html/${directory}" \
+        'doubledecode=0'
+      deleted_directory_privacy_password_directories=$((deleted_directory_privacy_password_directories + 1))
+    done <<<"${test_directory_privacy_password_directories}"
+  fi
+fi
+
+get_request \
   "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=Cron&cpanel_jsonapi_func=fetchcron" \
   'Cron inventory'
 while IFS= read -r linekey; do
@@ -703,4 +743,6 @@ printf '  addon domains deleted: %d\n' "${deleted_addon_domains}"
 printf '  domain aliases deleted: %d\n' "${deleted_domain_aliases}"
 printf '  subdomains deleted: %d\n' "${deleted_subdomains}"
 printf '  test domain directories deleted: %d\n' "${deleted_domain_directories}"
+printf '  Directory Privacy test password directories deleted: %d\n' \
+  "${deleted_directory_privacy_password_directories}"
 printf '  cron lines deleted: %d\n' "${deleted_cron_lines}"

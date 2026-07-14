@@ -74,7 +74,7 @@ cpanel_version="$(
 )"
 
 request 'execute/Features/list_features' 'feature check'
-for feature in addondomains apitokens blockers cron dynamicdns ftpaccts handlers indexmanager mime mysql parkeddomains popaccts postgres redirects subdomains zoneedit; do
+for feature in addondomains apitokens blockers cron dynamicdns ftpaccts handlers indexmanager mime mysql parkeddomains popaccts postgres redirects subdomains webprotect zoneedit; do
   if [[ "$(jq -r --arg feature "${feature}" '.data[$feature] // 0' "${response_file}")" != "1" ]]; then
     printf 'Required cPanel feature is disabled: %s\n' "${feature}" >&2
     exit 1
@@ -92,6 +92,11 @@ request \
   "execute/DirectoryIndexes/get_indexing?dir=${account_home}/public_html" \
   'Directory Indexes check'
 public_html_index_type="$(jq -r '.data' "${response_file}")"
+
+request \
+  "execute/DirectoryPrivacy/is_directory_protected?dir=${account_home}/public_html" \
+  'Directory Privacy check'
+public_html_protected="$(jq -r '.data.protected' "${response_file}")"
 
 request 'execute/Tokens/list' 'API token check'
 api_token_count="$(jq -r '.data | length' "${response_file}")"
@@ -311,6 +316,33 @@ domain_test_directory_count="$(
     "${response_file}"
 )"
 
+directory_privacy_test_directory_count=0
+request \
+  'execute/Fileman/list_files?dir=&show_hidden=1&limit=1000' \
+  'cPanel home directory check'
+if jq -e \
+  '.data[] | select(.type == "dir" and .file == ".htpasswds")' \
+  "${response_file}" >/dev/null; then
+  request \
+    'execute/Fileman/list_files?dir=.htpasswds&show_hidden=1&limit=1000' \
+    'Directory Privacy password root check'
+  if jq -e \
+    '.data[] | select(.type == "dir" and .file == "public_html")' \
+    "${response_file}" >/dev/null; then
+    request \
+      'execute/Fileman/list_files?dir=.htpasswds/public_html&show_hidden=1&limit=1000' \
+      'Directory Privacy test directory check'
+    directory_privacy_test_directory_count="$(
+      jq -r \
+        '[.data[]
+          | select(.type == "dir")
+          | .file
+          | select(startswith("tfcpanel-privacy-"))] | length' \
+        "${response_file}"
+    )"
+  fi
+fi
+
 request \
   "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=Cron&cpanel_jsonapi_func=fetchcron" \
   'cron check'
@@ -344,6 +376,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${domain_alias_test_count}" != "0"
     || "${subdomain_test_count}" != "0"
     || "${domain_test_directory_count}" != "0"
+    || "${directory_privacy_test_directory_count}" != "0"
     || "${cron_count}" != "0"
   ]]; then
     printf 'cPanel test-managed inventory is not empty\n' >&2
@@ -371,6 +404,8 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     printf '  test domain aliases: %s\n' "${domain_alias_test_count}" >&2
     printf '  test subdomains: %s\n' "${subdomain_test_count}" >&2
     printf '  test domain directories: %s\n' "${domain_test_directory_count}" >&2
+    printf '  test Directory Privacy password directories: %s\n' \
+      "${directory_privacy_test_directory_count}" >&2
     printf '  cron commands: %s\n' "${cron_command_count}" >&2
     printf '  cron variables: %s\n' "${cron_variable_count}" >&2
     exit 1
@@ -397,6 +432,7 @@ printf '  Apache handlers: %s (%s test-managed)\n' \
   "${apache_handler_count}" \
   "${apache_handler_test_count}"
 printf '  public_html directory index: %s\n' "${public_html_index_type}"
+printf '  public_html directory protected: %s\n' "${public_html_protected}"
 printf '  PostgreSQL databases: %s\n' "${database_count}"
 printf '  PostgreSQL users: %s\n' "${user_count}"
 printf '  MySQL databases: %s (%s test-managed)\n' \
@@ -436,5 +472,7 @@ printf '  subdomains: %s (%s test-managed)\n' \
   "${subdomain_count}" \
   "${subdomain_test_count}"
 printf '  test domain directories: %s\n' "${domain_test_directory_count}"
+printf '  test Directory Privacy password directories: %s\n' \
+  "${directory_privacy_test_directory_count}"
 printf '  cron commands: %s\n' "${cron_command_count}"
 printf '  cron variables: %s\n' "${cron_variable_count}"

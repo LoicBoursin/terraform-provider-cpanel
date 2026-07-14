@@ -31,6 +31,9 @@
   drift recovery, and cPanel 134 acceptance coverage.
 - Directory index resource and data source with inherited-setting cleanup,
   import, rollback, drift recovery, and cPanel 134 acceptance coverage.
+- Directory Privacy resource and data source with in-place authentication-label
+  updates, import, drift recovery, non-destructive removal, and cPanel 134
+  acceptance coverage.
 - Email account resource and data source with password and quota updates,
   import, replacement, drift recovery, and cPanel 134 acceptance coverage.
 - MySQL and MariaDB user and database resources, matching data sources, import,

@@ -16,6 +16,7 @@ import (
 	"terraform-provider-cpanel/internal/cpanel/cron"
 	"terraform-provider-cpanel/internal/cpanel/ddns"
 	"terraform-provider-cpanel/internal/cpanel/directoryindex"
+	"terraform-provider-cpanel/internal/cpanel/directoryprivacy"
 	cpaneldns "terraform-provider-cpanel/internal/cpanel/dns"
 	cpaneldomain "terraform-provider-cpanel/internal/cpanel/domain"
 	cpanelmail "terraform-provider-cpanel/internal/cpanel/email"
@@ -58,8 +59,8 @@ func (p *cpanelProvider) Metadata(_ context.Context, _ provider.MetadataRequest,
 // Schema defines the provider-level schema for configuration data.
 func (p *cpanelProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description:         "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, HTTP redirects, directory indexes, custom MIME types and Apache handlers, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, and MySQL, MariaDB, and PostgreSQL users and databases.",
-		MarkdownDescription: "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, HTTP redirects, directory indexes, custom MIME types and Apache handlers, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		Description:         "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, HTTP redirects, directory indexes and privacy, custom MIME types and Apache handlers, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		MarkdownDescription: "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, HTTP redirects, directory indexes and privacy, custom MIME types and Apache handlers, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, and MySQL, MariaDB, and PostgreSQL users and databases.",
 		Attributes: map[string]schema.Attribute{
 			"username": schema.StringAttribute{
 				Optional:            true,
@@ -201,6 +202,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	apiTokenClient := apitoken.NewClient(client)
 	cronClient := cron.NewClient(client)
 	directoryIndexClient := directoryindex.NewClient(client)
+	directoryPrivacyClient := directoryprivacy.NewClient(client)
 	dnsClient := cpaneldns.NewClient(client)
 	domainClient := cpaneldomain.NewClient(client)
 	dynamicDNSClient := ddns.NewClient(client)
@@ -215,36 +217,38 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	// Make the module clients available during DataSource and Resource
 	// type Configure methods.
 	resp.DataSourceData = map[string]interface{}{
-		"apachehandler":  apacheHandlerClient,
-		"apitoken":       apiTokenClient,
-		"cron":           cronClient,
-		"directoryindex": directoryIndexClient,
-		"dns":            dnsClient,
-		"domain":         domainClient,
-		"ddns":           dynamicDNSClient,
-		"email":          emailClient,
-		"ftp":            ftpClient,
-		"ipblock":        ipBlockClient,
-		"mimetype":       mimeTypeClient,
-		"mysql":          mySQLClient,
-		"postgresql":     postgreSQLClient,
-		"redirect":       redirectClient,
+		"apachehandler":    apacheHandlerClient,
+		"apitoken":         apiTokenClient,
+		"cron":             cronClient,
+		"directoryindex":   directoryIndexClient,
+		"directoryprivacy": directoryPrivacyClient,
+		"dns":              dnsClient,
+		"domain":           domainClient,
+		"ddns":             dynamicDNSClient,
+		"email":            emailClient,
+		"ftp":              ftpClient,
+		"ipblock":          ipBlockClient,
+		"mimetype":         mimeTypeClient,
+		"mysql":            mySQLClient,
+		"postgresql":       postgreSQLClient,
+		"redirect":         redirectClient,
 	}
 	resp.ResourceData = map[string]interface{}{
-		"apachehandler":  apacheHandlerClient,
-		"apitoken":       apiTokenClient,
-		"cron":           cronClient,
-		"directoryindex": directoryIndexClient,
-		"dns":            dnsClient,
-		"domain":         domainClient,
-		"ddns":           dynamicDNSClient,
-		"email":          emailClient,
-		"ftp":            ftpClient,
-		"ipblock":        ipBlockClient,
-		"mimetype":       mimeTypeClient,
-		"mysql":          mySQLClient,
-		"postgresql":     postgreSQLClient,
-		"redirect":       redirectClient,
+		"apachehandler":    apacheHandlerClient,
+		"apitoken":         apiTokenClient,
+		"cron":             cronClient,
+		"directoryindex":   directoryIndexClient,
+		"directoryprivacy": directoryPrivacyClient,
+		"dns":              dnsClient,
+		"domain":           domainClient,
+		"ddns":             dynamicDNSClient,
+		"email":            emailClient,
+		"ftp":              ftpClient,
+		"ipblock":          ipBlockClient,
+		"mimetype":         mimeTypeClient,
+		"mysql":            mySQLClient,
+		"postgresql":       postgreSQLClient,
+		"redirect":         redirectClient,
 	}
 
 	tflog.Info(ctx, "Configured module clients", map[string]any{"success": true})
@@ -258,6 +262,7 @@ func (p *cpanelProvider) DataSources(_ context.Context) []func() datasource.Data
 		NewAPITokenDataSource,
 		NewCronJobDataSource,
 		NewDirectoryIndexDataSource,
+		NewDirectoryPrivacyDataSource,
 		NewDNSRecordDataSource,
 		NewDomainAliasDataSource,
 		NewDynamicDNSDataSource,
@@ -285,6 +290,7 @@ func (p *cpanelProvider) Resources(_ context.Context) []func() resource.Resource
 		NewAPITokenResource,
 		NewCronJobResource,
 		NewDirectoryIndexResource,
+		NewDirectoryPrivacyResource,
 		NewDNSRecordResource,
 		NewDomainAliasResource,
 		NewDynamicDNSResource,

@@ -26,6 +26,7 @@ import (
 	"terraform-provider-cpanel/internal/cpanel/cron"
 	cpanelddns "terraform-provider-cpanel/internal/cpanel/ddns"
 	cpaneldirectoryindex "terraform-provider-cpanel/internal/cpanel/directoryindex"
+	cpaneldirectoryprivacy "terraform-provider-cpanel/internal/cpanel/directoryprivacy"
 	cpaneldns "terraform-provider-cpanel/internal/cpanel/dns"
 	cpaneldomain "terraform-provider-cpanel/internal/cpanel/domain"
 	cpanelmail "terraform-provider-cpanel/internal/cpanel/email"
@@ -82,6 +83,16 @@ func testAccPreCheck(t *testing.T) {
 	}
 	if directoryIndex == nil {
 		t.Fatal("verify Directory Indexes API access: public_html not found")
+	}
+	directoryPrivacy, err := cpaneldirectoryprivacy.NewClient(client).Get(
+		ctx,
+		"public_html",
+	)
+	if err != nil {
+		t.Fatalf("verify Directory Privacy API access: %v", err)
+	}
+	if directoryPrivacy == nil {
+		t.Fatal("verify Directory Privacy API access: public_html not found")
 	}
 	if _, err := cpaneldomain.NewClient(client).ListSubdomains(ctx); err != nil {
 		t.Fatalf("verify Domain API access: %v", err)
@@ -238,6 +249,14 @@ func testAccApacheHandlerName(kind string) string {
 func testAccDirectoryIndexDirectory(kind string) string {
 	return fmt.Sprintf(
 		"public_html/tfcpanel-index-%s-%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
+	)
+}
+
+func testAccDirectoryPrivacyDirectory(kind string) string {
+	return fmt.Sprintf(
+		"public_html/tfcpanel-privacy-%s-%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
 	)
@@ -1223,6 +1242,151 @@ func testAccCheckDirectoryIndexesDestroyed(
 				directory,
 			); err != nil && validationErr == nil {
 				validationErr = err
+			}
+		}
+
+		return validationErr
+	}
+}
+
+func testAccSetDirectoryPrivacy(
+	t *testing.T,
+	definition cpaneldirectoryprivacy.Definition,
+	enabled bool,
+) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	if _, err := cpaneldirectoryprivacy.NewClient(client).Configure(
+		ctx,
+		definition.Directory,
+		definition.AuthName,
+		enabled,
+	); err != nil {
+		t.Fatalf(
+			"configure directory privacy for %q: %v",
+			definition.Directory,
+			err,
+		)
+	}
+}
+
+func testAccCheckDirectoryPrivacyExists(
+	expected cpaneldirectoryprivacy.Definition,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+		apiPrivacy, err := cpaneldirectoryprivacy.NewClient(client).Get(
+			ctx,
+			expected.Directory,
+		)
+		if err != nil {
+			return err
+		}
+		if apiPrivacy == nil {
+			return fmt.Errorf(
+				"directory %q was not found",
+				expected.Directory,
+			)
+		}
+		if !apiPrivacy.Protected {
+			return fmt.Errorf(
+				"directory %q is not protected",
+				expected.Directory,
+			)
+		}
+		if apiPrivacy.AuthName != expected.AuthName {
+			return fmt.Errorf(
+				"directory %q auth name is %q; want %q",
+				expected.Directory,
+				apiPrivacy.AuthName,
+				expected.AuthName,
+			)
+		}
+
+		return nil
+	}
+}
+
+func testAccCheckDirectoryPrivacyDisabled(
+	directory string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+		apiPrivacy, err := cpaneldirectoryprivacy.NewClient(client).Get(
+			ctx,
+			directory,
+		)
+		if err != nil {
+			return err
+		}
+		if apiPrivacy != nil && apiPrivacy.Protected {
+			return fmt.Errorf(
+				"directory %q is still protected",
+				directory,
+			)
+		}
+
+		return nil
+	}
+}
+
+func testAccCheckDirectoryPrivaciesDestroyed(
+	directories ...string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+		privacyClient := cpaneldirectoryprivacy.NewClient(client)
+		var validationErr error
+		for _, directory := range directories {
+			apiPrivacy, err := privacyClient.Get(ctx, directory)
+			if err != nil && validationErr == nil {
+				validationErr = err
+			}
+			if apiPrivacy != nil &&
+				apiPrivacy.Protected &&
+				validationErr == nil {
+				validationErr = fmt.Errorf(
+					"directory %q is still protected after destroy",
+					directory,
+				)
+			}
+
+			for _, cleanupDirectory := range []string{
+				directory,
+				path.Join(".htpasswds", directory),
+			} {
+				if err := testAccRemoveDirectory(
+					ctx,
+					client,
+					cleanupDirectory,
+				); err != nil && validationErr == nil {
+					validationErr = err
+				}
 			}
 		}
 
