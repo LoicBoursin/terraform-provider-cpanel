@@ -1,9 +1,14 @@
 package cpanel
 
 const (
-	ModuleCron       = "Cron"
-	ModuleEmail      = "Email"
-	ModuleFtp        = "Ftp"
-	ModuleMysql      = "Mysql"
-	ModulePostgresql = "Postgresql"
+	ModuleAddonDomain = "AddonDomain"
+	ModuleCron        = "Cron"
+	ModuleDomainInfo  = "DomainInfo"
+	ModuleEmail       = "Email"
+	ModuleFileman     = "Fileman"
+	ModuleFtp         = "Ftp"
+	ModuleMysql       = "Mysql"
+	ModulePark        = "Park"
+	ModulePostgresql  = "Postgresql"
+	ModuleSubDomain   = "SubDomain"
 )

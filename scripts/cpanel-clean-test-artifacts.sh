@@ -105,6 +105,49 @@ uapi_post() {
   fi
 }
 
+api2_post() {
+  local module="$1"
+  local function="$2"
+  local label="$3"
+  local http_code
+  local parameter
+  local status
+  local curl_arguments=(
+    --silent
+    --show-error
+    --max-time 20
+    --request POST
+    --output "${response_file}"
+    --write-out '%{http_code}'
+    --header "${authorization}"
+    --header 'Content-Type: application/x-www-form-urlencoded'
+    --data-urlencode 'cpanel_jsonapi_apiversion=2'
+    --data-urlencode "cpanel_jsonapi_user=${CPANEL_USERNAME}"
+    --data-urlencode "cpanel_jsonapi_module=${module}"
+    --data-urlencode "cpanel_jsonapi_func=${function}"
+  )
+
+  shift 3
+  for parameter in "$@"; do
+    curl_arguments+=(--data-urlencode "${parameter}")
+  done
+
+  http_code="$(curl "${curl_arguments[@]}" "${host}/json-api/cpanel")"
+
+  if [[ "${http_code}" != "200" ]]; then
+    printf '%s failed with HTTP %s\n' "${label}" "${http_code}" >&2
+    exit 1
+  fi
+
+  status="$(jq -r '.cpanelresult.event.result // empty' "${response_file}")"
+  if [[ "${status}" != "1" ]]; then
+    printf '%s failed: %s\n' \
+      "${label}" \
+      "$(jq -c '{cpanelresult}' "${response_file}")" >&2
+    exit 1
+  fi
+}
+
 remove_cron_line() {
   local linekey="$1"
   local label="$2"
@@ -150,6 +193,8 @@ deleted_mysql_databases=0
 deleted_mysql_users=0
 deleted_email_accounts=0
 deleted_ftp_accounts=0
+deleted_subdomains=0
+deleted_domain_directories=0
 deleted_cron_lines=0
 
 get_request 'execute/Postgresql/list_databases' 'PostgreSQL database inventory'
@@ -243,6 +288,51 @@ done < <(
 )
 
 get_request \
+  "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=SubDomain&cpanel_jsonapi_func=listsubdomains" \
+  'Subdomain inventory'
+test_subdomains="$(
+  jq -r \
+    '.cpanelresult.data[].domain | select(startswith("tfcpanelsub"))' \
+    "${response_file}"
+)"
+while IFS= read -r domain; do
+  if [[ -z "${domain}" ]]; then
+    continue
+  fi
+  api2_post \
+    'SubDomain' \
+    'delsubdomain' \
+    "Delete test subdomain ${domain}" \
+    "domain=${domain}"
+  deleted_subdomains=$((deleted_subdomains + 1))
+done <<<"${test_subdomains}"
+
+get_request \
+  'execute/Fileman/list_files?dir=public_html&show_hidden=1&limit=1000' \
+  'Test domain directory inventory'
+test_domain_directories="$(
+  jq -r \
+    '.data[]
+      | select(.type == "dir")
+      | .file
+      | select(startswith("tfcpanel-"))' \
+    "${response_file}"
+)"
+while IFS= read -r directory; do
+  if [[ -z "${directory}" ]]; then
+    continue
+  fi
+  api2_post \
+    'Fileman' \
+    'fileop' \
+    "Delete test domain directory public_html/${directory}" \
+    'op=unlink' \
+    "sourcefiles=public_html/${directory}" \
+    'doubledecode=0'
+  deleted_domain_directories=$((deleted_domain_directories + 1))
+done <<<"${test_domain_directories}"
+
+get_request \
   "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=Cron&cpanel_jsonapi_func=fetchcron" \
   'Cron inventory'
 while IFS= read -r linekey; do
@@ -294,4 +384,6 @@ printf '  MySQL databases deleted: %d\n' "${deleted_mysql_databases}"
 printf '  MySQL users deleted: %d\n' "${deleted_mysql_users}"
 printf '  email accounts deleted: %d\n' "${deleted_email_accounts}"
 printf '  FTP accounts deleted: %d\n' "${deleted_ftp_accounts}"
+printf '  subdomains deleted: %d\n' "${deleted_subdomains}"
+printf '  test domain directories deleted: %d\n' "${deleted_domain_directories}"
 printf '  cron lines deleted: %d\n' "${deleted_cron_lines}"

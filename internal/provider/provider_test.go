@@ -21,6 +21,7 @@ import (
 
 	"terraform-provider-cpanel/internal/cpanel"
 	"terraform-provider-cpanel/internal/cpanel/cron"
+	cpaneldomain "terraform-provider-cpanel/internal/cpanel/domain"
 	cpanelmail "terraform-provider-cpanel/internal/cpanel/email"
 	cpanelftp "terraform-provider-cpanel/internal/cpanel/ftp"
 	"terraform-provider-cpanel/internal/cpanel/mysql"
@@ -56,6 +57,9 @@ func testAccPreCheck(t *testing.T) {
 
 	if _, err := cron.NewClient(client).GetCronJobs(ctx); err != nil {
 		t.Fatalf("verify Cron API access: %v", err)
+	}
+	if _, err := cpaneldomain.NewClient(client).ListSubdomains(ctx); err != nil {
+		t.Fatalf("verify Domain API access: %v", err)
 	}
 	if _, err := postgresql.NewClient(client).GetDatabases(ctx); err != nil {
 		t.Fatalf("verify PostgreSQL API access: %v", err)
@@ -130,6 +134,29 @@ func testAccFTPUsername(t *testing.T, kind string) string {
 func testAccFTPHomeDirectory(kind string) string {
 	return fmt.Sprintf(
 		"tfcpanel-ftp-%s-%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
+	)
+}
+
+func testAccSubdomain(t *testing.T, kind string) string {
+	t.Helper()
+
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("TF_ACC must be set for acceptance tests")
+	}
+
+	return fmt.Sprintf(
+		"tfcpanelsub%s%s.%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
+		testAccMainDomain(t),
+	)
+}
+
+func testAccDomainDocumentRoot(kind string) string {
+	return fmt.Sprintf(
+		"public_html/tfcpanel-%s-%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
 	)
@@ -766,5 +793,78 @@ func testAccDeleteFTPAccount(t *testing.T, username string) {
 	}
 	if err := cpanelftp.NewClient(client).DeleteAccount(ctx, user, domain, true); err != nil {
 		t.Fatalf("delete FTP account %q: %v", username, err)
+	}
+}
+
+func testAccCheckSubdomainExists(
+	domain string,
+	expectedDocumentRoot string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		subdomain, err := cpaneldomain.NewClient(client).GetSubdomain(ctx, domain)
+		if err != nil {
+			return err
+		}
+		if subdomain == nil {
+			return fmt.Errorf("subdomain %q was not found", domain)
+		}
+		if subdomain.BaseDirectory != expectedDocumentRoot {
+			return fmt.Errorf(
+				"subdomain %q document root = %q, want %q",
+				domain,
+				subdomain.BaseDirectory,
+				expectedDocumentRoot,
+			)
+		}
+
+		return nil
+	}
+}
+
+func testAccCheckSubdomainsDestroyed(domains ...string) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		response, err := cpaneldomain.NewClient(client).ListSubdomains(ctx)
+		if err != nil {
+			return err
+		}
+		for _, subdomain := range response.CpanelResult.Data {
+			if slices.Contains(domains, subdomain.Domain) {
+				return fmt.Errorf("subdomain %q still exists", subdomain.Domain)
+			}
+		}
+
+		return nil
+	}
+}
+
+func testAccDeleteSubdomain(t *testing.T, domain string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+
+	if err := cpaneldomain.NewClient(client).DeleteSubdomain(ctx, domain); err != nil {
+		t.Fatalf("delete subdomain %q: %v", domain, err)
 	}
 }

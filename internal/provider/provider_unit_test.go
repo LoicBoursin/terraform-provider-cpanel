@@ -308,6 +308,72 @@ func TestValidateFTPHomeDirectory(t *testing.T) {
 	}
 }
 
+func TestValidateDomainName(t *testing.T) {
+	t.Parallel()
+
+	testCases := map[string]struct {
+		domain    string
+		wantError bool
+	}{
+		"valid":         {domain: "terraform.example.test"},
+		"uppercase":     {domain: "Terraform.example.test", wantError: true},
+		"single label":  {domain: "localhost", wantError: true},
+		"leading dash":  {domain: "-terraform.example.test", wantError: true},
+		"trailing dash": {domain: "terraform-.example.test", wantError: true},
+		"empty label":   {domain: "terraform..example.test", wantError: true},
+	}
+
+	for name, testCase := range testCases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validateDomainName(testCase.domain)
+			if testCase.wantError && err == nil {
+				t.Fatalf("validateDomainName(%q) returned no error", testCase.domain)
+			}
+			if !testCase.wantError && err != nil {
+				t.Fatalf("validateDomainName(%q) returned error: %v", testCase.domain, err)
+			}
+		})
+	}
+}
+
+func TestValidateDomainDocumentRoot(t *testing.T) {
+	t.Parallel()
+
+	testCases := map[string]struct {
+		documentRoot string
+		wantError    bool
+	}{
+		"valid":          {documentRoot: "public_html/terraform"},
+		"absolute":       {documentRoot: "/public_html/terraform", wantError: true},
+		"parent segment": {documentRoot: "public_html/../mail", wantError: true},
+		"reserved":       {documentRoot: ".ssh/terraform", wantError: true},
+		"empty":          {documentRoot: "", wantError: true},
+	}
+
+	for name, testCase := range testCases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validateDomainDocumentRoot(testCase.documentRoot)
+			if testCase.wantError && err == nil {
+				t.Fatalf(
+					"validateDomainDocumentRoot(%q) returned no error",
+					testCase.documentRoot,
+				)
+			}
+			if !testCase.wantError && err != nil {
+				t.Fatalf(
+					"validateDomainDocumentRoot(%q) returned error: %v",
+					testCase.documentRoot,
+					err,
+				)
+			}
+		})
+	}
+}
+
 func TestCronJobModelLookupsIgnoreVariables(t *testing.T) {
 	t.Parallel()
 
@@ -584,6 +650,28 @@ func TestFTPAccountDefaultsToPreservingHomeDirectory(t *testing.T) {
 	}
 	if deleteOnDestroy.Default == nil {
 		t.Fatal("delete_on_destroy has no default")
+	}
+}
+
+func TestSubdomainDefaultsToPreservingDocumentRoot(t *testing.T) {
+	t.Parallel()
+
+	var response frameworkresource.SchemaResponse
+	(&subdomainResource{}).Schema(
+		context.Background(),
+		frameworkresource.SchemaRequest{},
+		&response,
+	)
+
+	attribute, ok := response.Schema.Attributes["delete_document_root"].(resourceschema.BoolAttribute)
+	if !ok {
+		t.Fatalf(
+			"delete_document_root has type %T, want schema.BoolAttribute",
+			response.Schema.Attributes["delete_document_root"],
+		)
+	}
+	if attribute.Default == nil {
+		t.Fatal("delete_document_root has no default")
 	}
 }
 
