@@ -1,0 +1,1 @@
+terraform import cpanel_email_domain_forwarder.legacy example.com

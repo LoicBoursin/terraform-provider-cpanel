@@ -18,6 +18,7 @@ The supported versions and API policy are documented in
 - `cpanel_dns_record`
 - `cpanel_domain_alias`
 - `cpanel_email_account`
+- `cpanel_email_domain_forwarder`
 - `cpanel_email_forwarder`
 - `cpanel_ftp_account`
 - `cpanel_mysql_database`

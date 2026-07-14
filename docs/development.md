@@ -68,6 +68,7 @@ that follow the test naming contract:
   `${CPANEL_USERNAME}_tf`;
 - email account local parts beginning with `tfcpanel`;
 - email forwarder source local parts beginning with `tfcpanelfwd`;
+- email domain forwarder destinations beginning with `tfcpaneldomainfwd`;
 - FTP account names beginning with `tfcpanelftp`;
 - DNS record names beginning with `tfcpaneldns`;
 - addon domains beginning with `tfcpaneladdon`;

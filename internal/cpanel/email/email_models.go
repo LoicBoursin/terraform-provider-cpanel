@@ -43,6 +43,16 @@ type Forwarder struct {
 	Destination string `json:"forward"`
 }
 
+type DomainForwarderListResponse struct {
+	cpanel.UAPIDataSourceModel
+	Data []DomainForwarder `json:"data"`
+}
+
+type DomainForwarder struct {
+	Domain      string `json:"dest"`
+	Destination string `json:"forward"`
+}
+
 func (a Account) QuotaMiB() (int64, error) {
 	bytesValue, err := parseIntegerJSON(a.DiskQuotaRaw)
 	if err != nil {

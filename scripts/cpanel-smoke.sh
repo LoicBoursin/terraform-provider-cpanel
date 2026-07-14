@@ -135,6 +135,14 @@ while IFS= read -r domain; do
   email_test_forwarder_count=$((email_test_forwarder_count + domain_test_forwarder_count))
 done <<<"${mail_domains}"
 
+request 'execute/Email/list_domain_forwarders' 'Email domain forwarder check'
+email_domain_forwarder_count="$(jq -r '.data | length' "${response_file}")"
+email_test_domain_forwarder_count="$(
+  jq -r \
+    '[.data[].forward | select(startswith("tfcpaneldomainfwd"))] | length' \
+    "${response_file}"
+)"
+
 request 'execute/Ftp/list_ftp_with_disk?include_acct_types=sub' 'FTP account check'
 ftp_account_count="$(jq -r '.data | length' "${response_file}")"
 ftp_test_account_count="$(
@@ -237,6 +245,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${mysql_test_user_count}" != "0"
     || "${email_test_account_count}" != "0"
     || "${email_test_forwarder_count}" != "0"
+    || "${email_test_domain_forwarder_count}" != "0"
     || "${ftp_test_account_count}" != "0"
     || "${dns_test_record_count}" != "0"
     || "${addon_domain_test_count}" != "0"
@@ -252,6 +261,8 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     printf '  MySQL test users: %s\n' "${mysql_test_user_count}" >&2
     printf '  email test accounts: %s\n' "${email_test_account_count}" >&2
     printf '  test email forwarders: %s\n' "${email_test_forwarder_count}" >&2
+    printf '  test email domain forwarders: %s\n' \
+      "${email_test_domain_forwarder_count}" >&2
     printf '  FTP test accounts: %s\n' "${ftp_test_account_count}" >&2
     printf '  test DNS records: %s\n' "${dns_test_record_count}" >&2
     printf '  test addon domains: %s\n' "${addon_domain_test_count}" >&2
@@ -282,6 +293,9 @@ printf '  email accounts: %s (%s test-managed)\n' \
 printf '  email forwarders: %s (%s test-managed)\n' \
   "${email_forwarder_count}" \
   "${email_test_forwarder_count}"
+printf '  email domain forwarders: %s (%s test-managed)\n' \
+  "${email_domain_forwarder_count}" \
+  "${email_test_domain_forwarder_count}"
 printf '  FTP accounts: %s (%s test-managed)\n' \
   "${ftp_account_count}" \
   "${ftp_test_account_count}"

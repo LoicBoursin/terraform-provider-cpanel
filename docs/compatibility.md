@@ -57,6 +57,11 @@ so both addresses form the resource identity. Domain-level forwarders, failure
 routes, pipes, and system-account routes use different cPanel semantics and are
 not represented by this resource.
 
+The email domain forwarder resource manages the single destination associated
+with one source mail domain. Changing the destination performs a verified
+delete-and-create transition and attempts to restore the previous destination
+if the replacement fails.
+
 The FTP resource manages cPanel virtual FTP accounts. Its home directory is
 relative to the cPanel account home, and Terraform preserves that directory by
 default when deleting the account. cPanel SFTP access uses the main cPanel
