@@ -1,13 +1,23 @@
 # Terraform Provider cPanel
 
+## Project Status
+
+Version `0.1.0` is an experimental release from February 2024. The current
+`v1.0` effort is focused on making the existing cron and PostgreSQL resources
+production-ready and certifying them against o2switch cPanel 134.
+
+The supported-version policy is documented in
+[`docs/compatibility.md`](docs/compatibility.md).
+
 ## Available Resources
 
-The whole list of resources has not been implemented yet. The following resources are available:
+The v1.0 scope contains:
 
 - Cron Jobs
 - PostgreSQL Databases & Users
 
-Feel free to open an issue or a pull request to implement new resources.
+Other cPanel resource families are outside the v1.0 scope and can be added in
+later releases.
 
 ## Requirements
 
@@ -81,4 +91,3 @@ make test
 ```
 
 *Note:* Acceptance tests create real resources, and requires a real cPanel account to run. Please be aware of the costs associated with running acceptance tests. For more information, refer to the [Acceptance Testing](https://www.terraform.io/docs/extend/testing/acceptance-tests/index.html) documentation.
-
