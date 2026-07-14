@@ -192,11 +192,23 @@ mysql_test_remote_host_count="$(
     "${response_file}"
 )"
 
-request 'execute/Email/list_pops?skip_main=1' 'Email account check'
+request \
+  'execute/Email/list_pops_with_disk?skip_main=1&no_disk=1&get_restrictions=1' \
+  'Email account check'
 email_account_count="$(jq -r '.data | length' "${response_file}")"
 email_test_account_count="$(
   jq -r \
     '[.data[].email | select(startswith("tfcpanel"))] | length' \
+    "${response_file}"
+)"
+email_suspended_count="$(
+  jq -r '[.data[] | select(.has_suspended == 1)] | length' "${response_file}"
+)"
+email_test_suspended_count="$(
+  jq -r \
+    '[.data[]
+      | select(.email | startswith("tfcpanel"))
+      | select(.has_suspended == 1)] | length' \
     "${response_file}"
 )"
 
@@ -448,6 +460,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${mysql_test_user_count}" != "0"
     || "${mysql_test_remote_host_count}" != "0"
     || "${email_test_account_count}" != "0"
+    || "${email_test_suspended_count}" != "0"
     || "${email_test_forwarder_count}" != "0"
     || "${email_test_domain_forwarder_count}" != "0"
     || "${email_test_auto_responder_count}" != "0"
@@ -481,6 +494,8 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     printf '  test remote MySQL hosts: %s\n' \
       "${mysql_test_remote_host_count}" >&2
     printf '  email test accounts: %s\n' "${email_test_account_count}" >&2
+    printf '  suspended email test accounts: %s\n' \
+      "${email_test_suspended_count}" >&2
     printf '  test email forwarders: %s\n' "${email_test_forwarder_count}" >&2
     printf '  test email domain forwarders: %s\n' \
       "${email_test_domain_forwarder_count}" >&2
@@ -542,9 +557,11 @@ printf '  MySQL users: %s (%s test-managed)\n' \
 printf '  remote MySQL hosts: %s (%s test-managed)\n' \
   "${mysql_remote_host_count}" \
   "${mysql_test_remote_host_count}"
-printf '  email accounts: %s (%s test-managed)\n' \
+printf '  email accounts: %s (%s suspended, %s test-managed, %s test-suspended)\n' \
   "${email_account_count}" \
-  "${email_test_account_count}"
+  "${email_suspended_count}" \
+  "${email_test_account_count}" \
+  "${email_test_suspended_count}"
 printf '  email forwarders: %s (%s test-managed)\n' \
   "${email_forwarder_count}" \
   "${email_test_forwarder_count}"

@@ -9,8 +9,6 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
-
-	cpanelmail "terraform-provider-cpanel/internal/cpanel/email"
 )
 
 var (
@@ -31,7 +29,7 @@ func emailAddressValidators() []validator.String {
 
 func validateEmailAccountAddress(
 	ctx context.Context,
-	client *cpanelmail.Client,
+	client emailMailDomainClient,
 	address string,
 ) (string, string, error) {
 	user, domain, err := splitEmailAccountAddress(address)

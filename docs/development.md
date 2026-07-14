@@ -87,6 +87,8 @@ that follow the test naming contract:
   `tfcpanel-git-`, plus only matching Git deletion markers in the account home
   or cPanel trash;
 - email account local parts beginning with `tfcpanel`;
+- login, incoming-mail, and outgoing-mail restrictions on those test email
+  accounts; cleanup refuses to delete a test mailbox with held outgoing mail;
 - email forwarder source local parts beginning with `tfcpanelfwd`;
 - email domain forwarder destinations beginning with `tfcpaneldomainfwd`;
 - email autoresponder local parts beginning with `tfcpanelauto`;

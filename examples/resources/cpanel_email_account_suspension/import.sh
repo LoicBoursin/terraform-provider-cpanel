@@ -1,0 +1,1 @@
+terraform import cpanel_email_account_suspension.mailbox terraform@example.com

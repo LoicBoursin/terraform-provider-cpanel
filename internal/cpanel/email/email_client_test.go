@@ -36,6 +36,64 @@ func TestAccountDiskValues(t *testing.T) {
 	}
 }
 
+func TestAccountSuspensions(t *testing.T) {
+	t.Parallel()
+
+	account := Account{
+		Email:                "terraform@example.test",
+		HasSuspendedRaw:      json.RawMessage(`1`),
+		HoldOutgoingRaw:      json.RawMessage(`"0"`),
+		SuspendedIncomingRaw: json.RawMessage(`true`),
+		SuspendedLoginRaw:    json.RawMessage(`null`),
+		SuspendedOutgoingRaw: json.RawMessage(`"1"`),
+	}
+
+	suspensions, err := account.Suspensions()
+	if err != nil {
+		t.Fatalf("Suspensions() error: %v", err)
+	}
+	if suspensions.Login ||
+		!suspensions.Incoming ||
+		!suspensions.Outgoing ||
+		suspensions.OutgoingHeld ||
+		!suspensions.HasSuspended {
+		t.Fatalf("suspensions = %#v", suspensions)
+	}
+}
+
+func TestAccountRejectsInconsistentSuspensions(t *testing.T) {
+	t.Parallel()
+
+	account := Account{
+		Email:                "terraform@example.test",
+		HasSuspendedRaw:      json.RawMessage(`0`),
+		HoldOutgoingRaw:      json.RawMessage(`0`),
+		SuspendedIncomingRaw: json.RawMessage(`0`),
+		SuspendedLoginRaw:    json.RawMessage(`1`),
+		SuspendedOutgoingRaw: json.RawMessage(`0`),
+	}
+
+	if _, err := account.Suspensions(); err == nil {
+		t.Fatal("Suspensions() returned no error")
+	}
+}
+
+func TestAccountRejectsMissingSuspensionField(t *testing.T) {
+	t.Parallel()
+
+	account := Account{
+		Email:                "terraform@example.test",
+		HasSuspendedRaw:      json.RawMessage(`0`),
+		HoldOutgoingRaw:      json.RawMessage(`0`),
+		SuspendedIncomingRaw: json.RawMessage(`0`),
+		SuspendedOutgoingRaw: json.RawMessage(`0`),
+	}
+
+	if _, err := account.Suspensions(); err == nil {
+		t.Fatal("Suspensions() returned no error")
+	}
+}
+
 func TestClientCreatesEmailAccountWithPOST(t *testing.T) {
 	t.Parallel()
 
@@ -83,6 +141,119 @@ func TestClientCreatesEmailAccountWithPOST(t *testing.T) {
 		50,
 	); err != nil {
 		t.Fatalf("CreateAccount() error: %v", err)
+	}
+}
+
+func TestClientSetsEmailAccountSuspensionsWithPOST(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name     string
+		path     string
+		mutation func(context.Context, *Client) error
+	}{
+		{
+			name: "suspend login",
+			path: "/execute/Email/suspend_login",
+			mutation: func(ctx context.Context, client *Client) error {
+				return client.SetLoginSuspended(
+					ctx,
+					"terraform@example.test",
+					true,
+				)
+			},
+		},
+		{
+			name: "unsuspend login",
+			path: "/execute/Email/unsuspend_login",
+			mutation: func(ctx context.Context, client *Client) error {
+				return client.SetLoginSuspended(
+					ctx,
+					"terraform@example.test",
+					false,
+				)
+			},
+		},
+		{
+			name: "suspend incoming",
+			path: "/execute/Email/suspend_incoming",
+			mutation: func(ctx context.Context, client *Client) error {
+				return client.SetIncomingSuspended(
+					ctx,
+					"terraform@example.test",
+					true,
+				)
+			},
+		},
+		{
+			name: "unsuspend incoming",
+			path: "/execute/Email/unsuspend_incoming",
+			mutation: func(ctx context.Context, client *Client) error {
+				return client.SetIncomingSuspended(
+					ctx,
+					"terraform@example.test",
+					false,
+				)
+			},
+		},
+		{
+			name: "suspend outgoing",
+			path: "/execute/Email/suspend_outgoing",
+			mutation: func(ctx context.Context, client *Client) error {
+				return client.SetOutgoingSuspended(
+					ctx,
+					"terraform@example.test",
+					true,
+				)
+			},
+		},
+		{
+			name: "unsuspend outgoing",
+			path: "/execute/Email/unsuspend_outgoing",
+			mutation: func(ctx context.Context, client *Client) error {
+				return client.SetOutgoingSuspended(
+					ctx,
+					"terraform@example.test",
+					false,
+				)
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(
+				response http.ResponseWriter,
+				request *http.Request,
+			) {
+				if request.Method != http.MethodPost {
+					t.Errorf("method = %s, want POST", request.Method)
+				}
+				if request.URL.Path != testCase.path {
+					t.Errorf("path = %s, want %s", request.URL.Path, testCase.path)
+				}
+				if request.URL.RawQuery != "" {
+					t.Errorf("query = %q, want empty", request.URL.RawQuery)
+				}
+				if err := request.ParseForm(); err != nil {
+					t.Fatalf("ParseForm() error: %v", err)
+				}
+				if request.Form.Get("email") != "terraform@example.test" {
+					t.Errorf("email = %q", request.Form.Get("email"))
+				}
+				_, _ = response.Write([]byte(`{"status":1,"data":null}`))
+			}))
+			defer server.Close()
+
+			if err := testCase.mutation(
+				t.Context(),
+				newEmailTestClient(t, server.URL),
+			); err != nil {
+				t.Fatalf("mutation error: %v", err)
+			}
+		})
 	}
 }
 

@@ -33,7 +33,7 @@ subdomains, HTTP redirects, email accounts, forwarders and autoresponders, FTP
 accounts, directory indexes and privacy, custom MIME types, Apache handlers,
 Git repositories, website IP blocks, MySQL or MariaDB databases and users,
 remote MySQL hosts, PostgreSQL databases and users, imports, drift detection,
-per-domain ModSecurity status, and cleanup.
+per-domain ModSecurity status, email account suspension, and cleanup.
 
 ## API policy
 
@@ -145,6 +145,17 @@ the `SVCB` capability function.
 The email account resource deliberately uses the email-service API instead of
 creating a cPanel subaccount. It manages only the mailbox and cannot
 accidentally enable or delete FTP and WebDisk services that share a username.
+
+Email account suspension reads use `Email::list_pops_with_disk` with
+`get_restrictions=1`. On the certified cPanel 134 environment,
+`suspended_login` is `null` rather than `0` when login is allowed; the provider
+normalizes that value to `false` while rejecting a missing restriction field.
+Mutations use the separate `suspend_*` and `unsuspend_*` UAPI operations for
+login, incoming mail, and outgoing mail. Terraform reports held outgoing mail
+but never calls `hold_outgoing` or `release_outgoing`, because releasing a
+queue is an imperative delivery action. Removing the resource unsuspends the
+three managed restrictions without deleting the mailbox or releasing held
+mail.
 
 The email forwarder resource manages one direct source-to-destination email
 address pair. cPanel permits multiple destinations for the same source address,

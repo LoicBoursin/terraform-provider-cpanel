@@ -247,6 +247,7 @@ deleted_mysql_databases=0
 deleted_mysql_users=0
 deleted_mysql_remote_hosts=0
 deleted_email_accounts=0
+unsuspended_email_restrictions=0
 deleted_email_forwarders=0
 deleted_email_domain_forwarders=0
 deleted_email_auto_responders=0
@@ -456,16 +457,56 @@ done < <(
     "${response_file}"
 )
 
-get_request 'execute/Email/list_pops?skip_main=1' 'Email account inventory'
-while IFS= read -r address; do
+get_request \
+  'execute/Email/list_pops_with_disk?skip_main=1&no_disk=1&get_restrictions=1' \
+  'Email account inventory'
+while IFS=$'\t' read -r address login incoming outgoing held; do
   if [[ -z "${address}" ]]; then
     continue
+  fi
+  if [[ "${held}" == "1" ]]; then
+    printf 'Refusing to delete test email account with held outgoing mail: %s\n' \
+      "${address}" >&2
+    exit 1
+  fi
+  if [[ "${login}" == "1" ]]; then
+    uapi_post \
+      'Email' \
+      'unsuspend_login' \
+      "Unsuspend login for test email account ${address}" \
+      "email=${address}"
+    unsuspended_email_restrictions=$((unsuspended_email_restrictions + 1))
+  fi
+  if [[ "${incoming}" == "1" ]]; then
+    uapi_post \
+      'Email' \
+      'unsuspend_incoming' \
+      "Unsuspend incoming mail for test email account ${address}" \
+      "email=${address}"
+    unsuspended_email_restrictions=$((unsuspended_email_restrictions + 1))
+  fi
+  if [[ "${outgoing}" == "1" ]]; then
+    uapi_post \
+      'Email' \
+      'unsuspend_outgoing' \
+      "Unsuspend outgoing mail for test email account ${address}" \
+      "email=${address}"
+    unsuspended_email_restrictions=$((unsuspended_email_restrictions + 1))
   fi
   uapi_post 'Email' 'delete_pop' "Delete test email account ${address}" "email=${address}"
   deleted_email_accounts=$((deleted_email_accounts + 1))
 done < <(
   jq -r \
-    '.data[].email | select(startswith("tfcpanel"))' \
+    '.data[]
+      | select(.email | startswith("tfcpanel"))
+      | [
+          .email,
+          (.suspended_login // 0),
+          (.suspended_incoming // 0),
+          (.suspended_outgoing // 0),
+          (.hold_outgoing // 0)
+        ]
+      | @tsv' \
     "${response_file}"
 )
 
@@ -925,6 +966,8 @@ printf '  PostgreSQL users deleted: %d\n' "${deleted_users}"
 printf '  MySQL databases deleted: %d\n' "${deleted_mysql_databases}"
 printf '  MySQL users deleted: %d\n' "${deleted_mysql_users}"
 printf '  remote MySQL hosts deleted: %d\n' "${deleted_mysql_remote_hosts}"
+printf '  email account restrictions unsuspended: %d\n' \
+  "${unsuspended_email_restrictions}"
 printf '  email accounts deleted: %d\n' "${deleted_email_accounts}"
 printf '  email forwarders deleted: %d\n' "${deleted_email_forwarders}"
 printf '  email domain forwarders deleted: %d\n' \

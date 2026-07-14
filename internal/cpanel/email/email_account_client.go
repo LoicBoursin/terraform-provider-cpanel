@@ -2,6 +2,7 @@ package email
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 
 	"terraform-provider-cpanel/internal/cpanel"
@@ -133,4 +134,71 @@ func (c *Client) ListMailDomains(ctx context.Context) ([]string, error) {
 	}
 
 	return domains, nil
+}
+
+func (c *Client) SetLoginSuspended(
+	ctx context.Context,
+	address string,
+	suspended bool,
+) error {
+	return c.setAccountSuspension(
+		ctx,
+		address,
+		suspended,
+		operationSuspendLogin,
+		operationUnsuspendLogin,
+	)
+}
+
+func (c *Client) SetIncomingSuspended(
+	ctx context.Context,
+	address string,
+	suspended bool,
+) error {
+	return c.setAccountSuspension(
+		ctx,
+		address,
+		suspended,
+		operationSuspendIncoming,
+		operationUnsuspendIncoming,
+	)
+}
+
+func (c *Client) SetOutgoingSuspended(
+	ctx context.Context,
+	address string,
+	suspended bool,
+) error {
+	return c.setAccountSuspension(
+		ctx,
+		address,
+		suspended,
+		operationSuspendOutgoing,
+		operationUnsuspendOutgoing,
+	)
+}
+
+func (c *Client) setAccountSuspension(
+	ctx context.Context,
+	address string,
+	suspended bool,
+	suspendOperation string,
+	unsuspendOperation string,
+) error {
+	if address == "" {
+		return fmt.Errorf("email account address must not be empty")
+	}
+
+	operation := unsuspendOperation
+	if suspended {
+		operation = suspendOperation
+	}
+	response := cpanel.UAPIDataSourceModel{}
+
+	return c.executeMutation(
+		ctx,
+		operation,
+		map[string]string{"email": address},
+		&response,
+	)
 }

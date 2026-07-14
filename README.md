@@ -27,6 +27,7 @@ The supported versions and API policy are documented in
 - `cpanel_domain_alias`
 - `cpanel_dynamic_dns`
 - `cpanel_email_account`
+- `cpanel_email_account_suspension`
 - `cpanel_email_auto_responder`
 - `cpanel_email_domain_forwarder`
 - `cpanel_email_forwarder`

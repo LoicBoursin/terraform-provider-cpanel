@@ -42,6 +42,9 @@
   default, explicit recursive deletion, and cPanel 134 acceptance coverage.
 - Email account resource and data source with password and quota updates,
   import, replacement, drift recovery, and cPanel 134 acceptance coverage.
+- Email account suspension resource and data source with independently managed
+  login, incoming-mail, and outgoing-mail restrictions, import, drift
+  recovery, safe reset on removal, and cPanel 134 acceptance coverage.
 - MySQL and MariaDB user and database resources, matching data sources, import,
   drift recovery, privilege management, and cPanel 134 acceptance coverage.
 - Remote MySQL host resource and data source with IPv4, CIDR, wildcard, and
