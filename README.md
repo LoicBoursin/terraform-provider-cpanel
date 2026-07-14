@@ -21,6 +21,7 @@ The supported versions and API policy are documented in
 - `cpanel_cron_job`
 - `cpanel_directory_index`
 - `cpanel_directory_privacy`
+- `cpanel_directory_privacy_user`
 - `cpanel_dns_record`
 - `cpanel_domain_alias`
 - `cpanel_dynamic_dns`

@@ -94,6 +94,12 @@ func testAccPreCheck(t *testing.T) {
 	if directoryPrivacy == nil {
 		t.Fatal("verify Directory Privacy API access: public_html not found")
 	}
+	if _, err := cpaneldirectoryprivacy.NewClient(client).ListUsers(
+		ctx,
+		"public_html",
+	); err != nil {
+		t.Fatalf("verify Directory Privacy user API access: %v", err)
+	}
 	if _, err := cpaneldomain.NewClient(client).ListSubdomains(ctx); err != nil {
 		t.Fatalf("verify Domain API access: %v", err)
 	}
@@ -257,6 +263,14 @@ func testAccDirectoryIndexDirectory(kind string) string {
 func testAccDirectoryPrivacyDirectory(kind string) string {
 	return fmt.Sprintf(
 		"public_html/tfcpanel-privacy-%s-%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
+	)
+}
+
+func testAccDirectoryPrivacyUsername(kind string) string {
+	return fmt.Sprintf(
+		"tfcpanelprivacy%s%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
 	)
@@ -1388,6 +1402,154 @@ func testAccCheckDirectoryPrivaciesDestroyed(
 					validationErr = err
 				}
 			}
+		}
+
+		return validationErr
+	}
+}
+
+func testAccDeleteDirectoryPrivacyUser(
+	t *testing.T,
+	directory string,
+	username string,
+) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	privacyClient := cpaneldirectoryprivacy.NewClient(client)
+	apiUser, err := privacyClient.GetUser(ctx, directory, username)
+	if err != nil {
+		t.Fatalf(
+			"read Directory Privacy user %q for %q: %v",
+			username,
+			directory,
+			err,
+		)
+	}
+	if apiUser == nil {
+		return
+	}
+	if err := privacyClient.DeleteUser(ctx, directory, username); err != nil {
+		t.Fatalf(
+			"delete Directory Privacy user %q for %q: %v",
+			username,
+			directory,
+			err,
+		)
+	}
+}
+
+func testAccCheckDirectoryPrivacyUserExists(
+	expected cpaneldirectoryprivacy.UserDefinition,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+		apiUser, err := cpaneldirectoryprivacy.NewClient(client).GetUser(
+			ctx,
+			expected.Directory,
+			expected.Username,
+		)
+		if err != nil {
+			return err
+		}
+		if apiUser == nil {
+			return fmt.Errorf(
+				"Directory Privacy user %q was not found for %q",
+				expected.Username,
+				expected.Directory,
+			)
+		}
+
+		return nil
+	}
+}
+
+func testAccCheckDirectoryPrivacyUserMissing(
+	directory string,
+	username string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+		apiUser, err := cpaneldirectoryprivacy.NewClient(client).GetUser(
+			ctx,
+			directory,
+			username,
+		)
+		if err != nil {
+			return err
+		}
+		if apiUser != nil {
+			return fmt.Errorf(
+				"Directory Privacy user %q still exists for %q",
+				username,
+				directory,
+			)
+		}
+
+		return nil
+	}
+}
+
+func testAccCheckDirectoryPrivacyUsersDestroyed(
+	definitions ...cpaneldirectoryprivacy.UserDefinition,
+) resource.TestCheckFunc {
+	return func(state *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+		privacyClient := cpaneldirectoryprivacy.NewClient(client)
+		directorySet := map[string]struct{}{}
+		var validationErr error
+		for _, definition := range definitions {
+			directorySet[definition.Directory] = struct{}{}
+			apiUser, err := privacyClient.GetUser(
+				ctx,
+				definition.Directory,
+				definition.Username,
+			)
+			if err != nil && validationErr == nil {
+				validationErr = err
+			}
+			if apiUser != nil && validationErr == nil {
+				validationErr = fmt.Errorf(
+					"Directory Privacy user %q still exists for %q after destroy",
+					definition.Username,
+					definition.Directory,
+				)
+			}
+		}
+
+		directories := make([]string, 0, len(directorySet))
+		for directory := range directorySet {
+			directories = append(directories, directory)
+		}
+		slices.Sort(directories)
+		if cleanupErr := testAccCheckDirectoryPrivaciesDestroyed(
+			directories...,
+		)(state); cleanupErr != nil && validationErr == nil {
+			validationErr = cleanupErr
 		}
 
 		return validationErr

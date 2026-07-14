@@ -102,6 +102,14 @@ account-home resolution as directory indexes. Removing the Terraform resource
 disables HTTP Basic protection without deleting the directory, its contents,
 or separately managed Directory Privacy users.
 
+Directory Privacy authorized-user operations use UAPI
+`DirectoryPrivacy::list_users`, `DirectoryPrivacy::add_user`, and
+`DirectoryPrivacy::delete_user`. cPanel returns usernames but never their
+passwords. Terraform therefore stores the configured password as sensitive
+state, and updating a password calls `add_user` again for the same identity.
+An imported user has no password in state until configuration sets it. Password
+changes made outside Terraform cannot be detected during refresh.
+
 DNS record reads and mutations use UAPI `DNS::parse_zone` and
 `DNS::mass_edit_zone`. Every mutation uses the current SOA serial and is
 verified against the parsed zone. Records are tracked by cPanel line index,

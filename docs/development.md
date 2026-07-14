@@ -77,7 +77,8 @@ that follow the test naming contract:
   with `tfcpanel-index-`;
 - Directory Privacy settings on top-level `public_html` directories beginning
   with `tfcpanel-privacy-`, plus only their matching password directories
-  below `.htpasswds/public_html`;
+  below `.htpasswds/public_html`; Directory Privacy user tests use only these
+  isolated directories;
 - email account local parts beginning with `tfcpanel`;
 - email forwarder source local parts beginning with `tfcpanelfwd`;
 - email domain forwarder destinations beginning with `tfcpaneldomainfwd`;

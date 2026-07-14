@@ -207,6 +207,190 @@ func TestPrivacyFromResponseNormalizesDisabledDirectory(t *testing.T) {
 	}
 }
 
+func TestClientListsDirectoryPrivacyUsers(t *testing.T) {
+	t.Parallel()
+
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(
+		response http.ResponseWriter,
+		request *http.Request,
+	) {
+		requestCount++
+		switch requestCount {
+		case 1:
+			writeJSON(t, response, map[string]any{
+				"status": 1,
+				"data":   map[string]any{"home": "/home/example"},
+			})
+		case 2:
+			writeJSON(t, response, map[string]any{
+				"status": 1,
+				"data": []map[string]any{{
+					"file":     "public_html",
+					"fullpath": "/home/example/public_html",
+					"type":     "dir",
+				}},
+			})
+		case 3:
+			writeJSON(t, response, map[string]any{
+				"status": 1,
+				"data": []map[string]any{{
+					"file":     "private",
+					"fullpath": "/home/example/public_html/private",
+					"type":     "dir",
+				}},
+			})
+		case 4:
+			if request.Method != http.MethodGet ||
+				request.URL.Path != "/execute/DirectoryPrivacy/list_users" {
+				t.Errorf("request = %s %s", request.Method, request.URL.Path)
+			}
+			if request.URL.Query().Get("dir") != "/home/example/public_html/private" {
+				t.Errorf("query = %v", request.URL.Query())
+			}
+			writeJSON(t, response, map[string]any{
+				"status": 1,
+				"data":   []string{"alice", "bob"},
+			})
+		default:
+			t.Fatalf("unexpected request %d: %s", requestCount, request.URL)
+		}
+	}))
+	defer server.Close()
+
+	users, err := newTestClient(t, server).ListUsers(
+		t.Context(),
+		"public_html/private",
+	)
+	if err != nil {
+		t.Fatalf("ListUsers() error: %v", err)
+	}
+	if len(users) != 2 ||
+		users[0].Username != "alice" ||
+		users[1].Username != "bob" ||
+		users[0].AbsoluteDirectory != "/home/example/public_html/private" {
+		t.Fatalf("users = %#v", users)
+	}
+}
+
+func TestClientAddsDirectoryPrivacyUserWithPOST(t *testing.T) {
+	t.Parallel()
+
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(
+		response http.ResponseWriter,
+		request *http.Request,
+	) {
+		requestCount++
+		switch requestCount {
+		case 1:
+			writeJSON(t, response, map[string]any{
+				"status": 1,
+				"data":   map[string]any{"home": "/home/example"},
+			})
+		case 2:
+			writeJSON(t, response, map[string]any{
+				"status": 1,
+				"data": []map[string]any{{
+					"file":     "public_html",
+					"fullpath": "/home/example/public_html",
+					"type":     "dir",
+				}},
+			})
+		case 3:
+			if request.Method != http.MethodPost ||
+				request.URL.Path != "/execute/DirectoryPrivacy/add_user" {
+				t.Errorf("request = %s %s", request.Method, request.URL.Path)
+			}
+			if request.URL.RawQuery != "" {
+				t.Errorf("query contains sensitive parameters: %q", request.URL.RawQuery)
+			}
+			if err := request.ParseForm(); err != nil {
+				t.Fatalf("ParseForm() error: %v", err)
+			}
+			if request.Form.Get("dir") != "/home/example/public_html" ||
+				request.Form.Get("user") != "alice" ||
+				request.Form.Get("password") != "Secret-2026!" {
+				t.Errorf("form = %v", request.Form)
+			}
+			writeJSON(t, response, map[string]any{
+				"status": 1,
+				"data":   nil,
+			})
+		default:
+			t.Fatalf("unexpected request %d: %s", requestCount, request.URL)
+		}
+	}))
+	defer server.Close()
+
+	err := newTestClient(t, server).AddUser(
+		t.Context(),
+		UserDefinition{
+			Directory: "public_html",
+			Username:  "alice",
+			Password:  "Secret-2026!",
+		},
+	)
+	if err != nil {
+		t.Fatalf("AddUser() error: %v", err)
+	}
+}
+
+func TestClientDeletesDirectoryPrivacyUserWithPOST(t *testing.T) {
+	t.Parallel()
+
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(
+		response http.ResponseWriter,
+		request *http.Request,
+	) {
+		requestCount++
+		switch requestCount {
+		case 1:
+			writeJSON(t, response, map[string]any{
+				"status": 1,
+				"data":   map[string]any{"home": "/home/example"},
+			})
+		case 2:
+			writeJSON(t, response, map[string]any{
+				"status": 1,
+				"data": []map[string]any{{
+					"file":     "public_html",
+					"fullpath": "/home/example/public_html",
+					"type":     "dir",
+				}},
+			})
+		case 3:
+			if request.Method != http.MethodPost ||
+				request.URL.Path != "/execute/DirectoryPrivacy/delete_user" {
+				t.Errorf("request = %s %s", request.Method, request.URL.Path)
+			}
+			if err := request.ParseForm(); err != nil {
+				t.Fatalf("ParseForm() error: %v", err)
+			}
+			if request.Form.Get("dir") != "/home/example/public_html" ||
+				request.Form.Get("user") != "alice" {
+				t.Errorf("form = %v", request.Form)
+			}
+			writeJSON(t, response, map[string]any{
+				"status": 1,
+				"data":   nil,
+			})
+		default:
+			t.Fatalf("unexpected request %d: %s", requestCount, request.URL)
+		}
+	}))
+	defer server.Close()
+
+	if err := newTestClient(t, server).DeleteUser(
+		t.Context(),
+		"public_html",
+		"alice",
+	); err != nil {
+		t.Fatalf("DeleteUser() error: %v", err)
+	}
+}
+
 func newTestClient(t *testing.T, server *httptest.Server) *Client {
 	t.Helper()
 

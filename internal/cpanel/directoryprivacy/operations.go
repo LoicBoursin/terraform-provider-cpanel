@@ -1,6 +1,9 @@
 package directoryprivacy
 
 const (
-	operationConfigure = "configure_directory_protection"
-	operationGet       = "is_directory_protected"
+	operationAddUser    = "add_user"
+	operationConfigure  = "configure_directory_protection"
+	operationDeleteUser = "delete_user"
+	operationGet        = "is_directory_protected"
+	operationListUsers  = "list_users"
 )
