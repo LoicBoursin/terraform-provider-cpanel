@@ -20,6 +20,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 
 	"terraform-provider-cpanel/internal/cpanel"
+	cpanelapachehandler "terraform-provider-cpanel/internal/cpanel/apachehandler"
 	cpanelapitoken "terraform-provider-cpanel/internal/cpanel/apitoken"
 	"terraform-provider-cpanel/internal/cpanel/cron"
 	cpanelddns "terraform-provider-cpanel/internal/cpanel/ddns"
@@ -61,6 +62,9 @@ func testAccPreCheck(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	if _, err := cpanelapachehandler.NewClient(client).ListUser(ctx); err != nil {
+		t.Fatalf("verify Apache handler API access: %v", err)
+	}
 	if _, err := cpanelapitoken.NewClient(client).List(ctx); err != nil {
 		t.Fatalf("verify API token access: %v", err)
 	}
@@ -198,6 +202,22 @@ func testAccMIMEType(kind string) string {
 func testAccMIMEExtension(kind string) string {
 	return fmt.Sprintf(
 		".tfcpanelmime%s%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
+	)
+}
+
+func testAccApacheHandlerExtension(kind string) string {
+	return fmt.Sprintf(
+		".tfcpanelhandler%s%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
+	)
+}
+
+func testAccApacheHandlerName(kind string) string {
+	return fmt.Sprintf(
+		"tfcpanel-handler-%s-%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
 	)
@@ -845,6 +865,135 @@ func testAccDeleteMIMEType(t *testing.T, mimeTypeName string) {
 	}
 	if err := mimeTypeClient.Delete(ctx, mimeTypeName); err != nil {
 		t.Fatalf("delete MIME type %q: %v", mimeTypeName, err)
+	}
+}
+
+func testAccCheckApacheHandlerExists(
+	expected cpanelapachehandler.Definition,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		apiHandler, err := cpanelapachehandler.NewClient(client).Get(
+			ctx,
+			expected.Extension,
+		)
+		if err != nil {
+			return err
+		}
+		if apiHandler == nil {
+			return fmt.Errorf(
+				"Apache handler for extension %q was not found",
+				expected.Extension,
+			)
+		}
+
+		actual := cpanelapachehandler.Definition{
+			Extension: apiHandler.Extension,
+			Handler:   apiHandler.Handler,
+		}
+		if actual != expected {
+			return fmt.Errorf(
+				"Apache handler for extension %q is %#v; want %#v",
+				expected.Extension,
+				actual,
+				expected,
+			)
+		}
+		if apiHandler.Origin != "user" {
+			return fmt.Errorf(
+				"Apache handler for extension %q origin is %q; want user",
+				expected.Extension,
+				apiHandler.Origin,
+			)
+		}
+
+		return nil
+	}
+}
+
+func testAccCheckApacheHandlersDestroyed(
+	extensions ...string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+		handlerClient := cpanelapachehandler.NewClient(client)
+		for _, extension := range extensions {
+			apiHandler, err := handlerClient.Get(ctx, extension)
+			if err != nil {
+				return err
+			}
+			if apiHandler != nil {
+				return fmt.Errorf(
+					"Apache handler for extension %q still exists",
+					extension,
+				)
+			}
+		}
+
+		return nil
+	}
+}
+
+func testAccReplaceApacheHandler(
+	t *testing.T,
+	definition cpanelapachehandler.Definition,
+) {
+	t.Helper()
+
+	testAccDeleteApacheHandler(t, definition.Extension)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	if err := cpanelapachehandler.NewClient(client).Add(
+		ctx,
+		definition,
+	); err != nil {
+		t.Fatalf(
+			"create Apache handler for extension %q: %v",
+			definition.Extension,
+			err,
+		)
+	}
+}
+
+func testAccDeleteApacheHandler(t *testing.T, extension string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	handlerClient := cpanelapachehandler.NewClient(client)
+	apiHandler, err := handlerClient.Get(ctx, extension)
+	if err != nil {
+		t.Fatalf("read Apache handler for extension %q: %v", extension, err)
+	}
+	if apiHandler == nil {
+		return
+	}
+	if err := handlerClient.Delete(ctx, extension); err != nil {
+		t.Fatalf("delete Apache handler for extension %q: %v", extension, err)
 	}
 }
 

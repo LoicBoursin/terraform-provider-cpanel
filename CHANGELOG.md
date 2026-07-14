@@ -27,6 +27,8 @@
   cPanel 134 acceptance coverage.
 - Custom MIME type resource and data source with unordered extensions, import,
   replacement rollback, drift recovery, and cPanel 134 acceptance coverage.
+- Apache handler resource and data source with import, replacement rollback,
+  drift recovery, and cPanel 134 acceptance coverage.
 - Email account resource and data source with password and quota updates,
   import, replacement, drift recovery, and cPanel 134 acceptance coverage.
 - MySQL and MariaDB user and database resources, matching data sources, import,

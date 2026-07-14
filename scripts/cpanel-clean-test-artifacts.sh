@@ -191,6 +191,7 @@ deleted_api_tokens=0
 deleted_dynamic_dns_domains=0
 deleted_redirects=0
 deleted_mime_types=0
+deleted_apache_handlers=0
 deleted_databases=0
 deleted_users=0
 deleted_mysql_databases=0
@@ -276,6 +277,23 @@ while IFS= read -r mime_type; do
 done < <(
   jq -r \
     '.data[].type | select(startswith("application/x-tfcpanel-"))' \
+    "${response_file}"
+)
+
+get_request 'execute/Mime/list_handlers?type=user' 'Apache handler inventory'
+while IFS= read -r extension; do
+  if [[ -z "${extension}" ]]; then
+    continue
+  fi
+  uapi_post \
+    'Mime' \
+    'delete_handler' \
+    "Delete test Apache handler ${extension}" \
+    "extension=${extension}"
+  deleted_apache_handlers=$((deleted_apache_handlers + 1))
+done < <(
+  jq -r \
+    '.data[].extension | select(startswith(".tfcpanelhandler"))' \
     "${response_file}"
 )
 
@@ -667,6 +685,7 @@ printf '  Dynamic DNS domains deleted: %d\n' \
   "${deleted_dynamic_dns_domains}"
 printf '  HTTP redirects deleted: %d\n' "${deleted_redirects}"
 printf '  custom MIME types deleted: %d\n' "${deleted_mime_types}"
+printf '  Apache handlers deleted: %d\n' "${deleted_apache_handlers}"
 printf '  PostgreSQL databases deleted: %d\n' "${deleted_databases}"
 printf '  PostgreSQL users deleted: %d\n' "${deleted_users}"
 printf '  MySQL databases deleted: %d\n' "${deleted_mysql_databases}"
