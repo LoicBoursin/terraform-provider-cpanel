@@ -30,8 +30,8 @@ The o2switch certification environment uses the cPanel account API over HTTPS
 on port 2083. Certification covers authentication, full-access API tokens, cron
 jobs, DNS records, Dynamic DNS domains, addon domains, domain aliases, web
 subdomains, HTTP redirects, email accounts, forwarders and autoresponders, FTP
-accounts, website IP blocks, MySQL or MariaDB databases and users, PostgreSQL
-databases and users, imports, drift detection, and cleanup.
+accounts, custom MIME types, website IP blocks, MySQL or MariaDB databases and
+users, PostgreSQL databases and users, imports, drift detection, and cleanup.
 
 ## API policy
 
@@ -72,6 +72,14 @@ non-www requests and rules that match www only. The provider therefore exposes
 only the stable `both` and `without` modes and deliberately does not advertise
 the unreadable www-only mode. Redirects that use that mode outside Terraform
 must be changed to a supported mode before import.
+
+Custom MIME type operations use UAPI `Mime::list_mime`, `Mime::add_mime`, and
+`Mime::delete_mime`. The provider reads only user-defined MIME types and uses
+the lowercase media type as stable identity. cPanel groups every extension for
+one media type into a single inventory entry, so Terraform models extensions
+as an unordered set. Removing or adding an extension performs a verified
+delete-and-create transition and restores the previous mapping if replacement
+fails.
 
 DNS record reads and mutations use UAPI `DNS::parse_zone` and
 `DNS::mass_edit_zone`. Every mutation uses the current SOA serial and is

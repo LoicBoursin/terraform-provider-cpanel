@@ -1,0 +1,1 @@
+terraform import cpanel_mime_type.manifest application/manifest+json

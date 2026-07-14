@@ -190,6 +190,7 @@ test_prefix="${CPANEL_USERNAME}_tf"
 deleted_api_tokens=0
 deleted_dynamic_dns_domains=0
 deleted_redirects=0
+deleted_mime_types=0
 deleted_databases=0
 deleted_users=0
 deleted_mysql_databases=0
@@ -258,6 +259,23 @@ done < <(
       | select(.source | startswith("/tfcpanelredirect-"))
       | [.domain, .source]
       | @tsv' \
+    "${response_file}"
+)
+
+get_request 'execute/Mime/list_mime?type=user' 'custom MIME type inventory'
+while IFS= read -r mime_type; do
+  if [[ -z "${mime_type}" ]]; then
+    continue
+  fi
+  uapi_post \
+    'Mime' \
+    'delete_mime' \
+    "Delete test custom MIME type ${mime_type}" \
+    "type=${mime_type}"
+  deleted_mime_types=$((deleted_mime_types + 1))
+done < <(
+  jq -r \
+    '.data[].type | select(startswith("application/x-tfcpanel-"))' \
     "${response_file}"
 )
 
@@ -648,6 +666,7 @@ printf '  API tokens revoked: %d\n' "${deleted_api_tokens}"
 printf '  Dynamic DNS domains deleted: %d\n' \
   "${deleted_dynamic_dns_domains}"
 printf '  HTTP redirects deleted: %d\n' "${deleted_redirects}"
+printf '  custom MIME types deleted: %d\n' "${deleted_mime_types}"
 printf '  PostgreSQL databases deleted: %d\n' "${deleted_databases}"
 printf '  PostgreSQL users deleted: %d\n' "${deleted_users}"
 printf '  MySQL databases deleted: %d\n' "${deleted_mysql_databases}"

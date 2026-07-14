@@ -74,7 +74,7 @@ cpanel_version="$(
 )"
 
 request 'execute/Features/list_features' 'feature check'
-for feature in addondomains apitokens blockers cron dynamicdns ftpaccts mysql parkeddomains popaccts postgres redirects subdomains zoneedit; do
+for feature in addondomains apitokens blockers cron dynamicdns ftpaccts mime mysql parkeddomains popaccts postgres redirects subdomains zoneedit; do
   if [[ "$(jq -r --arg feature "${feature}" '.data[$feature] // 0' "${response_file}")" != "1" ]]; then
     printf 'Required cPanel feature is disabled: %s\n' "${feature}" >&2
     exit 1
@@ -102,6 +102,14 @@ redirect_count="$(jq -r '.data | length' "${response_file}")"
 redirect_test_count="$(
   jq -r \
     '[.data[].source | select(startswith("/tfcpanelredirect-"))] | length' \
+    "${response_file}"
+)"
+
+request 'execute/Mime/list_mime?type=user' 'custom MIME type check'
+mime_type_count="$(jq -r '.data | length' "${response_file}")"
+mime_type_test_count="$(
+  jq -r \
+    '[.data[].type | select(startswith("application/x-tfcpanel-"))] | length' \
     "${response_file}"
 )"
 
@@ -299,6 +307,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     "${api_test_token_count}" != "0"
     || "${dynamic_dns_test_count}" != "0"
     || "${redirect_test_count}" != "0"
+    || "${mime_type_test_count}" != "0"
     || "${database_count}" != "0"
     || "${user_count}" != "0"
     || "${mysql_test_database_count}" != "0"
@@ -321,6 +330,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     printf '  test Dynamic DNS domains: %s\n' \
       "${dynamic_dns_test_count}" >&2
     printf '  test HTTP redirects: %s\n' "${redirect_test_count}" >&2
+    printf '  test custom MIME types: %s\n' "${mime_type_test_count}" >&2
     printf '  PostgreSQL databases: %s\n' "${database_count}" >&2
     printf '  PostgreSQL users: %s\n' "${user_count}" >&2
     printf '  MySQL test databases: %s\n' "${mysql_test_database_count}" >&2
@@ -357,6 +367,9 @@ printf '  Dynamic DNS domains: %s (%s test-managed)\n' \
 printf '  HTTP redirects: %s (%s test-managed)\n' \
   "${redirect_count}" \
   "${redirect_test_count}"
+printf '  custom MIME types: %s (%s test-managed)\n' \
+  "${mime_type_count}" \
+  "${mime_type_test_count}"
 printf '  PostgreSQL databases: %s\n' "${database_count}"
 printf '  PostgreSQL users: %s\n' "${user_count}"
 printf '  MySQL databases: %s (%s test-managed)\n' \

@@ -19,6 +19,7 @@ import (
 	cpanelmail "terraform-provider-cpanel/internal/cpanel/email"
 	"terraform-provider-cpanel/internal/cpanel/ftp"
 	"terraform-provider-cpanel/internal/cpanel/ipblock"
+	"terraform-provider-cpanel/internal/cpanel/mimetype"
 	"terraform-provider-cpanel/internal/cpanel/mysql"
 	"terraform-provider-cpanel/internal/cpanel/postgresql"
 	cpanelredirect "terraform-provider-cpanel/internal/cpanel/redirect"
@@ -55,8 +56,8 @@ func (p *cpanelProvider) Metadata(_ context.Context, _ provider.MetadataRequest,
 // Schema defines the provider-level schema for configuration data.
 func (p *cpanelProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description:         "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, HTTP redirects, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, and MySQL, MariaDB, and PostgreSQL users and databases.",
-		MarkdownDescription: "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, HTTP redirects, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		Description:         "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, HTTP redirects, custom MIME types, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		MarkdownDescription: "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, HTTP redirects, custom MIME types, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, and MySQL, MariaDB, and PostgreSQL users and databases.",
 		Attributes: map[string]schema.Attribute{
 			"username": schema.StringAttribute{
 				Optional:            true,
@@ -202,6 +203,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	emailClient := cpanelmail.NewClient(client)
 	ftpClient := ftp.NewClient(client)
 	ipBlockClient := ipblock.NewClient(client)
+	mimeTypeClient := mimetype.NewClient(client)
 	mySQLClient := mysql.NewClient(client)
 	postgreSQLClient := postgresql.NewClient(client)
 	redirectClient := cpanelredirect.NewClient(client)
@@ -217,6 +219,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		"email":      emailClient,
 		"ftp":        ftpClient,
 		"ipblock":    ipBlockClient,
+		"mimetype":   mimeTypeClient,
 		"mysql":      mySQLClient,
 		"postgresql": postgreSQLClient,
 		"redirect":   redirectClient,
@@ -230,6 +233,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		"email":      emailClient,
 		"ftp":        ftpClient,
 		"ipblock":    ipBlockClient,
+		"mimetype":   mimeTypeClient,
 		"mysql":      mySQLClient,
 		"postgresql": postgreSQLClient,
 		"redirect":   redirectClient,
@@ -253,6 +257,7 @@ func (p *cpanelProvider) DataSources(_ context.Context) []func() datasource.Data
 		NewEmailForwarderDataSource,
 		NewFTPAccountDataSource,
 		NewIPBlockDataSource,
+		NewMIMETypeDataSource,
 		NewMySQLDatabaseDataSource,
 		NewMySQLUserDataSource,
 		NewPostgreSQLDatabaseDataSource,
@@ -277,6 +282,7 @@ func (p *cpanelProvider) Resources(_ context.Context) []func() resource.Resource
 		NewEmailForwarderResource,
 		NewFTPAccountResource,
 		NewIPBlockResource,
+		NewMIMETypeResource,
 		NewMySQLDatabaseResource,
 		NewMySQLUserResource,
 		NewPostgreSQLDatabaseResource,

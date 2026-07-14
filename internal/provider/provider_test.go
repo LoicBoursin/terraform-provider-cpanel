@@ -28,6 +28,7 @@ import (
 	cpanelmail "terraform-provider-cpanel/internal/cpanel/email"
 	cpanelftp "terraform-provider-cpanel/internal/cpanel/ftp"
 	cpanelipblock "terraform-provider-cpanel/internal/cpanel/ipblock"
+	cpanelmimetype "terraform-provider-cpanel/internal/cpanel/mimetype"
 	"terraform-provider-cpanel/internal/cpanel/mysql"
 	"terraform-provider-cpanel/internal/cpanel/postgresql"
 	cpanelredirect "terraform-provider-cpanel/internal/cpanel/redirect"
@@ -109,6 +110,9 @@ func testAccPreCheck(t *testing.T) {
 	if _, err := cpanelipblock.NewClient(client).ListAddresses(ctx); err != nil {
 		t.Fatalf("verify IP blocker API access: %v", err)
 	}
+	if _, err := cpanelmimetype.NewClient(client).ListUser(ctx); err != nil {
+		t.Fatalf("verify MIME type API access: %v", err)
+	}
 	if _, err := cpanelredirect.NewClient(client).List(ctx); err != nil {
 		t.Fatalf("verify Redirects API access: %v", err)
 	}
@@ -178,6 +182,22 @@ func testAccRedirectSource(kind string) string {
 func testAccRedirectDestination(kind string) string {
 	return fmt.Sprintf(
 		"https://example.net/tfcpanelredirect-%s-%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
+	)
+}
+
+func testAccMIMEType(kind string) string {
+	return fmt.Sprintf(
+		"application/x-tfcpanel-%s-%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
+	)
+}
+
+func testAccMIMEExtension(kind string) string {
+	return fmt.Sprintf(
+		".tfcpanelmime%s%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
 	)
@@ -692,6 +712,139 @@ func testAccDeleteRedirect(t *testing.T, domain string, source string) {
 	}
 	if err := redirectClient.Delete(ctx, domain, source); err != nil {
 		t.Fatalf("delete redirect for %s%s: %v", domain, source, err)
+	}
+}
+
+func testAccCheckMIMETypeExists(
+	expected cpanelmimetype.Definition,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		apiMIMEType, err := cpanelmimetype.NewClient(client).Get(
+			ctx,
+			expected.Type,
+		)
+		if err != nil {
+			return err
+		}
+		if apiMIMEType == nil {
+			return fmt.Errorf("MIME type %q was not found", expected.Type)
+		}
+
+		actual := cpanelmimetype.Definition{
+			Type:       apiMIMEType.Type,
+			Extensions: apiMIMEType.Extensions(),
+		}.Sorted()
+		expected = expected.Sorted()
+		if actual.Type != expected.Type ||
+			!slices.Equal(actual.Extensions, expected.Extensions) {
+			return fmt.Errorf(
+				"MIME type %q is %#v; want %#v",
+				expected.Type,
+				actual,
+				expected,
+			)
+		}
+		if apiMIMEType.Origin != "user" {
+			return fmt.Errorf(
+				"MIME type %q origin is %q; want user",
+				expected.Type,
+				apiMIMEType.Origin,
+			)
+		}
+
+		return nil
+	}
+}
+
+func testAccCheckMIMETypesDestroyed(
+	mimeTypes ...string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+		mimeTypeClient := cpanelmimetype.NewClient(client)
+		for _, mimeTypeName := range mimeTypes {
+			apiMIMEType, err := mimeTypeClient.Get(ctx, mimeTypeName)
+			if err != nil {
+				return err
+			}
+			if apiMIMEType != nil {
+				return fmt.Errorf(
+					"MIME type %q still exists",
+					mimeTypeName,
+				)
+			}
+		}
+
+		return nil
+	}
+}
+
+func testAccReplaceMIMEType(
+	t *testing.T,
+	definition cpanelmimetype.Definition,
+) {
+	t.Helper()
+
+	testAccDeleteMIMEType(t, definition.Type)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	mimeTypeClient := cpanelmimetype.NewClient(client)
+	for _, extension := range definition.Sorted().Extensions {
+		if err := mimeTypeClient.AddExtension(
+			ctx,
+			definition.Type,
+			extension,
+		); err != nil {
+			t.Fatalf(
+				"add extension %q to MIME type %q: %v",
+				extension,
+				definition.Type,
+				err,
+			)
+		}
+	}
+}
+
+func testAccDeleteMIMEType(t *testing.T, mimeTypeName string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	mimeTypeClient := cpanelmimetype.NewClient(client)
+	apiMIMEType, err := mimeTypeClient.Get(ctx, mimeTypeName)
+	if err != nil {
+		t.Fatalf("read MIME type %q: %v", mimeTypeName, err)
+	}
+	if apiMIMEType == nil {
+		return
+	}
+	if err := mimeTypeClient.Delete(ctx, mimeTypeName); err != nil {
+		t.Fatalf("delete MIME type %q: %v", mimeTypeName, err)
 	}
 }
 

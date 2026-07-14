@@ -17,9 +17,10 @@ The CI and release configuration currently pins:
 ## cPanel acceptance environment
 
 Acceptance tests create and delete real API tokens, cron jobs, DNS records,
-Dynamic DNS domains, web domains, HTTP redirects, email accounts, forwarders and
-autoresponders, FTP accounts, MySQL or MariaDB users and databases, PostgreSQL
-users and databases, and database grants. Use a dedicated cPanel test account.
+Dynamic DNS domains, web domains, HTTP redirects, custom MIME types, email
+accounts, forwarders and autoresponders, FTP accounts, MySQL or MariaDB users
+and databases, PostgreSQL users and databases, and database grants. Use a
+dedicated cPanel test account.
 
 The scripts load credentials from the file specified by `CPANEL_ENV_FILE`. When
 that variable is unset, they use:
@@ -58,8 +59,8 @@ make test-acceptance
 
 The acceptance entry point performs the smoke test first. It refuses to run
 when any credential is missing or when the server does not expose API Tokens,
-Cron, DNS Zone Editor, Dynamic DNS, domains, Redirects, email and FTP accounts,
-MySQL or MariaDB, and PostgreSQL.
+Cron, DNS Zone Editor, Dynamic DNS, domains, Redirects, MIME Types, email and
+FTP accounts, MySQL or MariaDB, and PostgreSQL.
 
 Before and after the suite, the acceptance entry point removes only resources
 that follow the test naming contract:
@@ -70,6 +71,7 @@ that follow the test naming contract:
 - API token names beginning with `tfcpaneltoken`;
 - Dynamic DNS domains beginning with `tfcpanelddns`;
 - HTTP redirect source paths beginning with `/tfcpanelredirect-`;
+- custom MIME types beginning with `application/x-tfcpanel-`;
 - email account local parts beginning with `tfcpanel`;
 - email forwarder source local parts beginning with `tfcpanelfwd`;
 - email domain forwarder destinations beginning with `tfcpaneldomainfwd`;
