@@ -1,41 +1,57 @@
-# Terraform Provider release workflow.
 name: Release
 
-# This GitHub action creates a release when a tag that matches the pattern
-# "v*" (e.g. v0.1.0) is created.
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
-# Releases need permissions to read and write the repository contents.
-# GitHub considers creating releases and uploading assets as writing contents.
 permissions:
   contents: write
 
 jobs:
-  goreleaser:
+  release:
     runs-on: ubuntu-latest
+    timeout-minutes: 150
+    concurrency:
+      group: cpanel-release
+      cancel-in-progress: false
     steps:
-      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          # Allow goreleaser to access older tag information.
           fetch-depth: 0
-      - uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version-file: 'go.mod'
+          go-version-file: go.mod
           cache: true
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+      - run: go mod download
+      - run: go mod verify
+      - run: go test -race ./...
+      - run: go vet ./...
+      - uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+        with:
+          go-package: ./...
+      - name: Run cPanel acceptance tests
+        env:
+          CPANEL_HOST: ${{ secrets.CPANEL_HOST }}
+          CPANEL_USERNAME: ${{ secrets.CPANEL_USERNAME }}
+          CPANEL_API_TOKEN: ${{ secrets.CPANEL_API_TOKEN }}
+        run: ./scripts/test-acceptance.sh
       - name: Import GPG key
-        uses: crazy-max/ghaction-import-gpg@01dd5d3ca463c7f10f7f4f7b4f177225ac661ee4 # v6.1.0
         id: import_gpg
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.PASSPHRASE }}
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@7ec5c2b0c6cdda6e8bbb49444bc797dd33d74dd8 # v5.0.0
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
+          distribution: goreleaser
+          version: v2.17.0
           args: release --clean
         env:
-          # GitHub sets the GITHUB_TOKEN secret automatically.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
