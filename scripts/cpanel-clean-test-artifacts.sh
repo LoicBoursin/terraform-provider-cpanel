@@ -245,6 +245,7 @@ deleted_databases=0
 deleted_users=0
 deleted_mysql_databases=0
 deleted_mysql_users=0
+deleted_mysql_remote_hosts=0
 deleted_email_accounts=0
 deleted_email_forwarders=0
 deleted_email_domain_forwarders=0
@@ -424,6 +425,33 @@ done < <(
   jq -r \
     --arg prefix "${test_prefix}" \
     '.data[].user | select(startswith($prefix))' \
+    "${response_file}"
+)
+
+get_request \
+  "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=MysqlFE&cpanel_jsonapi_func=listhosts" \
+  'remote MySQL host inventory'
+while IFS= read -r remote_host; do
+  if [[ -z "${remote_host}" ]]; then
+    continue
+  fi
+  uapi_post \
+    'Mysql' \
+    'delete_host' \
+    "Delete test remote MySQL host ${remote_host}" \
+    "host=${remote_host}"
+  deleted_mysql_remote_hosts=$((deleted_mysql_remote_hosts + 1))
+done < <(
+  jq -r \
+    '.cpanelresult.data[].host
+      | select(
+          . == "198.51.100.245"
+          or . == "198.51.100.246"
+          or . == "198.51.100.247"
+          or . == "198.51.100.248"
+          or . == "198.51.100.249"
+          or . == "198.51.100.250"
+        )' \
     "${response_file}"
 )
 
@@ -862,6 +890,7 @@ printf '  PostgreSQL databases deleted: %d\n' "${deleted_databases}"
 printf '  PostgreSQL users deleted: %d\n' "${deleted_users}"
 printf '  MySQL databases deleted: %d\n' "${deleted_mysql_databases}"
 printf '  MySQL users deleted: %d\n' "${deleted_mysql_users}"
+printf '  remote MySQL hosts deleted: %d\n' "${deleted_mysql_remote_hosts}"
 printf '  email accounts deleted: %d\n' "${deleted_email_accounts}"
 printf '  email forwarders deleted: %d\n' "${deleted_email_forwarders}"
 printf '  email domain forwarders deleted: %d\n' \

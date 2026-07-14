@@ -60,8 +60,8 @@ func (p *cpanelProvider) Metadata(_ context.Context, _ provider.MetadataRequest,
 // Schema defines the provider-level schema for configuration data.
 func (p *cpanelProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description:         "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, and MySQL, MariaDB, and PostgreSQL users and databases.",
-		MarkdownDescription: "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		Description:         "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		MarkdownDescription: "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
 		Attributes: map[string]schema.Attribute{
 			"username": schema.StringAttribute{
 				Optional:            true,
@@ -280,6 +280,7 @@ func (p *cpanelProvider) DataSources(_ context.Context) []func() datasource.Data
 		NewIPBlockDataSource,
 		NewMIMETypeDataSource,
 		NewMySQLDatabaseDataSource,
+		NewMySQLRemoteHostDataSource,
 		NewMySQLUserDataSource,
 		NewPostgreSQLDatabaseDataSource,
 		NewPostgreSQLUserDataSource,
@@ -310,6 +311,7 @@ func (p *cpanelProvider) Resources(_ context.Context) []func() resource.Resource
 		NewIPBlockResource,
 		NewMIMETypeResource,
 		NewMySQLDatabaseResource,
+		NewMySQLRemoteHostResource,
 		NewMySQLUserResource,
 		NewPostgreSQLDatabaseResource,
 		NewPostgreSQLUserResource,

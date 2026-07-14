@@ -44,6 +44,9 @@
   import, replacement, drift recovery, and cPanel 134 acceptance coverage.
 - MySQL and MariaDB user and database resources, matching data sources, import,
   drift recovery, privilege management, and cPanel 134 acceptance coverage.
+- Remote MySQL host resource and data source with IPv4, CIDR, wildcard, and
+  hostname identities, optional notes, import, drift recovery, isolated
+  cleanup, and cPanel 134 acceptance coverage.
 - Import support for cron jobs by cPanel line key.
 - Stable drift and remote-deletion handling for every resource.
 - cPanel 134 acceptance coverage for CRUD, import, drift, recreation, and

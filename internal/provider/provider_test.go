@@ -135,6 +135,9 @@ func testAccPreCheck(t *testing.T) {
 	if _, err := mysql.NewClient(client).GetRestrictions(ctx); err != nil {
 		t.Fatalf("verify MySQL API access: %v", err)
 	}
+	if _, err := mysql.NewClient(client).ListRemoteHosts(ctx); err != nil {
+		t.Fatalf("verify remote MySQL host API access: %v", err)
+	}
 	if _, err := cpanelmail.NewClient(client).ListMailDomains(ctx); err != nil {
 		t.Fatalf("verify Email API access: %v", err)
 	}
@@ -2297,6 +2300,84 @@ func testAccDeleteMySQLUser(t *testing.T, name string) {
 
 	if err := mysql.NewClient(client).DeleteUser(ctx, name); err != nil {
 		t.Fatalf("delete MySQL user %q: %v", name, err)
+	}
+}
+
+func testAccCheckMySQLRemoteHostExists(
+	host string,
+	expectedNote string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		remoteHost, err := mysql.NewClient(client).GetRemoteHost(ctx, host)
+		if err != nil {
+			return err
+		}
+		if remoteHost == nil {
+			return fmt.Errorf("remote MySQL host %q was not found", host)
+		}
+		if remoteHost.Note != expectedNote {
+			return fmt.Errorf(
+				"remote MySQL host %q note is %q; want %q",
+				host,
+				remoteHost.Note,
+				expectedNote,
+			)
+		}
+
+		return nil
+	}
+}
+
+func testAccCheckMySQLRemoteHostsDestroyed(
+	hosts ...string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		remoteHosts, err := mysql.NewClient(client).ListRemoteHosts(ctx)
+		if err != nil {
+			return err
+		}
+		for _, remoteHost := range remoteHosts {
+			if slices.Contains(hosts, remoteHost.Host) {
+				return fmt.Errorf(
+					"remote MySQL host %q is still authorized",
+					remoteHost.Host,
+				)
+			}
+		}
+
+		return nil
+	}
+}
+
+func testAccDeleteMySQLRemoteHost(t *testing.T, host string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+
+	if err := mysql.NewClient(client).DeleteRemoteHost(ctx, host); err != nil {
+		t.Fatalf("delete remote MySQL host %q: %v", host, err)
 	}
 }
 

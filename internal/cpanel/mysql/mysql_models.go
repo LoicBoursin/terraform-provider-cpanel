@@ -57,3 +57,27 @@ type SetPasswordFailure struct {
 	Error string `json:"error"`
 	Host  string `json:"host"`
 }
+
+type RemoteHostListResponse struct {
+	CpanelResult RemoteHostListResult `json:"cpanelresult"`
+}
+
+type RemoteHostListResult struct {
+	cpanel.API2DataSourceCpanelResultModel
+	Data []RemoteHostAPI `json:"data"`
+}
+
+type RemoteHostAPI struct {
+	Host    string `json:"host"`
+	URIHost string `json:"uri_host"`
+}
+
+type RemoteHostNotesResponse struct {
+	cpanel.UAPIDataSourceModel
+	Data map[string]string `json:"data"`
+}
+
+type RemoteHost struct {
+	Host string
+	Note string
+}

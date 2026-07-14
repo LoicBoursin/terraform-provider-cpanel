@@ -20,8 +20,8 @@ Acceptance tests create and delete real API tokens, cron jobs, DNS records,
 Dynamic DNS domains, web domains, HTTP redirects, custom MIME types, email
 accounts, Apache handlers, directory indexes and privacy, Git repositories,
 forwarders and autoresponders, FTP accounts, MySQL or MariaDB users and
-databases, PostgreSQL users and databases, and database grants. Use a dedicated
-cPanel test account.
+databases and remote hosts, PostgreSQL users and databases, and database
+grants. Use a dedicated cPanel test account.
 
 The scripts load credentials from the file specified by `CPANEL_ENV_FILE`. When
 that variable is unset, they use:
@@ -70,6 +70,8 @@ that follow the test naming contract:
 - PostgreSQL databases and users beginning with `${CPANEL_USERNAME}_tf`;
 - MySQL or MariaDB databases and users beginning with
   `${CPANEL_USERNAME}_tf`;
+- remote MySQL hosts limited to `198.51.100.245` through
+  `198.51.100.250`;
 - API token names beginning with `tfcpaneltoken`;
 - Dynamic DNS domains beginning with `tfcpanelddns`;
 - HTTP redirect source paths beginning with `/tfcpanelredirect-`;

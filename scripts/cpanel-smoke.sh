@@ -174,6 +174,24 @@ mysql_test_user_count="$(
     "${response_file}"
 )"
 
+request \
+  "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=MysqlFE&cpanel_jsonapi_func=listhosts" \
+  'remote MySQL host check'
+mysql_remote_host_count="$(jq -r '.cpanelresult.data | length' "${response_file}")"
+mysql_test_remote_host_count="$(
+  jq -r \
+    '[.cpanelresult.data[].host
+      | select(
+          . == "198.51.100.245"
+          or . == "198.51.100.246"
+          or . == "198.51.100.247"
+          or . == "198.51.100.248"
+          or . == "198.51.100.249"
+          or . == "198.51.100.250"
+        )] | length' \
+    "${response_file}"
+)"
+
 request 'execute/Email/list_pops?skip_main=1' 'Email account check'
 email_account_count="$(jq -r '.data | length' "${response_file}")"
 email_test_account_count="$(
@@ -414,6 +432,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${user_count}" != "0"
     || "${mysql_test_database_count}" != "0"
     || "${mysql_test_user_count}" != "0"
+    || "${mysql_test_remote_host_count}" != "0"
     || "${email_test_account_count}" != "0"
     || "${email_test_forwarder_count}" != "0"
     || "${email_test_domain_forwarder_count}" != "0"
@@ -444,6 +463,8 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     printf '  PostgreSQL users: %s\n' "${user_count}" >&2
     printf '  MySQL test databases: %s\n' "${mysql_test_database_count}" >&2
     printf '  MySQL test users: %s\n' "${mysql_test_user_count}" >&2
+    printf '  test remote MySQL hosts: %s\n' \
+      "${mysql_test_remote_host_count}" >&2
     printf '  email test accounts: %s\n' "${email_test_account_count}" >&2
     printf '  test email forwarders: %s\n' "${email_test_forwarder_count}" >&2
     printf '  test email domain forwarders: %s\n' \
@@ -501,6 +522,9 @@ printf '  MySQL databases: %s (%s test-managed)\n' \
 printf '  MySQL users: %s (%s test-managed)\n' \
   "${mysql_user_count}" \
   "${mysql_test_user_count}"
+printf '  remote MySQL hosts: %s (%s test-managed)\n' \
+  "${mysql_remote_host_count}" \
+  "${mysql_test_remote_host_count}"
 printf '  email accounts: %s (%s test-managed)\n' \
   "${email_account_count}" \
   "${email_test_account_count}"

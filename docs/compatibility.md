@@ -32,7 +32,8 @@ jobs, DNS records, Dynamic DNS domains, addon domains, domain aliases, web
 subdomains, HTTP redirects, email accounts, forwarders and autoresponders, FTP
 accounts, directory indexes and privacy, custom MIME types, Apache handlers,
 Git repositories, website IP blocks, MySQL or MariaDB databases and users,
-PostgreSQL databases and users, imports, drift detection, and cleanup.
+remote MySQL hosts, PostgreSQL databases and users, imports, drift detection,
+and cleanup.
 
 ## API policy
 
@@ -175,6 +176,15 @@ relative to the cPanel account home, and Terraform preserves that directory by
 default when deleting the account. cPanel SFTP access uses the main cPanel
 system account and does not have an independent account lifecycle API, so the
 provider does not advertise a separate SFTP resource.
+
+Remote MySQL host mutations and notes use UAPI `Mysql::add_host`,
+`Mysql::add_host_note`, and `Mysql::delete_host`. The authoritative host
+inventory uses the remaining API 2 `MysqlFE::listhosts` function because UAPI
+only returns notes and omits authorized hosts that have no note. Host and note
+changes replace the authorization. This avoids the unreliable in-place note
+update observed on the certified cPanel 134 environment. IPv4 addresses, IPv4
+CIDR prefixes, cPanel percent-wildcard IPv4 patterns, and hostnames are
+normalized before comparison.
 
 Cron operations currently use cPanel API 2 because cPanel does not provide UAPI
 equivalents for the required cron functions. API 2 is deprecated, so each
