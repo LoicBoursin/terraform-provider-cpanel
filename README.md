@@ -8,6 +8,8 @@ production-ready and certifying them against o2switch cPanel 134.
 
 The supported-version policy is documented in
 [`docs/compatibility.md`](docs/compatibility.md).
+Local setup and acceptance testing are documented in
+[`docs/development.md`](docs/development.md).
 
 ## Available Resources
 

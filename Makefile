@@ -1,7 +1,14 @@
-# Run acceptance tests
 .PHONY: test
 test:
-	TF_ACC=1 go test ./... -v $(TESTARGS) -timeout 120m
+	CGO_ENABLED=0 go test ./... $(TESTARGS)
+
+.PHONY: smoke-test
+smoke-test:
+	./scripts/cpanel-smoke.sh
+
+.PHONY: test-acceptance
+test-acceptance:
+	./scripts/test-acceptance.sh $(TESTARGS)
 
 .PHONY: generate-documentation
 generate-documentation:
@@ -18,4 +25,3 @@ plan:
 .PHONY: apply
 apply:
 	terraform apply -parallelism=1
-
