@@ -29,8 +29,8 @@ security fixes.
 The o2switch certification environment uses the cPanel account API over HTTPS
 on port 2083. Certification covers authentication, cron jobs, DNS records,
 addon domains, domain aliases, web subdomains, email accounts, forwarders and
-autoresponders, FTP accounts, MySQL or MariaDB databases and users, PostgreSQL
-databases and users, imports, drift detection, and cleanup.
+autoresponders, FTP accounts, website IP blocks, MySQL or MariaDB databases and
+users, PostgreSQL databases and users, imports, drift detection, and cleanup.
 
 ## API policy
 
@@ -66,6 +66,15 @@ The email autoresponder resource manages all fields returned by cPanel,
 including its schedule and HTML flag. cPanel stores a trailing newline in the
 message body; the provider normalizes that server-added newline so refreshes do
 not create a perpetual diff.
+
+IP-block mutations use UAPI `BlockIP::add_ip` and `BlockIP::remove_ip`. The
+current blocked-address inventory is read with the cPanel API 2
+`DenyIp::listdenyips` function because cPanel does not expose an equivalent
+UAPI read operation. IPv4, CIDR, explicit ranges, and IPv6 are normalized
+before comparison. When cPanel decomposes an explicit range into multiple CIDR
+or single-address entries, the provider reassembles them only when they cover
+the requested range exactly. The expanded range bounds remain available as
+computed state.
 
 The FTP resource manages cPanel virtual FTP accounts. Its home directory is
 relative to the cPanel account home, and Terraform preserves that directory by

@@ -74,7 +74,7 @@ cpanel_version="$(
 )"
 
 request 'execute/Features/list_features' 'feature check'
-for feature in addondomains cron ftpaccts mysql parkeddomains popaccts postgres subdomains zoneedit; do
+for feature in addondomains blockers cron ftpaccts mysql parkeddomains popaccts postgres subdomains zoneedit; do
   if [[ "$(jq -r --arg feature "${feature}" '.data[$feature] // 0' "${response_file}")" != "1" ]]; then
     printf 'Required cPanel feature is disabled: %s\n' "${feature}" >&2
     exit 1
@@ -163,6 +163,25 @@ ftp_test_account_count="$(
   jq -r \
     '[.data[].login | select(startswith("tfcpanelftp"))] | length' \
   "${response_file}"
+)"
+
+request \
+  "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=DenyIp&cpanel_jsonapi_func=listdenyips" \
+  'IP block check'
+ip_block_count="$(jq -r '.cpanelresult.data | length' "${response_file}")"
+ip_test_block_count="$(
+  jq -r \
+    '[.cpanelresult.data[]
+      | select(
+          .ip == "198.51.100.253"
+          or .ip == "198.51.100.254"
+          or .ip == "198.51.100.240-198.51.100.242"
+          or .ip == "198.51.100.240/31"
+          or .ip == "198.51.100.242"
+          or .ip == "203.0.113.248/30"
+          or (.ip | startswith("2001:0db8:ffff:"))
+        )] | length' \
+    "${response_file}"
 )"
 
 request 'execute/DomainInfo/list_domains' 'DNS zone inventory'
@@ -262,6 +281,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${email_test_domain_forwarder_count}" != "0"
     || "${email_test_auto_responder_count}" != "0"
     || "${ftp_test_account_count}" != "0"
+    || "${ip_test_block_count}" != "0"
     || "${dns_test_record_count}" != "0"
     || "${addon_domain_test_count}" != "0"
     || "${domain_alias_test_count}" != "0"
@@ -281,6 +301,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     printf '  test email autoresponders: %s\n' \
       "${email_test_auto_responder_count}" >&2
     printf '  FTP test accounts: %s\n' "${ftp_test_account_count}" >&2
+    printf '  test IP blocks: %s\n' "${ip_test_block_count}" >&2
     printf '  test DNS records: %s\n' "${dns_test_record_count}" >&2
     printf '  test addon domains: %s\n' "${addon_domain_test_count}" >&2
     printf '  test domain aliases: %s\n' "${domain_alias_test_count}" >&2
@@ -319,6 +340,9 @@ printf '  email autoresponders: %s (%s test-managed)\n' \
 printf '  FTP accounts: %s (%s test-managed)\n' \
   "${ftp_account_count}" \
   "${ftp_test_account_count}"
+printf '  IP blocks: %s (%s test-managed)\n' \
+  "${ip_block_count}" \
+  "${ip_test_block_count}"
 printf '  DNS records: %s (%s test-managed)\n' \
   "${dns_record_count}" \
   "${dns_test_record_count}"

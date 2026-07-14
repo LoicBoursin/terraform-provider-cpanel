@@ -196,6 +196,7 @@ deleted_email_forwarders=0
 deleted_email_domain_forwarders=0
 deleted_email_auto_responders=0
 deleted_ftp_accounts=0
+deleted_ip_blocks=0
 deleted_dns_records=0
 deleted_addon_domains=0
 deleted_domain_aliases=0
@@ -365,6 +366,35 @@ while IFS= read -r login; do
 done < <(
   jq -r \
     '.data[].login | select(startswith("tfcpanelftp"))' \
+    "${response_file}"
+)
+
+get_request \
+  "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=DenyIp&cpanel_jsonapi_func=listdenyips" \
+  'IP block inventory'
+while IFS= read -r address; do
+  if [[ -z "${address}" ]]; then
+    continue
+  fi
+  uapi_post \
+    'BlockIP' \
+    'remove_ip' \
+    "Delete test IP block ${address}" \
+    "ip=${address}"
+  deleted_ip_blocks=$((deleted_ip_blocks + 1))
+done < <(
+  jq -r \
+    '.cpanelresult.data[]
+      | select(
+          .ip == "198.51.100.253"
+          or .ip == "198.51.100.254"
+          or .ip == "198.51.100.240-198.51.100.242"
+          or .ip == "198.51.100.240/31"
+          or .ip == "198.51.100.242"
+          or .ip == "203.0.113.248/30"
+          or (.ip | startswith("2001:0db8:ffff:"))
+        )
+      | .ip' \
     "${response_file}"
 )
 
@@ -568,6 +598,7 @@ printf '  email domain forwarders deleted: %d\n' \
 printf '  email autoresponders deleted: %d\n' \
   "${deleted_email_auto_responders}"
 printf '  FTP accounts deleted: %d\n' "${deleted_ftp_accounts}"
+printf '  IP blocks deleted: %d\n' "${deleted_ip_blocks}"
 printf '  DNS records deleted: %d\n' "${deleted_dns_records}"
 printf '  addon domains deleted: %d\n' "${deleted_addon_domains}"
 printf '  domain aliases deleted: %d\n' "${deleted_domain_aliases}"

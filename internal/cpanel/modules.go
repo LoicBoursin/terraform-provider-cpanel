@@ -2,7 +2,9 @@ package cpanel
 
 const (
 	ModuleAddonDomain = "AddonDomain"
+	ModuleBlockIP     = "BlockIP"
 	ModuleCron        = "Cron"
+	ModuleDenyIP      = "DenyIp"
 	ModuleDNS         = "DNS"
 	ModuleDomainInfo  = "DomainInfo"
 	ModuleEmail       = "Email"

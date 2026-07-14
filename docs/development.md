@@ -71,6 +71,9 @@ that follow the test naming contract:
 - email domain forwarder destinations beginning with `tfcpaneldomainfwd`;
 - email autoresponder local parts beginning with `tfcpanelauto`;
 - FTP account names beginning with `tfcpanelftp`;
+- IP blocks limited to `198.51.100.253`, `198.51.100.254`,
+  `198.51.100.240-198.51.100.242`, `203.0.113.248/30`, and the
+  `2001:db8:ffff::/48` documentation prefix;
 - DNS record names beginning with `tfcpaneldns`;
 - addon domains beginning with `tfcpaneladdon`;
 - domain aliases beginning with `tfcpanelalias`;

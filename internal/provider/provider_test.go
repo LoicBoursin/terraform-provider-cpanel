@@ -25,6 +25,7 @@ import (
 	cpaneldomain "terraform-provider-cpanel/internal/cpanel/domain"
 	cpanelmail "terraform-provider-cpanel/internal/cpanel/email"
 	cpanelftp "terraform-provider-cpanel/internal/cpanel/ftp"
+	cpanelipblock "terraform-provider-cpanel/internal/cpanel/ipblock"
 	"terraform-provider-cpanel/internal/cpanel/mysql"
 	"terraform-provider-cpanel/internal/cpanel/postgresql"
 )
@@ -95,6 +96,9 @@ func testAccPreCheck(t *testing.T) {
 	}
 	if _, err := cpanelftp.NewClient(client).ListAccounts(ctx); err != nil {
 		t.Fatalf("verify FTP API access: %v", err)
+	}
+	if _, err := cpanelipblock.NewClient(client).ListAddresses(ctx); err != nil {
+		t.Fatalf("verify IP blocker API access: %v", err)
 	}
 }
 
@@ -281,6 +285,93 @@ func testAccDNSRecordData(kind string) string {
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
 	)
+}
+
+func testAccCheckIPBlockExists(
+	address string,
+	expectedStart string,
+	expectedEnd string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		blockedAddress, err := cpanelipblock.NewClient(client).GetAddress(ctx, address)
+		if err != nil {
+			return err
+		}
+		if blockedAddress == nil {
+			return fmt.Errorf("IP block %q was not found", address)
+		}
+
+		start, err := cpanelipblock.NormalizeAddress(blockedAddress.Start)
+		if err != nil {
+			return err
+		}
+		end, err := cpanelipblock.NormalizeAddress(blockedAddress.End)
+		if err != nil {
+			return err
+		}
+		if start != expectedStart || end != expectedEnd {
+			return fmt.Errorf(
+				"IP block %q spans %q to %q, want %q to %q",
+				address,
+				start,
+				end,
+				expectedStart,
+				expectedEnd,
+			)
+		}
+
+		return nil
+	}
+}
+
+func testAccCheckIPBlocksDestroyed(
+	addresses ...string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		ipBlockClient := cpanelipblock.NewClient(client)
+		for _, address := range addresses {
+			blockedAddress, err := ipBlockClient.GetAddress(ctx, address)
+			if err != nil {
+				return err
+			}
+			if blockedAddress != nil {
+				return fmt.Errorf("IP block %q still exists", address)
+			}
+		}
+
+		return nil
+	}
+}
+
+func testAccDeleteIPBlock(t *testing.T, address string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	if err := cpanelipblock.NewClient(client).RemoveAddress(ctx, address); err != nil {
+		t.Fatalf("delete IP block %q: %v", address, err)
+	}
 }
 
 func testAccMainDomain(t *testing.T) string {
