@@ -7,6 +7,7 @@ const (
 	ModuleDenyIP      = "DenyIp"
 	ModuleDNS         = "DNS"
 	ModuleDomainInfo  = "DomainInfo"
+	ModuleDynamicDNS  = "DynamicDNS"
 	ModuleEmail       = "Email"
 	ModuleFileman     = "Fileman"
 	ModuleFtp         = "Ftp"

@@ -188,6 +188,7 @@ remove_cron_line() {
 
 test_prefix="${CPANEL_USERNAME}_tf"
 deleted_api_tokens=0
+deleted_dynamic_dns_domains=0
 deleted_databases=0
 deleted_users=0
 deleted_mysql_databases=0
@@ -215,6 +216,26 @@ while IFS= read -r token_name; do
 done < <(
   jq -r \
     '.data[].name | select(startswith("tfcpaneltoken"))' \
+    "${response_file}"
+)
+
+get_request 'execute/DynamicDNS/list' 'Dynamic DNS inventory'
+while IFS=$'\t' read -r domain id; do
+  if [[ -z "${domain}" || -z "${id}" ]]; then
+    continue
+  fi
+  uapi_post \
+    'DynamicDNS' \
+    'delete' \
+    "Delete test Dynamic DNS domain ${domain}" \
+    "id=${id}"
+  deleted_dynamic_dns_domains=$((deleted_dynamic_dns_domains + 1))
+done < <(
+  jq -r \
+    '.data[]
+      | select(.domain | startswith("tfcpanelddns"))
+      | [.domain, .id]
+      | @tsv' \
     "${response_file}"
 )
 
@@ -602,6 +623,8 @@ fi
 
 printf 'cPanel test cleanup passed\n'
 printf '  API tokens revoked: %d\n' "${deleted_api_tokens}"
+printf '  Dynamic DNS domains deleted: %d\n' \
+  "${deleted_dynamic_dns_domains}"
 printf '  PostgreSQL databases deleted: %d\n' "${deleted_databases}"
 printf '  PostgreSQL users deleted: %d\n' "${deleted_users}"
 printf '  MySQL databases deleted: %d\n' "${deleted_mysql_databases}"

@@ -22,6 +22,7 @@ import (
 	"terraform-provider-cpanel/internal/cpanel"
 	cpanelapitoken "terraform-provider-cpanel/internal/cpanel/apitoken"
 	"terraform-provider-cpanel/internal/cpanel/cron"
+	cpanelddns "terraform-provider-cpanel/internal/cpanel/ddns"
 	cpaneldns "terraform-provider-cpanel/internal/cpanel/dns"
 	cpaneldomain "terraform-provider-cpanel/internal/cpanel/domain"
 	cpanelmail "terraform-provider-cpanel/internal/cpanel/email"
@@ -79,6 +80,9 @@ func testAccPreCheck(t *testing.T) {
 	}
 	if _, err := cpaneldns.NewClient(client).ParseZone(ctx, mainDomain); err != nil {
 		t.Fatalf("verify DNS API access: %v", err)
+	}
+	if _, err := cpanelddns.NewClient(client).List(ctx); err != nil {
+		t.Fatalf("verify Dynamic DNS API access: %v", err)
 	}
 	if _, err := cpanelmail.NewClient(client).ListForwarders(ctx, mainDomain); err != nil {
 		t.Fatalf("verify email forwarder API access: %v", err)
@@ -142,6 +146,21 @@ func testAccAPITokenName(kind string) string {
 	testAccRegisterAPITokenCandidate(name, time.Now().Add(-5*time.Minute).Unix())
 
 	return name
+}
+
+func testAccDynamicDNSDomain(t *testing.T, kind string) string {
+	t.Helper()
+
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("TF_ACC must be set for acceptance tests")
+	}
+
+	return fmt.Sprintf(
+		"tfcpanelddns%s%s.%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
+		testAccMainDomain(t),
+	)
 }
 
 func testAccEmailAddress(t *testing.T, kind string) string {
@@ -378,6 +397,149 @@ func testAccRevokeAPIToken(t *testing.T, name string) {
 	}
 	if err := cpanelapitoken.NewClient(client).Revoke(ctx, name); err != nil {
 		t.Fatalf("revoke API token %q: %v", name, err)
+	}
+}
+
+func testAccCheckDynamicDNSExists(
+	domain string,
+	expectedDescription string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		dynamicDomain, err := cpanelddns.NewClient(client).Get(ctx, domain)
+		if err != nil {
+			return err
+		}
+		if dynamicDomain == nil {
+			return fmt.Errorf("Dynamic DNS domain %q was not found", domain)
+		}
+		if dynamicDomain.Description != expectedDescription {
+			return fmt.Errorf(
+				"Dynamic DNS domain %q description is %q; want %q",
+				domain,
+				dynamicDomain.Description,
+				expectedDescription,
+			)
+		}
+		if dynamicDomain.ID == "" {
+			return fmt.Errorf("Dynamic DNS domain %q has an empty ID", domain)
+		}
+
+		return nil
+	}
+}
+
+func testAccCheckDynamicDNSDestroyed(
+	domains ...string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		dynamicDNSClient := cpanelddns.NewClient(client)
+		for _, domain := range domains {
+			dynamicDomain, err := dynamicDNSClient.Get(ctx, domain)
+			if err != nil {
+				return err
+			}
+			if dynamicDomain != nil {
+				return fmt.Errorf(
+					"Dynamic DNS domain %q still exists",
+					domain,
+				)
+			}
+		}
+
+		return nil
+	}
+}
+
+func testAccSetDynamicDNSDescription(
+	t *testing.T,
+	domain string,
+	description string,
+) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	dynamicDNSClient := cpanelddns.NewClient(client)
+	dynamicDomain, err := dynamicDNSClient.Get(ctx, domain)
+	if err != nil {
+		t.Fatalf("read Dynamic DNS domain %q: %v", domain, err)
+	}
+	if dynamicDomain == nil {
+		t.Fatalf("Dynamic DNS domain %q was not found", domain)
+	}
+	if err := dynamicDNSClient.SetDescription(
+		ctx,
+		dynamicDomain.ID,
+		description,
+	); err != nil {
+		t.Fatalf("set Dynamic DNS domain %q description: %v", domain, err)
+	}
+}
+
+func testAccRecreateDynamicDNS(t *testing.T, domain string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	dynamicDNSClient := cpanelddns.NewClient(client)
+	dynamicDomain, err := dynamicDNSClient.Get(ctx, domain)
+	if err != nil {
+		t.Fatalf("read Dynamic DNS domain %q: %v", domain, err)
+	}
+	if dynamicDomain == nil {
+		t.Fatalf("Dynamic DNS domain %q was not found", domain)
+	}
+	if _, err := dynamicDNSClient.Recreate(ctx, dynamicDomain.ID); err != nil {
+		t.Fatalf("recreate Dynamic DNS domain %q webcall URL: %v", domain, err)
+	}
+}
+
+func testAccDeleteDynamicDNS(t *testing.T, domain string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	dynamicDNSClient := cpanelddns.NewClient(client)
+	dynamicDomain, err := dynamicDNSClient.Get(ctx, domain)
+	if err != nil {
+		t.Fatalf("read Dynamic DNS domain %q: %v", domain, err)
+	}
+	if dynamicDomain == nil {
+		return
+	}
+	if _, err := dynamicDNSClient.Delete(ctx, dynamicDomain.ID); err != nil {
+		t.Fatalf("delete Dynamic DNS domain %q: %v", domain, err)
 	}
 }
 
