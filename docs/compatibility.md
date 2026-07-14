@@ -27,9 +27,9 @@ security fixes.
 | Certified o2switch environment | 134.0 build 44 |
 
 The o2switch certification environment uses the cPanel account API over HTTPS
-on port 2083. Certification covers authentication, cron jobs, web subdomains,
-email and FTP accounts, MySQL or MariaDB databases and users, PostgreSQL
-databases and users, imports, drift detection, and cleanup.
+on port 2083. Certification covers authentication, cron jobs, addon domains,
+web subdomains, email and FTP accounts, MySQL or MariaDB databases and users,
+PostgreSQL databases and users, imports, drift detection, and cleanup.
 
 ## API policy
 
@@ -51,21 +51,24 @@ equivalents for the required cron functions. API 2 is deprecated, so each
 provider release must run the cron acceptance suite against the certified
 cPanel environment.
 
-Web-subdomain creation, document-root changes, and deletion also use cPanel API
-2 because cPanel does not provide equivalent account-level UAPI mutations.
-Reads use the domain inventory exposed by cPanel, and every release must repeat
-the subdomain acceptance suite against the certified environment.
+Addon-domain and web-subdomain creation, document-root changes, and deletion
+also use cPanel API 2 because cPanel does not provide equivalent account-level
+UAPI mutations. Reads use the domain inventory exposed by cPanel, and every
+release must repeat the domain acceptance suites against the certified
+environment.
 
 ## Concurrency
 
 The provider serializes all cPanel requests through its shared client. Users do
 not need to disable Terraform parallelism.
 
-Each HTTP request has a 30-second timeout and honors Terraform context
-cancellation. The provider does not automatically retry API calls. cPanel
-mutations are not reliably idempotent, so retrying after an interrupted
-response could apply an operation twice. Terraform instead refreshes the
-remote state before deciding what must be retried.
+Each HTTP request has a 90-second timeout and honors Terraform context
+cancellation. The certified environment can take more than 30 seconds to
+rebuild web-server and DNS configuration after a domain mutation. The provider
+does not automatically retry API calls. cPanel mutations are not reliably
+idempotent, so retrying after an interrupted response could apply an operation
+twice. Terraform instead refreshes the remote state before deciding what must
+be retried.
 
 ## Compatibility evidence
 

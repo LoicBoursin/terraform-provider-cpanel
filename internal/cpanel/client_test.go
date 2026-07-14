@@ -67,6 +67,18 @@ func TestNewClientValidatesHost(t *testing.T) {
 	}
 }
 
+func TestNewClientUsesBoundedRequestTimeout(t *testing.T) {
+	t.Parallel()
+
+	client, err := NewClient("https://cpanel.example.test:2083", "username", "token")
+	if err != nil {
+		t.Fatalf("NewClient() error: %v", err)
+	}
+	if client.HTTPClient.Timeout != 90*time.Second {
+		t.Fatalf("HTTP timeout = %v, want 90s", client.HTTPClient.Timeout)
+	}
+}
+
 func TestExecuteUAPIOperationGET(t *testing.T) {
 	t.Parallel()
 

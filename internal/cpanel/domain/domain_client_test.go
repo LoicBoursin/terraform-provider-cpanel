@@ -164,6 +164,80 @@ func TestClientDeletesFilePathWithPOST(t *testing.T) {
 	}
 }
 
+func TestClientCreatesAddonDomainWithPOST(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(
+		response http.ResponseWriter,
+		request *http.Request,
+	) {
+		if request.Method != http.MethodPost {
+			t.Errorf("method = %s, want POST", request.Method)
+		}
+		if err := request.ParseForm(); err != nil {
+			t.Fatalf("ParseForm() error: %v", err)
+		}
+		expected := map[string]string{
+			"cpanel_jsonapi_module": "AddonDomain",
+			"cpanel_jsonapi_func":   "addaddondomain",
+			"newdomain":             "terraform.example.test",
+			"subdomain":             "terraform",
+			"dir":                   "public_html/terraform-addon",
+			"ftp_is_optional":       "1",
+		}
+		for key, want := range expected {
+			if got := request.Form.Get(key); got != want {
+				t.Errorf("%s = %q, want %q", key, got, want)
+			}
+		}
+
+		_, _ = response.Write([]byte(
+			`{"cpanelresult":{"event":{"result":1},"data":[{"result":1}]}}`,
+		))
+	}))
+	defer server.Close()
+
+	client := newDomainTestClient(t, server.URL)
+	if err := client.CreateAddonDomain(
+		context.Background(),
+		"terraform.example.test",
+		"terraform",
+		"public_html/terraform-addon",
+	); err != nil {
+		t.Fatalf("CreateAddonDomain() error: %v", err)
+	}
+}
+
+func TestClientGetsExactAddonDomain(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(
+		response http.ResponseWriter,
+		request *http.Request,
+	) {
+		if request.URL.Query().Get("cpanel_jsonapi_func") != "listaddondomains" {
+			t.Errorf("function = %q", request.URL.Query().Get("cpanel_jsonapi_func"))
+		}
+
+		_, _ = response.Write([]byte(
+			`{"cpanelresult":{"event":{"result":1},"data":[{"domain":"other.example.test"},{"domain":"terraform.example.test","subdomain":"terraform","rootdomain":"main.example.test","fullsubdomain":"terraform.main.example.test","domainkey":"terraform_main.example.test","basedir":"public_html/terraform-addon"}]}}`,
+		))
+	}))
+	defer server.Close()
+
+	client := newDomainTestClient(t, server.URL)
+	addonDomain, err := client.GetAddonDomain(
+		context.Background(),
+		"terraform.example.test",
+	)
+	if err != nil {
+		t.Fatalf("GetAddonDomain() error: %v", err)
+	}
+	if addonDomain == nil || addonDomain.DomainKey != "terraform_main.example.test" {
+		t.Fatalf("addonDomain = %#v", addonDomain)
+	}
+}
+
 func newDomainTestClient(t *testing.T, host string) *Client {
 	t.Helper()
 

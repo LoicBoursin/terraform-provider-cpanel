@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	defaultRequestTimeout = 30 * time.Second
+	defaultRequestTimeout = 90 * time.Second
 	maxResponseSize       = 10 << 20
 )
 

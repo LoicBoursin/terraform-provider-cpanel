@@ -45,7 +45,7 @@ request() {
     curl \
       --silent \
       --show-error \
-      --max-time 20 \
+      --max-time 90 \
       --output "${response_file}" \
       --write-out '%{http_code}' \
       --header "${authorization}" \
@@ -74,7 +74,7 @@ cpanel_version="$(
 )"
 
 request 'execute/Features/list_features' 'feature check'
-for feature in cron ftpaccts mysql popaccts postgres subdomains; do
+for feature in addondomains cron ftpaccts mysql popaccts postgres subdomains; do
   if [[ "$(jq -r --arg feature "${feature}" '.data[$feature] // 0' "${response_file}")" != "1" ]]; then
     printf 'Required cPanel feature is disabled: %s\n' "${feature}" >&2
     exit 1
@@ -122,6 +122,16 @@ ftp_test_account_count="$(
 )"
 
 request \
+  "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=AddonDomain&cpanel_jsonapi_func=listaddondomains" \
+  'addon domain check'
+addon_domain_count="$(jq -r '.cpanelresult.data | length' "${response_file}")"
+addon_domain_test_count="$(
+  jq -r \
+    '[.cpanelresult.data[].domain | select(startswith("tfcpaneladdon"))] | length' \
+    "${response_file}"
+)"
+
+request \
   "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=SubDomain&cpanel_jsonapi_func=listsubdomains" \
   'subdomain check'
 subdomain_count="$(jq -r '.cpanelresult.data | length' "${response_file}")"
@@ -162,6 +172,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${mysql_test_user_count}" != "0"
     || "${email_test_account_count}" != "0"
     || "${ftp_test_account_count}" != "0"
+    || "${addon_domain_test_count}" != "0"
     || "${subdomain_test_count}" != "0"
     || "${domain_test_directory_count}" != "0"
     || "${cron_count}" != "0"
@@ -173,6 +184,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     printf '  MySQL test users: %s\n' "${mysql_test_user_count}" >&2
     printf '  email test accounts: %s\n' "${email_test_account_count}" >&2
     printf '  FTP test accounts: %s\n' "${ftp_test_account_count}" >&2
+    printf '  test addon domains: %s\n' "${addon_domain_test_count}" >&2
     printf '  test subdomains: %s\n' "${subdomain_test_count}" >&2
     printf '  test domain directories: %s\n' "${domain_test_directory_count}" >&2
     printf '  cron commands: %s\n' "${cron_command_count}" >&2
@@ -199,6 +211,9 @@ printf '  email accounts: %s (%s test-managed)\n' \
 printf '  FTP accounts: %s (%s test-managed)\n' \
   "${ftp_account_count}" \
   "${ftp_test_account_count}"
+printf '  addon domains: %s (%s test-managed)\n' \
+  "${addon_domain_count}" \
+  "${addon_domain_test_count}"
 printf '  subdomains: %s (%s test-managed)\n' \
   "${subdomain_count}" \
   "${subdomain_test_count}"

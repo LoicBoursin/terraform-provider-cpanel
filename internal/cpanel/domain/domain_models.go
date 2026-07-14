@@ -46,3 +46,24 @@ type Subdomain struct {
 	RelativeDir   string `json:"reldir"`
 	BaseDirectory string `json:"basedir"`
 }
+
+type AddonDomainListResponse struct {
+	CpanelResult AddonDomainListResult `json:"cpanelresult"`
+}
+
+type AddonDomainListResult struct {
+	cpanel.API2DataSourceCpanelResultModel
+	Data []AddonDomain `json:"data"`
+}
+
+type AddonDomain struct {
+	Domain            string `json:"domain"`
+	DomainKey         string `json:"domainkey"`
+	InternalSubdomain string `json:"subdomain"`
+	RootDomain        string `json:"rootdomain"`
+	FullSubdomain     string `json:"fullsubdomain"`
+	Directory         string `json:"dir"`
+	RelativeDir       string `json:"reldir"`
+	BaseDirectory     string `json:"basedir"`
+	Status            string `json:"status"`
+}

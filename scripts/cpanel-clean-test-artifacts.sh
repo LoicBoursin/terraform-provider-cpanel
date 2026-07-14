@@ -45,7 +45,7 @@ get_request() {
     curl \
       --silent \
       --show-error \
-      --max-time 20 \
+      --max-time 90 \
       --output "${response_file}" \
       --write-out '%{http_code}' \
       --header "${authorization}" \
@@ -76,7 +76,7 @@ uapi_post() {
   local curl_arguments=(
     --silent
     --show-error
-    --max-time 20
+    --max-time 90
     --request POST
     --output "${response_file}"
     --write-out '%{http_code}'
@@ -115,7 +115,7 @@ api2_post() {
   local curl_arguments=(
     --silent
     --show-error
-    --max-time 20
+    --max-time 90
     --request POST
     --output "${response_file}"
     --write-out '%{http_code}'
@@ -158,7 +158,7 @@ remove_cron_line() {
     curl \
       --silent \
       --show-error \
-      --max-time 20 \
+      --max-time 90 \
       --request POST \
       --output "${response_file}" \
       --write-out '%{http_code}' \
@@ -193,6 +193,7 @@ deleted_mysql_databases=0
 deleted_mysql_users=0
 deleted_email_accounts=0
 deleted_ftp_accounts=0
+deleted_addon_domains=0
 deleted_subdomains=0
 deleted_domain_directories=0
 deleted_cron_lines=0
@@ -308,6 +309,30 @@ while IFS= read -r domain; do
 done <<<"${test_subdomains}"
 
 get_request \
+  "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=AddonDomain&cpanel_jsonapi_func=listaddondomains" \
+  'Addon domain inventory'
+test_addon_domains="$(
+  jq -r \
+    '.cpanelresult.data[]
+      | select(.domain | startswith("tfcpaneladdon"))
+      | [.domain, .domainkey]
+      | @tsv' \
+    "${response_file}"
+)"
+while IFS=$'\t' read -r domain domain_key; do
+  if [[ -z "${domain}" || -z "${domain_key}" ]]; then
+    continue
+  fi
+  api2_post \
+    'AddonDomain' \
+    'deladdondomain' \
+    "Delete test addon domain ${domain}" \
+    "domain=${domain}" \
+    "subdomain=${domain_key}"
+  deleted_addon_domains=$((deleted_addon_domains + 1))
+done <<<"${test_addon_domains}"
+
+get_request \
   'execute/Fileman/list_files?dir=public_html&show_hidden=1&limit=1000' \
   'Test domain directory inventory'
 test_domain_directories="$(
@@ -384,6 +409,7 @@ printf '  MySQL databases deleted: %d\n' "${deleted_mysql_databases}"
 printf '  MySQL users deleted: %d\n' "${deleted_mysql_users}"
 printf '  email accounts deleted: %d\n' "${deleted_email_accounts}"
 printf '  FTP accounts deleted: %d\n' "${deleted_ftp_accounts}"
+printf '  addon domains deleted: %d\n' "${deleted_addon_domains}"
 printf '  subdomains deleted: %d\n' "${deleted_subdomains}"
 printf '  test domain directories deleted: %d\n' "${deleted_domain_directories}"
 printf '  cron lines deleted: %d\n' "${deleted_cron_lines}"

@@ -61,6 +61,9 @@ func testAccPreCheck(t *testing.T) {
 	if _, err := cpaneldomain.NewClient(client).ListSubdomains(ctx); err != nil {
 		t.Fatalf("verify Domain API access: %v", err)
 	}
+	if _, err := cpaneldomain.NewClient(client).ListAddonDomains(ctx); err != nil {
+		t.Fatalf("verify AddonDomain API access: %v", err)
+	}
 	if _, err := postgresql.NewClient(client).GetDatabases(ctx); err != nil {
 		t.Fatalf("verify PostgreSQL API access: %v", err)
 	}
@@ -160,6 +163,22 @@ func testAccDomainDocumentRoot(kind string) string {
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
 	)
+}
+
+func testAccAddonDomain(t *testing.T, kind string) (string, string) {
+	t.Helper()
+
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("TF_ACC must be set for acceptance tests")
+	}
+
+	internalSubdomain := fmt.Sprintf(
+		"tfcpaneladdon%s%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
+	)
+
+	return internalSubdomain + ".example.test", internalSubdomain
 }
 
 func testAccMainDomain(t *testing.T) string {
@@ -801,7 +820,7 @@ func testAccCheckSubdomainExists(
 	expectedDocumentRoot string,
 ) resource.TestCheckFunc {
 	return func(_ *terraform.State) error {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()
 
 		client, err := testAccClient()
@@ -831,7 +850,7 @@ func testAccCheckSubdomainExists(
 
 func testAccCheckSubdomainsDestroyed(domains ...string) resource.TestCheckFunc {
 	return func(_ *terraform.State) error {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()
 
 		client, err := testAccClient()
@@ -856,7 +875,7 @@ func testAccCheckSubdomainsDestroyed(domains ...string) resource.TestCheckFunc {
 func testAccDeleteSubdomain(t *testing.T, domain string) {
 	t.Helper()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
 	client, err := testAccClient()
@@ -866,5 +885,99 @@ func testAccDeleteSubdomain(t *testing.T, domain string) {
 
 	if err := cpaneldomain.NewClient(client).DeleteSubdomain(ctx, domain); err != nil {
 		t.Fatalf("delete subdomain %q: %v", domain, err)
+	}
+}
+
+func testAccCheckAddonDomainExists(
+	domain string,
+	expectedInternalSubdomain string,
+	expectedDocumentRoot string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		addonDomain, err := cpaneldomain.NewClient(client).GetAddonDomain(ctx, domain)
+		if err != nil {
+			return err
+		}
+		if addonDomain == nil {
+			return fmt.Errorf("addon domain %q was not found", domain)
+		}
+		if addonDomain.InternalSubdomain != expectedInternalSubdomain {
+			return fmt.Errorf(
+				"addon domain %q internal subdomain = %q, want %q",
+				domain,
+				addonDomain.InternalSubdomain,
+				expectedInternalSubdomain,
+			)
+		}
+		if addonDomain.BaseDirectory != expectedDocumentRoot {
+			return fmt.Errorf(
+				"addon domain %q document root = %q, want %q",
+				domain,
+				addonDomain.BaseDirectory,
+				expectedDocumentRoot,
+			)
+		}
+
+		return nil
+	}
+}
+
+func testAccCheckAddonDomainsDestroyed(domains ...string) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		response, err := cpaneldomain.NewClient(client).ListAddonDomains(ctx)
+		if err != nil {
+			return err
+		}
+		for _, addonDomain := range response.CpanelResult.Data {
+			if slices.Contains(domains, addonDomain.Domain) {
+				return fmt.Errorf("addon domain %q still exists", addonDomain.Domain)
+			}
+		}
+
+		return nil
+	}
+}
+
+func testAccDeleteAddonDomain(t *testing.T, domain string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+
+	domainClient := cpaneldomain.NewClient(client)
+	addonDomain, err := domainClient.GetAddonDomain(ctx, domain)
+	if err != nil {
+		t.Fatalf("read addon domain %q: %v", domain, err)
+	}
+	if addonDomain == nil {
+		return
+	}
+	if err := domainClient.DeleteAddonDomain(
+		ctx,
+		addonDomain.Domain,
+		addonDomain.DomainKey,
+	); err != nil {
+		t.Fatalf("delete addon domain %q: %v", domain, err)
 	}
 }

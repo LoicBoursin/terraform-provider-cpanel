@@ -374,6 +374,43 @@ func TestValidateDomainDocumentRoot(t *testing.T) {
 	}
 }
 
+func TestValidateAddonDomainInternalSubdomain(t *testing.T) {
+	t.Parallel()
+
+	testCases := map[string]struct {
+		name      string
+		wantError bool
+	}{
+		"valid":         {name: "terraform-addon"},
+		"uppercase":     {name: "Terraform-addon", wantError: true},
+		"leading dash":  {name: "-terraform", wantError: true},
+		"trailing dash": {name: "terraform-", wantError: true},
+		"dot":           {name: "terraform.addon", wantError: true},
+		"empty":         {name: "", wantError: true},
+	}
+
+	for name, testCase := range testCases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validateAddonDomainInternalSubdomain(testCase.name)
+			if testCase.wantError && err == nil {
+				t.Fatalf(
+					"validateAddonDomainInternalSubdomain(%q) returned no error",
+					testCase.name,
+				)
+			}
+			if !testCase.wantError && err != nil {
+				t.Fatalf(
+					"validateAddonDomainInternalSubdomain(%q) returned error: %v",
+					testCase.name,
+					err,
+				)
+			}
+		})
+	}
+}
+
 func TestCronJobModelLookupsIgnoreVariables(t *testing.T) {
 	t.Parallel()
 
@@ -658,6 +695,28 @@ func TestSubdomainDefaultsToPreservingDocumentRoot(t *testing.T) {
 
 	var response frameworkresource.SchemaResponse
 	(&subdomainResource{}).Schema(
+		context.Background(),
+		frameworkresource.SchemaRequest{},
+		&response,
+	)
+
+	attribute, ok := response.Schema.Attributes["delete_document_root"].(resourceschema.BoolAttribute)
+	if !ok {
+		t.Fatalf(
+			"delete_document_root has type %T, want schema.BoolAttribute",
+			response.Schema.Attributes["delete_document_root"],
+		)
+	}
+	if attribute.Default == nil {
+		t.Fatal("delete_document_root has no default")
+	}
+}
+
+func TestAddonDomainDefaultsToPreservingDocumentRoot(t *testing.T) {
+	t.Parallel()
+
+	var response frameworkresource.SchemaResponse
+	(&addonDomainResource{}).Schema(
 		context.Background(),
 		frameworkresource.SchemaRequest{},
 		&response,

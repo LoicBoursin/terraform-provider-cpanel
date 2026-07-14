@@ -13,6 +13,7 @@ The supported versions and API policy are documented in
 [`docs/compatibility.md`](docs/compatibility.md).
 ## Supported resources
 
+- `cpanel_addon_domain`
 - `cpanel_cron_job`
 - `cpanel_email_account`
 - `cpanel_mysql_database`
