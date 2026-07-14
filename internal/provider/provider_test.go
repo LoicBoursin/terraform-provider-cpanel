@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path"
 	"slices"
 	"strings"
 	"testing"
@@ -24,6 +25,7 @@ import (
 	cpanelapitoken "terraform-provider-cpanel/internal/cpanel/apitoken"
 	"terraform-provider-cpanel/internal/cpanel/cron"
 	cpanelddns "terraform-provider-cpanel/internal/cpanel/ddns"
+	cpaneldirectoryindex "terraform-provider-cpanel/internal/cpanel/directoryindex"
 	cpaneldns "terraform-provider-cpanel/internal/cpanel/dns"
 	cpaneldomain "terraform-provider-cpanel/internal/cpanel/domain"
 	cpanelmail "terraform-provider-cpanel/internal/cpanel/email"
@@ -70,6 +72,16 @@ func testAccPreCheck(t *testing.T) {
 	}
 	if _, err := cron.NewClient(client).GetCronJobs(ctx); err != nil {
 		t.Fatalf("verify Cron API access: %v", err)
+	}
+	directoryIndex, err := cpaneldirectoryindex.NewClient(client).Get(
+		ctx,
+		"public_html",
+	)
+	if err != nil {
+		t.Fatalf("verify Directory Indexes API access: %v", err)
+	}
+	if directoryIndex == nil {
+		t.Fatal("verify Directory Indexes API access: public_html not found")
 	}
 	if _, err := cpaneldomain.NewClient(client).ListSubdomains(ctx); err != nil {
 		t.Fatalf("verify Domain API access: %v", err)
@@ -218,6 +230,14 @@ func testAccApacheHandlerExtension(kind string) string {
 func testAccApacheHandlerName(kind string) string {
 	return fmt.Sprintf(
 		"tfcpanel-handler-%s-%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
+	)
+}
+
+func testAccDirectoryIndexDirectory(kind string) string {
+	return fmt.Sprintf(
+		"public_html/tfcpanel-index-%s-%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
 	)
@@ -994,6 +1014,219 @@ func testAccDeleteApacheHandler(t *testing.T, extension string) {
 	}
 	if err := handlerClient.Delete(ctx, extension); err != nil {
 		t.Fatalf("delete Apache handler for extension %q: %v", extension, err)
+	}
+}
+
+func testAccCreateDirectory(t *testing.T, directory string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	indexClient := cpaneldirectoryindex.NewClient(client)
+	existing, err := indexClient.Get(ctx, directory)
+	if err != nil {
+		t.Fatalf("read directory %q: %v", directory, err)
+	}
+	if existing != nil {
+		return
+	}
+
+	homeDirectory, err := indexClient.HomeDirectory(ctx)
+	if err != nil {
+		t.Fatalf("read cPanel account home directory: %v", err)
+	}
+	parentDirectory := path.Dir(directory)
+	if parentDirectory == "." {
+		parentDirectory = ""
+	}
+
+	response := struct{}{}
+	if err := client.ExecuteAPI2Operation(
+		ctx,
+		http.MethodPost,
+		cpanel.ModuleFileman,
+		"mkdir",
+		map[string]string{
+			"name":        path.Base(directory),
+			"path":        path.Join(homeDirectory, parentDirectory),
+			"permissions": "0755",
+		},
+		&response,
+	); err != nil {
+		t.Fatalf("create directory %q: %v", directory, err)
+	}
+
+	created, err := indexClient.Get(ctx, directory)
+	if err != nil {
+		t.Fatalf("verify directory %q: %v", directory, err)
+	}
+	if created == nil {
+		t.Fatalf("directory %q was not found after creation", directory)
+	}
+}
+
+func testAccDeleteDirectory(t *testing.T, directory string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	if err := testAccRemoveDirectory(ctx, client, directory); err != nil {
+		t.Fatalf("delete directory %q: %v", directory, err)
+	}
+}
+
+func testAccRemoveDirectory(
+	ctx context.Context,
+	client *cpanel.Client,
+	directory string,
+) error {
+	indexClient := cpaneldirectoryindex.NewClient(client)
+	existing, err := indexClient.Get(ctx, directory)
+	if err != nil {
+		return fmt.Errorf("read directory %q: %w", directory, err)
+	}
+	if existing == nil {
+		return nil
+	}
+
+	response := struct{}{}
+	if err := client.ExecuteAPI2Operation(
+		ctx,
+		http.MethodPost,
+		cpanel.ModuleFileman,
+		"fileop",
+		map[string]string{
+			"doubledecode": "0",
+			"op":           "unlink",
+			"sourcefiles":  directory,
+		},
+		&response,
+	); err != nil {
+		return fmt.Errorf("delete directory %q: %w", directory, err)
+	}
+
+	remaining, err := indexClient.Get(ctx, directory)
+	if err != nil {
+		return fmt.Errorf("verify directory %q deletion: %w", directory, err)
+	}
+	if remaining != nil {
+		return fmt.Errorf("directory %q still exists after deletion", directory)
+	}
+
+	return nil
+}
+
+func testAccSetDirectoryIndex(
+	t *testing.T,
+	definition cpaneldirectoryindex.Definition,
+) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	if _, err := cpaneldirectoryindex.NewClient(client).Set(
+		ctx,
+		definition.Directory,
+		definition.Type,
+	); err != nil {
+		t.Fatalf(
+			"set directory %q indexing to %q: %v",
+			definition.Directory,
+			definition.Type,
+			err,
+		)
+	}
+}
+
+func testAccCheckDirectoryIndexExists(
+	expected cpaneldirectoryindex.Definition,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+		apiIndex, err := cpaneldirectoryindex.NewClient(client).Get(
+			ctx,
+			expected.Directory,
+		)
+		if err != nil {
+			return err
+		}
+		if apiIndex == nil {
+			return fmt.Errorf(
+				"directory %q was not found",
+				expected.Directory,
+			)
+		}
+		if apiIndex.Type != expected.Type {
+			return fmt.Errorf(
+				"directory %q indexing type is %q; want %q",
+				expected.Directory,
+				apiIndex.Type,
+				expected.Type,
+			)
+		}
+
+		return nil
+	}
+}
+
+func testAccCheckDirectoryIndexesDestroyed(
+	directories ...string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+		indexClient := cpaneldirectoryindex.NewClient(client)
+		var validationErr error
+		for _, directory := range directories {
+			apiIndex, err := indexClient.Get(ctx, directory)
+			if err != nil && validationErr == nil {
+				validationErr = err
+			}
+			if apiIndex != nil &&
+				apiIndex.Type != cpaneldirectoryindex.IndexTypeInherit &&
+				validationErr == nil {
+				validationErr = fmt.Errorf(
+					"directory %q indexing type is %q after destroy; want inherit",
+					directory,
+					apiIndex.Type,
+				)
+			}
+			if err := testAccRemoveDirectory(
+				ctx,
+				client,
+				directory,
+			); err != nil && validationErr == nil {
+				validationErr = err
+			}
+		}
+
+		return validationErr
 	}
 }
 

@@ -18,9 +18,9 @@ The CI and release configuration currently pins:
 
 Acceptance tests create and delete real API tokens, cron jobs, DNS records,
 Dynamic DNS domains, web domains, HTTP redirects, custom MIME types, email
-accounts, Apache handlers, forwarders and autoresponders, FTP accounts, MySQL
-or MariaDB users and databases, PostgreSQL users and databases, and database
-grants. Use a dedicated cPanel test account.
+accounts, Apache handlers, directory indexes, forwarders and autoresponders,
+FTP accounts, MySQL or MariaDB users and databases, PostgreSQL users and
+databases, and database grants. Use a dedicated cPanel test account.
 
 The scripts load credentials from the file specified by `CPANEL_ENV_FILE`. When
 that variable is unset, they use:
@@ -73,6 +73,8 @@ that follow the test naming contract:
 - HTTP redirect source paths beginning with `/tfcpanelredirect-`;
 - custom MIME types beginning with `application/x-tfcpanel-`;
 - Apache handler extensions beginning with `.tfcpanelhandler`;
+- directory index settings on top-level `public_html` directories beginning
+  with `tfcpanel-index-`;
 - email account local parts beginning with `tfcpanel`;
 - email forwarder source local parts beginning with `tfcpanelfwd`;
 - email domain forwarder destinations beginning with `tfcpaneldomainfwd`;

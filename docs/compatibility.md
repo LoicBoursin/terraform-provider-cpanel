@@ -30,9 +30,9 @@ The o2switch certification environment uses the cPanel account API over HTTPS
 on port 2083. Certification covers authentication, full-access API tokens, cron
 jobs, DNS records, Dynamic DNS domains, addon domains, domain aliases, web
 subdomains, HTTP redirects, email accounts, forwarders and autoresponders, FTP
-accounts, custom MIME types, Apache handlers, website IP blocks, MySQL or
-MariaDB databases and users, PostgreSQL databases and users, imports, drift
-detection, and cleanup.
+accounts, directory indexes, custom MIME types, Apache handlers, website IP
+blocks, MySQL or MariaDB databases and users, PostgreSQL databases and users,
+imports, drift detection, and cleanup.
 
 ## API policy
 
@@ -87,6 +87,13 @@ Apache handler operations use UAPI `Mime::list_handlers`,
 user-defined handlers and uses the file extension as stable identity. Changing
 the handler performs a verified delete-and-create transition and restores the
 previous definition if replacement fails.
+
+Directory index operations use UAPI `DirectoryIndexes::get_indexing` and
+`DirectoryIndexes::set_indexing`. The provider resolves each normalized path
+relative to the account home through `Variables::get_user_information` and
+`Fileman::list_files`, so it can distinguish a deleted directory from an API
+failure. Removing the Terraform resource preserves the directory and restores
+its indexing mode to `inherit`.
 
 DNS record reads and mutations use UAPI `DNS::parse_zone` and
 `DNS::mass_edit_zone`. Every mutation uses the current SOA serial and is

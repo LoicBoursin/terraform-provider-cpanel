@@ -74,12 +74,24 @@ cpanel_version="$(
 )"
 
 request 'execute/Features/list_features' 'feature check'
-for feature in addondomains apitokens blockers cron dynamicdns ftpaccts handlers mime mysql parkeddomains popaccts postgres redirects subdomains zoneedit; do
+for feature in addondomains apitokens blockers cron dynamicdns ftpaccts handlers indexmanager mime mysql parkeddomains popaccts postgres redirects subdomains zoneedit; do
   if [[ "$(jq -r --arg feature "${feature}" '.data[$feature] // 0' "${response_file}")" != "1" ]]; then
     printf 'Required cPanel feature is disabled: %s\n' "${feature}" >&2
     exit 1
   fi
 done
+
+request 'execute/Variables/get_user_information' 'cPanel account home check'
+account_home="$(jq -r '.data.home' "${response_file}")"
+if [[ -z "${account_home}" || "${account_home}" != /* ]]; then
+  printf 'cPanel returned an invalid account home directory\n' >&2
+  exit 1
+fi
+
+request \
+  "execute/DirectoryIndexes/get_indexing?dir=${account_home}/public_html" \
+  'Directory Indexes check'
+public_html_index_type="$(jq -r '.data' "${response_file}")"
 
 request 'execute/Tokens/list' 'API token check'
 api_token_count="$(jq -r '.data | length' "${response_file}")"
@@ -384,6 +396,7 @@ printf '  custom MIME types: %s (%s test-managed)\n' \
 printf '  Apache handlers: %s (%s test-managed)\n' \
   "${apache_handler_count}" \
   "${apache_handler_test_count}"
+printf '  public_html directory index: %s\n' "${public_html_index_type}"
 printf '  PostgreSQL databases: %s\n' "${database_count}"
 printf '  PostgreSQL users: %s\n' "${user_count}"
 printf '  MySQL databases: %s (%s test-managed)\n' \
