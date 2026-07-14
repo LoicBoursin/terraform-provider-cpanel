@@ -30,6 +30,7 @@ import (
 	cpanelipblock "terraform-provider-cpanel/internal/cpanel/ipblock"
 	"terraform-provider-cpanel/internal/cpanel/mysql"
 	"terraform-provider-cpanel/internal/cpanel/postgresql"
+	cpanelredirect "terraform-provider-cpanel/internal/cpanel/redirect"
 )
 
 const providerConfig = ``
@@ -108,6 +109,9 @@ func testAccPreCheck(t *testing.T) {
 	if _, err := cpanelipblock.NewClient(client).ListAddresses(ctx); err != nil {
 		t.Fatalf("verify IP blocker API access: %v", err)
 	}
+	if _, err := cpanelredirect.NewClient(client).List(ctx); err != nil {
+		t.Fatalf("verify Redirects API access: %v", err)
+	}
 }
 
 func testAccClient() (*cpanel.Client, error) {
@@ -160,6 +164,22 @@ func testAccDynamicDNSDomain(t *testing.T, kind string) string {
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
 		testAccMainDomain(t),
+	)
+}
+
+func testAccRedirectSource(kind string) string {
+	return fmt.Sprintf(
+		"/tfcpanelredirect-%s-%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
+	)
+}
+
+func testAccRedirectDestination(kind string) string {
+	return fmt.Sprintf(
+		"https://example.net/tfcpanelredirect-%s-%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
 	)
 }
 
@@ -540,6 +560,138 @@ func testAccDeleteDynamicDNS(t *testing.T, domain string) {
 	}
 	if _, err := dynamicDNSClient.Delete(ctx, dynamicDomain.ID); err != nil {
 		t.Fatalf("delete Dynamic DNS domain %q: %v", domain, err)
+	}
+}
+
+func testAccCheckRedirectExists(
+	expected cpanelredirect.Definition,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		redirect, err := cpanelredirect.NewClient(client).Get(
+			ctx,
+			expected.Domain,
+			expected.Source,
+		)
+		if err != nil {
+			return err
+		}
+		if redirect == nil {
+			return fmt.Errorf(
+				"redirect for %s%s was not found",
+				expected.Domain,
+				expected.Source,
+			)
+		}
+
+		actual := cpanelredirect.Definition{
+			Domain:      redirect.Domain,
+			Source:      redirect.Source,
+			Destination: redirect.Destination,
+			Type:        redirect.Type,
+			WWWMode:     cpanelredirect.WWWModeBoth,
+			Wildcard:    redirect.Wildcard == 1,
+		}
+		if redirect.MatchWWW == 0 {
+			actual.WWWMode = cpanelredirect.WWWModeWithout
+		}
+		if actual != expected {
+			return fmt.Errorf(
+				"redirect for %s%s is %#v; want %#v",
+				expected.Domain,
+				expected.Source,
+				actual,
+				expected,
+			)
+		}
+
+		return nil
+	}
+}
+
+func testAccCheckRedirectsDestroyed(
+	domain string,
+	sources ...string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+		redirectClient := cpanelredirect.NewClient(client)
+		for _, source := range sources {
+			redirect, err := redirectClient.Get(ctx, domain, source)
+			if err != nil {
+				return err
+			}
+			if redirect != nil {
+				return fmt.Errorf(
+					"redirect for %s%s still exists",
+					domain,
+					source,
+				)
+			}
+		}
+
+		return nil
+	}
+}
+
+func testAccReplaceRedirect(
+	t *testing.T,
+	definition cpanelredirect.Definition,
+) {
+	t.Helper()
+
+	testAccDeleteRedirect(t, definition.Domain, definition.Source)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	if err := cpanelredirect.NewClient(client).Add(ctx, definition); err != nil {
+		t.Fatalf(
+			"create redirect for %s%s: %v",
+			definition.Domain,
+			definition.Source,
+			err,
+		)
+	}
+}
+
+func testAccDeleteRedirect(t *testing.T, domain string, source string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	redirectClient := cpanelredirect.NewClient(client)
+	redirect, err := redirectClient.Get(ctx, domain, source)
+	if err != nil {
+		t.Fatalf("read redirect for %s%s: %v", domain, source, err)
+	}
+	if redirect == nil {
+		return
+	}
+	if err := redirectClient.Delete(ctx, domain, source); err != nil {
+		t.Fatalf("delete redirect for %s%s: %v", domain, source, err)
 	}
 }
 

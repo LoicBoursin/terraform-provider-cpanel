@@ -29,9 +29,9 @@ security fixes.
 The o2switch certification environment uses the cPanel account API over HTTPS
 on port 2083. Certification covers authentication, full-access API tokens, cron
 jobs, DNS records, Dynamic DNS domains, addon domains, domain aliases, web
-subdomains, email accounts, forwarders and autoresponders, FTP accounts,
-website IP blocks, MySQL or MariaDB databases and users, PostgreSQL databases
-and users, imports, drift detection, and cleanup.
+subdomains, HTTP redirects, email accounts, forwarders and autoresponders, FTP
+accounts, website IP blocks, MySQL or MariaDB databases and users, PostgreSQL
+databases and users, imports, drift detection, and cleanup.
 
 ## API policy
 
@@ -59,6 +59,19 @@ recoverable from cPanel after creation and import. Recreating a webcall URL
 outside Terraform is observed as computed-state drift on the next refresh.
 Deleting the Dynamic DNS resource also removes the DNS record that cPanel
 created for it.
+
+HTTP redirect operations use UAPI `Mime::list_redirects`,
+`Mime::add_redirect`, and `Mime::delete_redirect`. A redirect is identified by
+its account domain and absolute source path. Changing its destination, status
+type, www matching mode, or wildcard behavior performs a verified
+delete-and-create transition and attempts to restore the previous definition
+if replacement fails.
+
+cPanel reports the same `matchwww` value for rules that match both www and
+non-www requests and rules that match www only. The provider therefore exposes
+only the stable `both` and `without` modes and deliberately does not advertise
+the unreadable www-only mode. Redirects that use that mode outside Terraform
+must be changed to a supported mode before import.
 
 DNS record reads and mutations use UAPI `DNS::parse_zone` and
 `DNS::mass_edit_zone`. Every mutation uses the current SOA serial and is

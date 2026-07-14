@@ -21,6 +21,7 @@ import (
 	"terraform-provider-cpanel/internal/cpanel/ipblock"
 	"terraform-provider-cpanel/internal/cpanel/mysql"
 	"terraform-provider-cpanel/internal/cpanel/postgresql"
+	cpanelredirect "terraform-provider-cpanel/internal/cpanel/redirect"
 )
 
 // Ensure the implementation satisfies the expected interfaces.
@@ -54,8 +55,8 @@ func (p *cpanelProvider) Metadata(_ context.Context, _ provider.MetadataRequest,
 // Schema defines the provider-level schema for configuration data.
 func (p *cpanelProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description:         "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, and MySQL, MariaDB, and PostgreSQL users and databases.",
-		MarkdownDescription: "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		Description:         "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, HTTP redirects, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		MarkdownDescription: "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, HTTP redirects, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, and MySQL, MariaDB, and PostgreSQL users and databases.",
 		Attributes: map[string]schema.Attribute{
 			"username": schema.StringAttribute{
 				Optional:            true,
@@ -203,6 +204,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	ipBlockClient := ipblock.NewClient(client)
 	mySQLClient := mysql.NewClient(client)
 	postgreSQLClient := postgresql.NewClient(client)
+	redirectClient := cpanelredirect.NewClient(client)
 
 	// Make the module clients available during DataSource and Resource
 	// type Configure methods.
@@ -217,6 +219,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		"ipblock":    ipBlockClient,
 		"mysql":      mySQLClient,
 		"postgresql": postgreSQLClient,
+		"redirect":   redirectClient,
 	}
 	resp.ResourceData = map[string]interface{}{
 		"apitoken":   apiTokenClient,
@@ -229,6 +232,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		"ipblock":    ipBlockClient,
 		"mysql":      mySQLClient,
 		"postgresql": postgreSQLClient,
+		"redirect":   redirectClient,
 	}
 
 	tflog.Info(ctx, "Configured module clients", map[string]any{"success": true})
@@ -253,6 +257,7 @@ func (p *cpanelProvider) DataSources(_ context.Context) []func() datasource.Data
 		NewMySQLUserDataSource,
 		NewPostgreSQLDatabaseDataSource,
 		NewPostgreSQLUserDataSource,
+		NewRedirectDataSource,
 		NewSubdomainDataSource,
 	}
 }
@@ -276,6 +281,7 @@ func (p *cpanelProvider) Resources(_ context.Context) []func() resource.Resource
 		NewMySQLUserResource,
 		NewPostgreSQLDatabaseResource,
 		NewPostgreSQLUserResource,
+		NewRedirectResource,
 		NewSubdomainResource,
 	}
 }

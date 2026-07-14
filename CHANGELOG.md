@@ -22,6 +22,9 @@
 - Dynamic DNS resource and data source with description updates, sensitive
   webcall metadata, import, replacement, drift recovery, and cPanel 134
   acceptance coverage.
+- HTTP redirect resource and data source with permanent or temporary status,
+  stable www matching modes, wildcard behavior, import, drift recovery, and
+  cPanel 134 acceptance coverage.
 - Email account resource and data source with password and quota updates,
   import, replacement, drift recovery, and cPanel 134 acceptance coverage.
 - MySQL and MariaDB user and database resources, matching data sources, import,

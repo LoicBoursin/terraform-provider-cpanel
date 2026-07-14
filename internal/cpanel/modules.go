@@ -12,6 +12,7 @@ const (
 	ModuleFileman     = "Fileman"
 	ModuleFtp         = "Ftp"
 	ModuleMysql       = "Mysql"
+	ModuleMime        = "Mime"
 	ModulePark        = "Park"
 	ModulePostgresql  = "Postgresql"
 	ModuleSubDomain   = "SubDomain"

@@ -189,6 +189,7 @@ remove_cron_line() {
 test_prefix="${CPANEL_USERNAME}_tf"
 deleted_api_tokens=0
 deleted_dynamic_dns_domains=0
+deleted_redirects=0
 deleted_databases=0
 deleted_users=0
 deleted_mysql_databases=0
@@ -235,6 +236,27 @@ done < <(
     '.data[]
       | select(.domain | startswith("tfcpanelddns"))
       | [.domain, .id]
+      | @tsv' \
+    "${response_file}"
+)
+
+get_request 'execute/Mime/list_redirects' 'HTTP redirect inventory'
+while IFS=$'\t' read -r domain source; do
+  if [[ -z "${domain}" || -z "${source}" ]]; then
+    continue
+  fi
+  uapi_post \
+    'Mime' \
+    'delete_redirect' \
+    "Delete test HTTP redirect ${domain}${source}" \
+    "domain=${domain}" \
+    "src=${source}"
+  deleted_redirects=$((deleted_redirects + 1))
+done < <(
+  jq -r \
+    '.data[]
+      | select(.source | startswith("/tfcpanelredirect-"))
+      | [.domain, .source]
       | @tsv' \
     "${response_file}"
 )
@@ -625,6 +647,7 @@ printf 'cPanel test cleanup passed\n'
 printf '  API tokens revoked: %d\n' "${deleted_api_tokens}"
 printf '  Dynamic DNS domains deleted: %d\n' \
   "${deleted_dynamic_dns_domains}"
+printf '  HTTP redirects deleted: %d\n' "${deleted_redirects}"
 printf '  PostgreSQL databases deleted: %d\n' "${deleted_databases}"
 printf '  PostgreSQL users deleted: %d\n' "${deleted_users}"
 printf '  MySQL databases deleted: %d\n' "${deleted_mysql_databases}"
