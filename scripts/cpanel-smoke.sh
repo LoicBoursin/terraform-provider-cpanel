@@ -74,7 +74,7 @@ cpanel_version="$(
 )"
 
 request 'execute/Features/list_features' 'feature check'
-for feature in addondomains apitokens blockers cron dynamicdns ftpaccts handlers indexmanager mime mysql parkeddomains popaccts postgres redirects subdomains version_control webprotect zoneedit; do
+for feature in addondomains apitokens blockers cron dynamicdns ftpaccts handlers indexmanager mime modsecurity mysql parkeddomains popaccts postgres redirects subdomains version_control webprotect zoneedit; do
   if [[ "$(jq -r --arg feature "${feature}" '.data[$feature] // 0' "${response_file}")" != "1" ]]; then
     printf 'Required cPanel feature is disabled: %s\n' "${feature}" >&2
     exit 1
@@ -334,6 +334,20 @@ subdomain_test_count="$(
     "${response_file}"
 )"
 
+request 'execute/ModSecurity/list_domains' 'ModSecurity domain check'
+modsecurity_domain_count="$(jq -r '.data | length' "${response_file}")"
+modsecurity_disabled_count="$(
+  jq -r '[.data[] | select(.enabled == 0)] | length' "${response_file}"
+)"
+modsecurity_test_disabled_count="$(
+  jq -r \
+    '[.data[]
+      | select(.enabled == 0)
+      | .domain
+      | select(startswith("tfcpanelsubmodsecurity"))] | length' \
+    "${response_file}"
+)"
+
 request \
   'execute/Fileman/list_files?dir=public_html&show_hidden=1&limit=1000' \
   'test domain directory check'
@@ -443,6 +457,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${addon_domain_test_count}" != "0"
     || "${domain_alias_test_count}" != "0"
     || "${subdomain_test_count}" != "0"
+    || "${modsecurity_test_disabled_count}" != "0"
     || "${domain_test_directory_count}" != "0"
     || "${git_repository_test_directory_count}" != "0"
     || "${git_repository_test_trash_count}" != "0"
@@ -477,6 +492,8 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     printf '  test addon domains: %s\n' "${addon_domain_test_count}" >&2
     printf '  test domain aliases: %s\n' "${domain_alias_test_count}" >&2
     printf '  test subdomains: %s\n' "${subdomain_test_count}" >&2
+    printf '  disabled test ModSecurity domains: %s\n' \
+      "${modsecurity_test_disabled_count}" >&2
     printf '  test domain directories: %s\n' "${domain_test_directory_count}" >&2
     printf '  test Git repository directories: %s\n' \
       "${git_repository_test_directory_count}" >&2
@@ -555,6 +572,10 @@ printf '  domain aliases: %s (%s test-managed)\n' \
 printf '  subdomains: %s (%s test-managed)\n' \
   "${subdomain_count}" \
   "${subdomain_test_count}"
+printf '  ModSecurity domains: %s (%s disabled, %s test-disabled)\n' \
+  "${modsecurity_domain_count}" \
+  "${modsecurity_disabled_count}" \
+  "${modsecurity_test_disabled_count}"
 printf '  test domain directories: %s\n' "${domain_test_directory_count}"
 printf '  test Git repository directories: %s\n' \
   "${git_repository_test_directory_count}"

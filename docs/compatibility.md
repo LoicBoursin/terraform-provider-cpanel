@@ -33,7 +33,7 @@ subdomains, HTTP redirects, email accounts, forwarders and autoresponders, FTP
 accounts, directory indexes and privacy, custom MIME types, Apache handlers,
 Git repositories, website IP blocks, MySQL or MariaDB databases and users,
 remote MySQL hosts, PostgreSQL databases and users, imports, drift detection,
-and cleanup.
+per-domain ModSecurity status, and cleanup.
 
 ## API policy
 
@@ -185,6 +185,14 @@ changes replace the authorization. This avoids the unreliable in-place note
 update observed on the certified cPanel 134 environment. IPv4 addresses, IPv4
 CIDR prefixes, cPanel percent-wildcard IPv4 patterns, and hostnames are
 normalized before comparison.
+
+Per-domain ModSecurity reads and mutations use UAPI
+`ModSecurity::list_domains`, `ModSecurity::enable_domains`, and
+`ModSecurity::disable_domains`. The provider deliberately does not call the
+account-wide enable or disable functions. cPanel can report related domains
+that a change also affects; Terraform exposes both those dependencies and the
+complete affected-domain set. Removing the resource restores the enabled
+state without deleting the domain.
 
 Cron operations currently use cPanel API 2 because cPanel does not provide UAPI
 equivalents for the required cron functions. API 2 is deprecated, so each

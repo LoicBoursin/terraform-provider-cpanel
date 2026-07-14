@@ -62,7 +62,7 @@ The acceptance entry point performs the smoke test first. It refuses to run
 when any credential is missing or when the server does not expose API Tokens,
 Cron, DNS Zone Editor, Dynamic DNS, domains, Redirects, MIME Types, email and
 FTP accounts, Directory Privacy, Git Version Control, MySQL or MariaDB, and
-PostgreSQL.
+PostgreSQL, plus ModSecurity.
 
 Before and after the suite, the acceptance entry point removes only resources
 that follow the test naming contract:
@@ -98,6 +98,8 @@ that follow the test naming contract:
 - addon domains beginning with `tfcpaneladdon`;
 - domain aliases beginning with `tfcpanelalias`;
 - web subdomains beginning with `tfcpanelsub`;
+- disabled ModSecurity domains beginning with
+  `tfcpanelsubmodsecurity`; cleanup re-enables them before subdomain removal;
 - top-level test directories in `public_html` beginning with `tfcpanel-`;
 - cron commands containing `# terraform-provider-cpanel-`;
 - the empty `MAILTO` and default `SHELL=/bin/bash` lines that cPanel creates

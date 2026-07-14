@@ -47,6 +47,9 @@
 - Remote MySQL host resource and data source with IPv4, CIDR, wildcard, and
   hostname identities, optional notes, import, drift recovery, isolated
   cleanup, and cPanel 134 acceptance coverage.
+- ModSecurity domain resource and data source with dependency metadata,
+  in-place enable or disable updates, import, drift recovery, safe reset on
+  removal, and cPanel 134 acceptance coverage.
 - Import support for cron jobs by cPanel line key.
 - Stable drift and remote-deletion handling for every resource.
 - cPanel 134 acceptance coverage for CRUD, import, drift, recreation, and

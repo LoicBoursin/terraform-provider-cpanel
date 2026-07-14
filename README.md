@@ -2,10 +2,10 @@
 
 Terraform provider for managing account-level API tokens, cron jobs, DNS
 records, Dynamic DNS domains, web domains, HTTP redirects, email accounts,
-directory indexes and privacy, Git repositories, custom MIME types, Apache
-handlers, forwarders, autoresponders, FTP accounts, and MySQL, MariaDB, and
-PostgreSQL users and databases, remote MySQL hosts, plus website IP blocks,
-through the cPanel API.
+ModSecurity settings, directory indexes and privacy, Git repositories, custom
+MIME types, Apache handlers, forwarders, autoresponders, FTP accounts, and
+MySQL, MariaDB, and PostgreSQL users and databases, remote MySQL hosts, plus
+website IP blocks, through the cPanel API.
 
 ## Status
 
@@ -34,6 +34,7 @@ The supported versions and API policy are documented in
 - `cpanel_git_repository`
 - `cpanel_ip_block`
 - `cpanel_mime_type`
+- `cpanel_modsecurity_domain`
 - `cpanel_mysql_database`
 - `cpanel_mysql_remote_host`
 - `cpanel_mysql_user`
@@ -50,9 +51,9 @@ Matching data sources are available for each resource family.
 - Go `1.26.x` for development
 - cPanel `134.x` over HTTPS with API Tokens, Cron, DNS Zone Editor, Dynamic
   DNS, domains, Redirects, Index Manager, Directory Privacy, MIME Types,
-  Apache Handlers, Git Version Control, email accounts, forwarders and
-  autoresponders, FTP accounts, MySQL or MariaDB with remote-host access, and
-  PostgreSQL enabled, plus the IP Blocker feature
+  Apache Handlers, ModSecurity, Git Version Control, email accounts, forwarders
+  and autoresponders, FTP accounts, MySQL or MariaDB with remote-host access,
+  and PostgreSQL enabled, plus the IP Blocker feature
 
 ## Configuration
 

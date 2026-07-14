@@ -16,6 +16,7 @@ const (
 	ModuleMysql            = "Mysql"
 	ModuleMysqlFE          = "MysqlFE"
 	ModuleMime             = "Mime"
+	ModuleModSecurity      = "ModSecurity"
 	ModulePark             = "Park"
 	ModulePostgresql       = "Postgresql"
 	ModuleSubDomain        = "SubDomain"

@@ -255,6 +255,7 @@ deleted_ip_blocks=0
 deleted_dns_records=0
 deleted_addon_domains=0
 deleted_domain_aliases=0
+enabled_modsecurity_domains=0
 deleted_subdomains=0
 deleted_domain_directories=0
 deleted_directory_privacy_password_directories=0
@@ -668,6 +669,39 @@ done < <(
 )
 
 get_request \
+  'execute/ModSecurity/list_domains' \
+  'ModSecurity domain inventory'
+while IFS= read -r domain; do
+  if [[ -z "${domain}" ]]; then
+    continue
+  fi
+  uapi_post \
+    'ModSecurity' \
+    'enable_domains' \
+    "Enable test ModSecurity domain ${domain}" \
+    "domains=${domain}"
+  if ! jq -e --arg domain "${domain}" \
+    '(.data | type) == "array"
+      and (.data | length) > 0
+      and all(.data[]; (.exception // "") == "" and .enabled == 1)
+      and any(.data[]; .domain == $domain)' \
+    "${response_file}" >/dev/null; then
+    printf 'Enable test ModSecurity domain %s failed: %s\n' \
+      "${domain}" \
+      "$(jq -c '.data' "${response_file}")" >&2
+    exit 1
+  fi
+  enabled_modsecurity_domains=$((enabled_modsecurity_domains + 1))
+done < <(
+  jq -r \
+    '.data[]
+      | select(.enabled == 0)
+      | .domain
+      | select(startswith("tfcpanelsubmodsecurity"))' \
+    "${response_file}"
+)
+
+get_request \
   "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=SubDomain&cpanel_jsonapi_func=listsubdomains" \
   'Subdomain inventory'
 test_subdomains="$(
@@ -902,6 +936,8 @@ printf '  IP blocks deleted: %d\n' "${deleted_ip_blocks}"
 printf '  DNS records deleted: %d\n' "${deleted_dns_records}"
 printf '  addon domains deleted: %d\n' "${deleted_addon_domains}"
 printf '  domain aliases deleted: %d\n' "${deleted_domain_aliases}"
+printf '  test ModSecurity domains enabled: %d\n' \
+  "${enabled_modsecurity_domains}"
 printf '  subdomains deleted: %d\n' "${deleted_subdomains}"
 printf '  test domain directories deleted: %d\n' "${deleted_domain_directories}"
 printf '  Directory Privacy test password directories deleted: %d\n' \

@@ -23,6 +23,7 @@ import (
 	"terraform-provider-cpanel/internal/cpanel/ftp"
 	"terraform-provider-cpanel/internal/cpanel/ipblock"
 	"terraform-provider-cpanel/internal/cpanel/mimetype"
+	"terraform-provider-cpanel/internal/cpanel/modsecurity"
 	"terraform-provider-cpanel/internal/cpanel/mysql"
 	"terraform-provider-cpanel/internal/cpanel/postgresql"
 	cpanelredirect "terraform-provider-cpanel/internal/cpanel/redirect"
@@ -60,8 +61,8 @@ func (p *cpanelProvider) Metadata(_ context.Context, _ provider.MetadataRequest,
 // Schema defines the provider-level schema for configuration data.
 func (p *cpanelProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description:         "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
-		MarkdownDescription: "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		Description:         "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, ModSecurity settings, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		MarkdownDescription: "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, ModSecurity settings, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
 		Attributes: map[string]schema.Attribute{
 			"username": schema.StringAttribute{
 				Optional:            true,
@@ -211,6 +212,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	ftpClient := ftp.NewClient(client)
 	ipBlockClient := ipblock.NewClient(client)
 	mimeTypeClient := mimetype.NewClient(client)
+	modSecurityClient := modsecurity.NewClient(client)
 	mySQLClient := mysql.NewClient(client)
 	postgreSQLClient := postgresql.NewClient(client)
 	redirectClient := cpanelredirect.NewClient(client)
@@ -231,6 +233,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		"ftp":              ftpClient,
 		"ipblock":          ipBlockClient,
 		"mimetype":         mimeTypeClient,
+		"modsecurity":      modSecurityClient,
 		"mysql":            mySQLClient,
 		"postgresql":       postgreSQLClient,
 		"redirect":         redirectClient,
@@ -249,6 +252,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		"ftp":              ftpClient,
 		"ipblock":          ipBlockClient,
 		"mimetype":         mimeTypeClient,
+		"modsecurity":      modSecurityClient,
 		"mysql":            mySQLClient,
 		"postgresql":       postgreSQLClient,
 		"redirect":         redirectClient,
@@ -279,6 +283,7 @@ func (p *cpanelProvider) DataSources(_ context.Context) []func() datasource.Data
 		NewGitRepositoryDataSource,
 		NewIPBlockDataSource,
 		NewMIMETypeDataSource,
+		NewModSecurityDomainDataSource,
 		NewMySQLDatabaseDataSource,
 		NewMySQLRemoteHostDataSource,
 		NewMySQLUserDataSource,
@@ -310,6 +315,7 @@ func (p *cpanelProvider) Resources(_ context.Context) []func() resource.Resource
 		NewGitRepositoryResource,
 		NewIPBlockResource,
 		NewMIMETypeResource,
+		NewModSecurityDomainResource,
 		NewMySQLDatabaseResource,
 		NewMySQLRemoteHostResource,
 		NewMySQLUserResource,
