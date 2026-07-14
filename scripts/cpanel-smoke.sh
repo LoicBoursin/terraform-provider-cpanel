@@ -117,6 +117,8 @@ request 'execute/Email/list_mail_domains' 'Email forwarder domain inventory'
 mail_domains="$(jq -r '.data[].domain' "${response_file}")"
 email_forwarder_count=0
 email_test_forwarder_count=0
+email_auto_responder_count=0
+email_test_auto_responder_count=0
 while IFS= read -r domain; do
   if [[ -z "${domain}" ]]; then
     continue
@@ -133,6 +135,18 @@ while IFS= read -r domain; do
   )"
   email_forwarder_count=$((email_forwarder_count + domain_forwarder_count))
   email_test_forwarder_count=$((email_test_forwarder_count + domain_test_forwarder_count))
+
+  request \
+    "execute/Email/list_auto_responders?domain=${domain}" \
+    "Email autoresponder check for ${domain}"
+  domain_auto_responder_count="$(jq -r '.data | length' "${response_file}")"
+  domain_test_auto_responder_count="$(
+    jq -r \
+      '[.data[].email | select(startswith("tfcpanelauto"))] | length' \
+      "${response_file}"
+  )"
+  email_auto_responder_count=$((email_auto_responder_count + domain_auto_responder_count))
+  email_test_auto_responder_count=$((email_test_auto_responder_count + domain_test_auto_responder_count))
 done <<<"${mail_domains}"
 
 request 'execute/Email/list_domain_forwarders' 'Email domain forwarder check'
@@ -246,6 +260,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${email_test_account_count}" != "0"
     || "${email_test_forwarder_count}" != "0"
     || "${email_test_domain_forwarder_count}" != "0"
+    || "${email_test_auto_responder_count}" != "0"
     || "${ftp_test_account_count}" != "0"
     || "${dns_test_record_count}" != "0"
     || "${addon_domain_test_count}" != "0"
@@ -263,6 +278,8 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     printf '  test email forwarders: %s\n' "${email_test_forwarder_count}" >&2
     printf '  test email domain forwarders: %s\n' \
       "${email_test_domain_forwarder_count}" >&2
+    printf '  test email autoresponders: %s\n' \
+      "${email_test_auto_responder_count}" >&2
     printf '  FTP test accounts: %s\n' "${ftp_test_account_count}" >&2
     printf '  test DNS records: %s\n' "${dns_test_record_count}" >&2
     printf '  test addon domains: %s\n' "${addon_domain_test_count}" >&2
@@ -296,6 +313,9 @@ printf '  email forwarders: %s (%s test-managed)\n' \
 printf '  email domain forwarders: %s (%s test-managed)\n' \
   "${email_domain_forwarder_count}" \
   "${email_test_domain_forwarder_count}"
+printf '  email autoresponders: %s (%s test-managed)\n' \
+  "${email_auto_responder_count}" \
+  "${email_test_auto_responder_count}"
 printf '  FTP accounts: %s (%s test-managed)\n' \
   "${ftp_account_count}" \
   "${ftp_test_account_count}"

@@ -1,8 +1,8 @@
 # Terraform Provider cPanel
 
 Terraform provider for managing account-level cron jobs, DNS records, domains,
-email accounts and forwarders, FTP accounts, and MySQL, MariaDB, and PostgreSQL
-users and databases through the cPanel API.
+email accounts, forwarders, and autoresponders, FTP accounts, and MySQL,
+MariaDB, and PostgreSQL users and databases through the cPanel API.
 
 ## Status
 
@@ -18,6 +18,7 @@ The supported versions and API policy are documented in
 - `cpanel_dns_record`
 - `cpanel_domain_alias`
 - `cpanel_email_account`
+- `cpanel_email_auto_responder`
 - `cpanel_email_domain_forwarder`
 - `cpanel_email_forwarder`
 - `cpanel_ftp_account`
@@ -33,8 +34,9 @@ Matching data sources are available for each resource family.
 
 - Terraform CLI `1.14.x` or `1.15.x`
 - Go `1.26.x` for development
-- cPanel `134.x` over HTTPS with Cron, DNS Zone Editor, domains, email accounts
-  and forwarders, FTP accounts, MySQL or MariaDB, and PostgreSQL enabled
+- cPanel `134.x` over HTTPS with Cron, DNS Zone Editor, domains, email accounts,
+  forwarders and autoresponders, FTP accounts, MySQL or MariaDB, and PostgreSQL
+  enabled
 
 ## Configuration
 

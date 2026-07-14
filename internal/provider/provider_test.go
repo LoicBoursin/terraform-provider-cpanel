@@ -81,6 +81,9 @@ func testAccPreCheck(t *testing.T) {
 	if _, err := cpanelmail.NewClient(client).ListDomainForwarders(ctx); err != nil {
 		t.Fatalf("verify email domain forwarder API access: %v", err)
 	}
+	if _, err := cpanelmail.NewClient(client).ListAutoResponders(ctx, mainDomain); err != nil {
+		t.Fatalf("verify email autoresponder API access: %v", err)
+	}
 	if _, err := postgresql.NewClient(client).GetDatabases(ctx); err != nil {
 		t.Fatalf("verify PostgreSQL API access: %v", err)
 	}
@@ -164,6 +167,21 @@ func testAccEmailDomainForwarderDestination(kind string) string {
 		"tfcpaneldomainfwd%s%s.example.net",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
+	)
+}
+
+func testAccEmailAutoResponderAddress(t *testing.T, kind string) string {
+	t.Helper()
+
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("TF_ACC must be set for acceptance tests")
+	}
+
+	return fmt.Sprintf(
+		"tfcpanelauto%s%s@%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
+		testAccMainDomain(t),
 	)
 }
 
@@ -1009,6 +1027,98 @@ func testAccDeleteEmailDomainForwarder(t *testing.T, domain string) {
 	}
 	if err := cpanelmail.NewClient(client).DeleteDomainForwarder(ctx, domain); err != nil {
 		t.Fatalf("delete email domain forwarder for %q: %v", domain, err)
+	}
+}
+
+func testAccCheckEmailAutoResponderExists(
+	expected cpanelmail.AutoResponder,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		_, domain, err := splitEmailAccountAddress(expected.Email)
+		if err != nil {
+			return err
+		}
+		autoResponder, err := cpanelmail.NewClient(client).GetAutoResponder(
+			ctx,
+			expected.Email,
+			domain,
+		)
+		if err != nil {
+			return err
+		}
+		if autoResponder == nil {
+			return fmt.Errorf(
+				"email autoresponder for %q was not found",
+				expected.Email,
+			)
+		}
+		if !autoRespondersEqual(*autoResponder, expected) {
+			return fmt.Errorf(
+				"email autoresponder for %q does not match %#v: %#v",
+				expected.Email,
+				expected,
+				*autoResponder,
+			)
+		}
+
+		return nil
+	}
+}
+
+func testAccCheckEmailAutoRespondersDestroyed(
+	addresses ...string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		emailClient := cpanelmail.NewClient(client)
+		for _, address := range addresses {
+			_, domain, err := splitEmailAccountAddress(address)
+			if err != nil {
+				return err
+			}
+			autoResponder, err := emailClient.GetAutoResponder(ctx, address, domain)
+			if err != nil {
+				return err
+			}
+			if autoResponder != nil {
+				return fmt.Errorf(
+					"email autoresponder for %q still exists",
+					address,
+				)
+			}
+		}
+
+		return nil
+	}
+}
+
+func testAccDeleteEmailAutoResponder(t *testing.T, address string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	if err := cpanelmail.NewClient(client).DeleteAutoResponder(ctx, address); err != nil {
+		t.Fatalf("delete email autoresponder for %q: %v", address, err)
 	}
 }
 

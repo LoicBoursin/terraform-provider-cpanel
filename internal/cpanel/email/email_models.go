@@ -53,6 +53,49 @@ type DomainForwarder struct {
 	Destination string `json:"forward"`
 }
 
+type AutoResponderListResponse struct {
+	cpanel.UAPIDataSourceModel
+	Data []AutoResponderSummary `json:"data"`
+}
+
+type AutoResponderSummary struct {
+	Email   string `json:"email"`
+	Subject string `json:"subject"`
+}
+
+type AutoResponderResponse struct {
+	cpanel.UAPIDataSourceModel
+	Data AutoResponder `json:"data"`
+}
+
+type AutoResponder struct {
+	Email    string
+	From     string `json:"from"`
+	Subject  string `json:"subject"`
+	Body     string `json:"body"`
+	Charset  string `json:"charset"`
+	Interval int64  `json:"interval"`
+	IsHTML   int64  `json:"is_html"`
+	Start    *int64 `json:"start"`
+	Stop     *int64 `json:"stop"`
+}
+
+func (a AutoResponder) StartUnix() int64 {
+	if a.Start == nil {
+		return 0
+	}
+
+	return *a.Start
+}
+
+func (a AutoResponder) StopUnix() int64 {
+	if a.Stop == nil {
+		return 0
+	}
+
+	return *a.Stop
+}
+
 func (a Account) QuotaMiB() (int64, error) {
 	bytesValue, err := parseIntegerJSON(a.DiskQuotaRaw)
 	if err != nil {

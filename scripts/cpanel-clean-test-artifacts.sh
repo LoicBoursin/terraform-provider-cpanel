@@ -194,6 +194,7 @@ deleted_mysql_users=0
 deleted_email_accounts=0
 deleted_email_forwarders=0
 deleted_email_domain_forwarders=0
+deleted_email_auto_responders=0
 deleted_ftp_accounts=0
 deleted_dns_records=0
 deleted_addon_domains=0
@@ -298,6 +299,31 @@ while IFS= read -r domain; do
         | select(.dest | startswith("tfcpanelfwd"))
         | [.dest, .forward]
         | @tsv' \
+      "${response_file}"
+  )
+done <<<"${mail_domains}"
+
+while IFS= read -r domain; do
+  if [[ -z "${domain}" ]]; then
+    continue
+  fi
+
+  get_request \
+    "execute/Email/list_auto_responders?domain=${domain}" \
+    "Email autoresponder inventory for ${domain}"
+  while IFS= read -r address; do
+    if [[ -z "${address}" ]]; then
+      continue
+    fi
+    uapi_post \
+      'Email' \
+      'delete_auto_responder' \
+      "Delete test email autoresponder ${address}" \
+      "email=${address}"
+    deleted_email_auto_responders=$((deleted_email_auto_responders + 1))
+  done < <(
+    jq -r \
+      '.data[].email | select(startswith("tfcpanelauto"))' \
       "${response_file}"
   )
 done <<<"${mail_domains}"
@@ -539,6 +565,8 @@ printf '  email accounts deleted: %d\n' "${deleted_email_accounts}"
 printf '  email forwarders deleted: %d\n' "${deleted_email_forwarders}"
 printf '  email domain forwarders deleted: %d\n' \
   "${deleted_email_domain_forwarders}"
+printf '  email autoresponders deleted: %d\n' \
+  "${deleted_email_auto_responders}"
 printf '  FTP accounts deleted: %d\n' "${deleted_ftp_accounts}"
 printf '  DNS records deleted: %d\n' "${deleted_dns_records}"
 printf '  addon domains deleted: %d\n' "${deleted_addon_domains}"
