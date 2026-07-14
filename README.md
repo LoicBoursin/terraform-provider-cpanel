@@ -1,8 +1,8 @@
 # Terraform Provider cPanel
 
-Terraform provider for managing account-level cron jobs, domains, email and FTP
-accounts, and MySQL, MariaDB, and PostgreSQL users and databases through the
-cPanel API.
+Terraform provider for managing account-level cron jobs, DNS records, domains,
+email and FTP accounts, and MySQL, MariaDB, and PostgreSQL users and databases
+through the cPanel API.
 
 ## Status
 
@@ -15,6 +15,7 @@ The supported versions and API policy are documented in
 
 - `cpanel_addon_domain`
 - `cpanel_cron_job`
+- `cpanel_dns_record`
 - `cpanel_domain_alias`
 - `cpanel_email_account`
 - `cpanel_ftp_account`
@@ -30,8 +31,8 @@ Matching data sources are available for each resource family.
 
 - Terraform CLI `1.14.x` or `1.15.x`
 - Go `1.26.x` for development
-- cPanel `134.x` over HTTPS with Cron, domains, email and FTP accounts, MySQL or
-  MariaDB, and PostgreSQL enabled
+- cPanel `134.x` over HTTPS with Cron, DNS Zone Editor, domains, email and FTP
+  accounts, MySQL or MariaDB, and PostgreSQL enabled
 
 ## Configuration
 

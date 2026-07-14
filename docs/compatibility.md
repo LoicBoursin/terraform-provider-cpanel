@@ -27,15 +27,25 @@ security fixes.
 | Certified o2switch environment | 134.0 build 44 |
 
 The o2switch certification environment uses the cPanel account API over HTTPS
-on port 2083. Certification covers authentication, cron jobs, addon domains,
-domain aliases, web subdomains, email and FTP accounts, MySQL or MariaDB
-databases and users, PostgreSQL databases and users, imports, drift detection,
-and cleanup.
+on port 2083. Certification covers authentication, cron jobs, DNS records,
+addon domains, domain aliases, web subdomains, email and FTP accounts, MySQL or
+MariaDB databases and users, PostgreSQL databases and users, imports, drift
+detection, and cleanup.
 
 ## API policy
 
 Email account, FTP account, MySQL, MariaDB, and PostgreSQL operations use
 cPanel UAPI.
+
+DNS record reads and mutations use UAPI `DNS::parse_zone` and
+`DNS::mass_edit_zone`. Every mutation uses the current SOA serial and is
+verified against the parsed zone. Records are tracked by cPanel line index,
+name, and type; the provider can relocate a record after unrelated zone edits
+unless duplicate records make the identity ambiguous. The certified record
+types are `A`, `AAAA`, `CAA`, `CNAME`, `MX`, `SRV`, and `TXT`. The certified
+account rejects account-level `NS` and `PTR` creation. Its capability endpoints
+report optional `ALIAS` and `HTTPS` support as disabled, and it does not expose
+the `SVCB` capability function.
 
 The email account resource deliberately uses the email-service API instead of
 creating a cPanel subaccount. It manages only the mailbox and cannot

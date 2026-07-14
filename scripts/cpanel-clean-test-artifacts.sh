@@ -193,6 +193,7 @@ deleted_mysql_databases=0
 deleted_mysql_users=0
 deleted_email_accounts=0
 deleted_ftp_accounts=0
+deleted_dns_records=0
 deleted_addon_domains=0
 deleted_domain_aliases=0
 deleted_subdomains=0
@@ -288,6 +289,61 @@ done < <(
     '.data[].login | select(startswith("tfcpanelftp"))' \
     "${response_file}"
 )
+
+get_request 'execute/DomainInfo/list_domains' 'DNS zone inventory'
+dns_zones="$(
+  jq -r \
+    '[.data.main_domain] + (.data.addon_domains // []) | .[]' \
+    "${response_file}"
+)"
+while IFS= read -r zone; do
+  if [[ -z "${zone}" ]]; then
+    continue
+  fi
+
+  while true; do
+    get_request "execute/DNS/parse_zone?zone=${zone}" "DNS record inventory for ${zone}"
+    line_index="$(
+      jq -r \
+        'first(
+          .data[]
+          | select(.record_type != null)
+          | select(
+              (try (.dname_b64 | @base64d) catch "")
+              | startswith("tfcpaneldns")
+            )
+          | .line_index
+        ) // empty' \
+        "${response_file}"
+    )"
+    if [[ -z "${line_index}" ]]; then
+      break
+    fi
+
+    serial="$(
+      jq -r \
+        '.data[]
+          | select(.record_type == "SOA")
+          | .data_b64[2]
+          | @base64d' \
+        "${response_file}"
+    )"
+    if [[ -z "${serial}" ]]; then
+      printf 'DNS zone %s does not contain a readable SOA serial\n' "${zone}" >&2
+      exit 1
+    fi
+
+    mutation_label="Delete test DNS record at line ${line_index} in ${zone}"
+    uapi_post \
+      'DNS' \
+      'mass_edit_zone' \
+      "${mutation_label}" \
+      "zone=${zone}" \
+      "serial=${serial}" \
+      "remove=${line_index}"
+    deleted_dns_records=$((deleted_dns_records + 1))
+  done
+done <<<"${dns_zones}"
 
 get_request \
   "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=Park&cpanel_jsonapi_func=listparkeddomains" \
@@ -429,6 +485,7 @@ printf '  MySQL databases deleted: %d\n' "${deleted_mysql_databases}"
 printf '  MySQL users deleted: %d\n' "${deleted_mysql_users}"
 printf '  email accounts deleted: %d\n' "${deleted_email_accounts}"
 printf '  FTP accounts deleted: %d\n' "${deleted_ftp_accounts}"
+printf '  DNS records deleted: %d\n' "${deleted_dns_records}"
 printf '  addon domains deleted: %d\n' "${deleted_addon_domains}"
 printf '  domain aliases deleted: %d\n' "${deleted_domain_aliases}"
 printf '  subdomains deleted: %d\n' "${deleted_subdomains}"

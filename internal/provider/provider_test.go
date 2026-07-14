@@ -21,6 +21,7 @@ import (
 
 	"terraform-provider-cpanel/internal/cpanel"
 	"terraform-provider-cpanel/internal/cpanel/cron"
+	cpaneldns "terraform-provider-cpanel/internal/cpanel/dns"
 	cpaneldomain "terraform-provider-cpanel/internal/cpanel/domain"
 	cpanelmail "terraform-provider-cpanel/internal/cpanel/email"
 	cpanelftp "terraform-provider-cpanel/internal/cpanel/ftp"
@@ -66,6 +67,13 @@ func testAccPreCheck(t *testing.T) {
 	}
 	if _, err := cpaneldomain.NewClient(client).ListDomainAliases(ctx); err != nil {
 		t.Fatalf("verify domain alias API access: %v", err)
+	}
+	mainDomain, err := cpaneldomain.NewClient(client).GetMainDomain(ctx)
+	if err != nil {
+		t.Fatalf("read cPanel main domain: %v", err)
+	}
+	if _, err := cpaneldns.NewClient(client).ParseZone(ctx, mainDomain); err != nil {
+		t.Fatalf("verify DNS API access: %v", err)
 	}
 	if _, err := postgresql.NewClient(client).GetDatabases(ctx); err != nil {
 		t.Fatalf("verify PostgreSQL API access: %v", err)
@@ -198,6 +206,28 @@ func testAccDomainAlias(t *testing.T, kind string) string {
 	)
 }
 
+func testAccDNSRecordName(t *testing.T, kind string) string {
+	t.Helper()
+
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("TF_ACC must be set for acceptance tests")
+	}
+
+	return fmt.Sprintf(
+		"tfcpaneldns%s%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
+	)
+}
+
+func testAccDNSRecordData(kind string) string {
+	return fmt.Sprintf(
+		"terraform-provider-cpanel-%s-%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
+	)
+}
+
 func testAccMainDomain(t *testing.T) string {
 	t.Helper()
 
@@ -252,6 +282,25 @@ func testAccImportStateIDFromAttribute(resourceName, attribute string) resource.
 		}
 
 		return value, nil
+	}
+}
+
+func testAccDNSRecordImportStateID(
+	resourceName string,
+	zone string,
+) resource.ImportStateIdFunc {
+	return func(state *terraform.State) (string, error) {
+		resourceState, ok := state.RootModule().Resources[resourceName]
+		if !ok {
+			return "", fmt.Errorf("resource %s not found in state", resourceName)
+		}
+
+		lineIndex := resourceState.Primary.Attributes["line_index"]
+		if lineIndex == "" {
+			return "", fmt.Errorf("attribute %s.line_index is empty", resourceName)
+		}
+
+		return zone + "/" + lineIndex, nil
 	}
 }
 
@@ -1093,5 +1142,171 @@ func testAccDeleteDomainAlias(t *testing.T, domain string) {
 	}
 	if err := domainClient.DeleteDomainAlias(ctx, domain); err != nil {
 		t.Fatalf("delete domain alias %q: %v", domain, err)
+	}
+}
+
+func testAccCheckDNSRecordExists(
+	zoneName string,
+	name string,
+	ttl int64,
+	data []string,
+) resource.TestCheckFunc {
+	return testAccCheckTypedDNSRecordExists(
+		zoneName,
+		name,
+		"TXT",
+		ttl,
+		data,
+	)
+}
+
+func testAccCheckTypedDNSRecordExists(
+	zoneName string,
+	name string,
+	recordType string,
+	ttl int64,
+	data []string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		zone, err := cpaneldns.NewClient(client).ParseZone(ctx, zoneName)
+		if err != nil {
+			return err
+		}
+		for _, record := range zone.RecordsByIdentity(name, recordType) {
+			if record.TTL == ttl && slices.Equal(record.Data, data) {
+				return nil
+			}
+		}
+
+		return fmt.Errorf(
+			"%s record %q with TTL %d and data %v was not found in zone %q",
+			recordType,
+			name,
+			ttl,
+			data,
+			zoneName,
+		)
+	}
+}
+
+func testAccCheckDNSRecordsDestroyed(
+	zoneName string,
+	names ...string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		zone, err := cpaneldns.NewClient(client).ParseZone(ctx, zoneName)
+		if err != nil {
+			return err
+		}
+		for _, record := range zone.Records {
+			if slices.Contains(names, record.Name) {
+				return fmt.Errorf(
+					"DNS record %q still exists in zone %q",
+					record.Name,
+					zoneName,
+				)
+			}
+		}
+
+		return nil
+	}
+}
+
+func testAccUpdateDNSRecord(
+	t *testing.T,
+	zoneName string,
+	name string,
+	ttl int64,
+	data []string,
+) {
+	t.Helper()
+
+	const recordType = "TXT"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	dnsClient := cpaneldns.NewClient(client)
+	zone, err := dnsClient.ParseZone(ctx, zoneName)
+	if err != nil {
+		t.Fatalf("read DNS zone %q: %v", zoneName, err)
+	}
+	records := zone.RecordsByIdentity(name, recordType)
+	if len(records) != 1 {
+		t.Fatalf(
+			"found %d %s records named %q in zone %q, want 1",
+			len(records),
+			recordType,
+			name,
+			zoneName,
+		)
+	}
+
+	record := records[0]
+	desired := record
+	desired.TTL = ttl
+	desired.Data = data
+	if _, err := dnsClient.UpdateRecord(ctx, zoneName, record, desired); err != nil {
+		t.Fatalf("update DNS record %q: %v", name, err)
+	}
+}
+
+func testAccDeleteDNSRecord(
+	t *testing.T,
+	zoneName string,
+	name string,
+) {
+	t.Helper()
+
+	const recordType = "TXT"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	dnsClient := cpaneldns.NewClient(client)
+	zone, err := dnsClient.ParseZone(ctx, zoneName)
+	if err != nil {
+		t.Fatalf("read DNS zone %q: %v", zoneName, err)
+	}
+	records := zone.RecordsByIdentity(name, recordType)
+	if len(records) == 0 {
+		return
+	}
+	if len(records) != 1 {
+		t.Fatalf(
+			"found %d %s records named %q in zone %q, want at most 1",
+			len(records),
+			recordType,
+			name,
+			zoneName,
+		)
+	}
+
+	if err := dnsClient.DeleteRecord(ctx, zoneName, records[0]); err != nil {
+		t.Fatalf("delete DNS record %q: %v", name, err)
 	}
 }

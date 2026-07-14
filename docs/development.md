@@ -16,9 +16,9 @@ The CI and release configuration currently pins:
 
 ## cPanel acceptance environment
 
-Acceptance tests create and delete real cron jobs, email accounts, MySQL or
-MariaDB users and databases, PostgreSQL users and databases, and database
-grants. Use a dedicated cPanel test account.
+Acceptance tests create and delete real cron jobs, DNS records, domains, email
+and FTP accounts, MySQL or MariaDB users and databases, PostgreSQL users and
+databases, and database grants. Use a dedicated cPanel test account.
 
 The scripts load credentials from the file specified by `CPANEL_ENV_FILE`. When
 that variable is unset, they use:
@@ -56,8 +56,8 @@ make test-acceptance
 ```
 
 The acceptance entry point performs the smoke test first. It refuses to run
-when any credential is missing or when the server does not expose Cron, email
-accounts, MySQL or MariaDB, and PostgreSQL.
+when any credential is missing or when the server does not expose Cron, DNS
+Zone Editor, domains, email and FTP accounts, MySQL or MariaDB, and PostgreSQL.
 
 Before and after the suite, the acceptance entry point removes only resources
 that follow the test naming contract:
@@ -66,6 +66,12 @@ that follow the test naming contract:
 - MySQL or MariaDB databases and users beginning with
   `${CPANEL_USERNAME}_tf`;
 - email account local parts beginning with `tfcpanel`;
+- FTP account names beginning with `tfcpanelftp`;
+- DNS record names beginning with `tfcpaneldns`;
+- addon domains beginning with `tfcpaneladdon`;
+- domain aliases beginning with `tfcpanelalias`;
+- web subdomains beginning with `tfcpanelsub`;
+- top-level test directories in `public_html` beginning with `tfcpanel-`;
 - cron commands containing `# terraform-provider-cpanel-`;
 - the empty `MAILTO` and default `SHELL=/bin/bash` lines that cPanel creates
   automatically when the test account has no remaining cron command.

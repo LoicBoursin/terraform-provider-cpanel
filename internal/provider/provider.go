@@ -12,6 +12,7 @@ import (
 	"os"
 	"terraform-provider-cpanel/internal/cpanel"
 	"terraform-provider-cpanel/internal/cpanel/cron"
+	cpaneldns "terraform-provider-cpanel/internal/cpanel/dns"
 	cpaneldomain "terraform-provider-cpanel/internal/cpanel/domain"
 	cpanelmail "terraform-provider-cpanel/internal/cpanel/email"
 	"terraform-provider-cpanel/internal/cpanel/ftp"
@@ -50,8 +51,8 @@ func (p *cpanelProvider) Metadata(_ context.Context, _ provider.MetadataRequest,
 // Schema defines the provider-level schema for configuration data.
 func (p *cpanelProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description:         "Manage cPanel account cron jobs, domains, email and FTP accounts, and MySQL, MariaDB, and PostgreSQL users and databases.",
-		MarkdownDescription: "Manage cPanel account cron jobs, domains, email and FTP accounts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		Description:         "Manage cPanel account cron jobs, DNS records, domains, email and FTP accounts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		MarkdownDescription: "Manage cPanel account cron jobs, DNS records, domains, email and FTP accounts, and MySQL, MariaDB, and PostgreSQL users and databases.",
 		Attributes: map[string]schema.Attribute{
 			"username": schema.StringAttribute{
 				Optional:            true,
@@ -190,6 +191,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 
 	// Initialize module clients
 	cronClient := cron.NewClient(client)
+	dnsClient := cpaneldns.NewClient(client)
 	domainClient := cpaneldomain.NewClient(client)
 	emailClient := cpanelmail.NewClient(client)
 	ftpClient := ftp.NewClient(client)
@@ -200,6 +202,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	// type Configure methods.
 	resp.DataSourceData = map[string]interface{}{
 		"cron":       cronClient,
+		"dns":        dnsClient,
 		"domain":     domainClient,
 		"email":      emailClient,
 		"ftp":        ftpClient,
@@ -208,6 +211,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	}
 	resp.ResourceData = map[string]interface{}{
 		"cron":       cronClient,
+		"dns":        dnsClient,
 		"domain":     domainClient,
 		"email":      emailClient,
 		"ftp":        ftpClient,
@@ -223,6 +227,7 @@ func (p *cpanelProvider) DataSources(_ context.Context) []func() datasource.Data
 	return []func() datasource.DataSource{
 		NewAddonDomainDataSource,
 		NewCronJobDataSource,
+		NewDNSRecordDataSource,
 		NewDomainAliasDataSource,
 		NewEmailAccountDataSource,
 		NewFTPAccountDataSource,
@@ -239,6 +244,7 @@ func (p *cpanelProvider) Resources(_ context.Context) []func() resource.Resource
 	return []func() resource.Resource{
 		NewAddonDomainResource,
 		NewCronJobResource,
+		NewDNSRecordResource,
 		NewDomainAliasResource,
 		NewEmailAccountResource,
 		NewFTPAccountResource,
