@@ -145,6 +145,7 @@ deleted_databases=0
 deleted_users=0
 deleted_mysql_databases=0
 deleted_mysql_users=0
+deleted_email_accounts=0
 deleted_cron_lines=0
 
 get_request 'execute/Postgresql/list_databases' 'PostgreSQL database inventory'
@@ -203,6 +204,19 @@ done < <(
     "${response_file}"
 )
 
+get_request 'execute/Email/list_pops?skip_main=1' 'Email account inventory'
+while IFS= read -r address; do
+  if [[ -z "${address}" ]]; then
+    continue
+  fi
+  uapi_post 'Email' 'delete_pop' "email=${address}" "Delete test email account ${address}"
+  deleted_email_accounts=$((deleted_email_accounts + 1))
+done < <(
+  jq -r \
+    '.data[].email | select(startswith("tfcpanel"))' \
+    "${response_file}"
+)
+
 get_request \
   "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=Cron&cpanel_jsonapi_func=fetchcron" \
   'Cron inventory'
@@ -253,4 +267,5 @@ printf '  PostgreSQL databases deleted: %d\n' "${deleted_databases}"
 printf '  PostgreSQL users deleted: %d\n' "${deleted_users}"
 printf '  MySQL databases deleted: %d\n' "${deleted_mysql_databases}"
 printf '  MySQL users deleted: %d\n' "${deleted_mysql_users}"
+printf '  email accounts deleted: %d\n' "${deleted_email_accounts}"
 printf '  cron lines deleted: %d\n' "${deleted_cron_lines}"

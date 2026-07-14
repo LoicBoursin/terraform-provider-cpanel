@@ -74,7 +74,7 @@ cpanel_version="$(
 )"
 
 request 'execute/Features/list_features' 'feature check'
-for feature in cron mysql postgres; do
+for feature in cron mysql popaccts postgres; do
   if [[ "$(jq -r --arg feature "${feature}" '.data[$feature] // 0' "${response_file}")" != "1" ]]; then
     printf 'Required cPanel feature is disabled: %s\n' "${feature}" >&2
     exit 1
@@ -105,6 +105,14 @@ mysql_test_user_count="$(
     "${response_file}"
 )"
 
+request 'execute/Email/list_pops?skip_main=1' 'Email account check'
+email_account_count="$(jq -r '.data | length' "${response_file}")"
+email_test_account_count="$(
+  jq -r \
+    '[.data[].email | select(startswith("tfcpanel"))] | length' \
+    "${response_file}"
+)"
+
 request \
   "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=Cron&cpanel_jsonapi_func=fetchcron" \
   'cron check'
@@ -122,6 +130,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${user_count}" != "0"
     || "${mysql_test_database_count}" != "0"
     || "${mysql_test_user_count}" != "0"
+    || "${email_test_account_count}" != "0"
     || "${cron_count}" != "0"
   ]]; then
     printf 'cPanel test-managed inventory is not empty\n' >&2
@@ -129,6 +138,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     printf '  PostgreSQL users: %s\n' "${user_count}" >&2
     printf '  MySQL test databases: %s\n' "${mysql_test_database_count}" >&2
     printf '  MySQL test users: %s\n' "${mysql_test_user_count}" >&2
+    printf '  email test accounts: %s\n' "${email_test_account_count}" >&2
     printf '  cron commands: %s\n' "${cron_command_count}" >&2
     printf '  cron variables: %s\n' "${cron_variable_count}" >&2
     exit 1
@@ -147,5 +157,8 @@ printf '  MySQL databases: %s (%s test-managed)\n' \
 printf '  MySQL users: %s (%s test-managed)\n' \
   "${mysql_user_count}" \
   "${mysql_test_user_count}"
+printf '  email accounts: %s (%s test-managed)\n' \
+  "${email_account_count}" \
+  "${email_test_account_count}"
 printf '  cron commands: %s\n' "${cron_command_count}"
 printf '  cron variables: %s\n' "${cron_variable_count}"

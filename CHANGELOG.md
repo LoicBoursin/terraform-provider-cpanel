@@ -16,6 +16,8 @@
 
 ### Added
 
+- Email account resource and data source with password and quota updates,
+  import, replacement, drift recovery, and cPanel 134 acceptance coverage.
 - MySQL and MariaDB user and database resources, matching data sources, import,
   drift recovery, privilege management, and cPanel 134 acceptance coverage.
 - Import support for cron jobs by cPanel line key.

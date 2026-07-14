@@ -6,8 +6,10 @@ package provider
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 
 	"terraform-provider-cpanel/internal/cpanel"
 	"terraform-provider-cpanel/internal/cpanel/cron"
+	cpanelmail "terraform-provider-cpanel/internal/cpanel/email"
 	"terraform-provider-cpanel/internal/cpanel/mysql"
 	"terraform-provider-cpanel/internal/cpanel/postgresql"
 )
@@ -59,6 +62,9 @@ func testAccPreCheck(t *testing.T) {
 	if _, err := mysql.NewClient(client).GetRestrictions(ctx); err != nil {
 		t.Fatalf("verify MySQL API access: %v", err)
 	}
+	if _, err := cpanelmail.NewClient(client).ListMailDomains(ctx); err != nil {
+		t.Fatalf("verify Email API access: %v", err)
+	}
 }
 
 func testAccClient() (*cpanel.Client, error) {
@@ -85,6 +91,54 @@ func testAccMySQLName(kind string) string {
 		kind,
 		acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum),
 	)
+}
+
+func testAccEmailAddress(t *testing.T, kind string) string {
+	t.Helper()
+
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("TF_ACC must be set for acceptance tests")
+	}
+
+	return fmt.Sprintf(
+		"tfcpanel%s%s@%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
+		testAccMainDomain(t),
+	)
+}
+
+func testAccMainDomain(t *testing.T) string {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+
+	var response struct {
+		Data struct {
+			MainDomain string `json:"main_domain"`
+		} `json:"data"`
+	}
+	if err := client.ExecuteUAPIOperation(
+		ctx,
+		http.MethodGet,
+		"DomainInfo",
+		"list_domains",
+		map[string]string{},
+		&response,
+	); err != nil {
+		t.Fatalf("read cPanel main domain: %v", err)
+	}
+	if response.Data.MainDomain == "" {
+		t.Fatal("cPanel main domain is empty")
+	}
+
+	return response.Data.MainDomain
 }
 
 func testAccCronCommand(kind string) string {
@@ -508,5 +562,91 @@ func testAccDeleteMySQLDatabase(t *testing.T, name string) {
 
 	if err := mysql.NewClient(client).DeleteDatabase(ctx, name); err != nil {
 		t.Fatalf("delete MySQL database %q: %v", name, err)
+	}
+}
+
+func testAccCheckEmailAccountExists(
+	address string,
+	expectedQuotaMiB int64,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		user, domain, err := splitEmailAccountAddress(address)
+		if err != nil {
+			return err
+		}
+		account, err := cpanelmail.NewClient(client).GetAccount(ctx, user, domain)
+		if err != nil {
+			return err
+		}
+		if account == nil {
+			return fmt.Errorf("email account %q was not found", address)
+		}
+
+		quotaMiB, err := account.QuotaMiB()
+		if err != nil {
+			return err
+		}
+		if quotaMiB != expectedQuotaMiB {
+			return fmt.Errorf(
+				"email account %q quota = %d MiB, want %d MiB",
+				address,
+				quotaMiB,
+				expectedQuotaMiB,
+			)
+		}
+
+		return nil
+	}
+}
+
+func testAccCheckEmailAccountsDestroyed(addresses ...string) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		accounts, err := cpanelmail.NewClient(client).ListAccounts(ctx)
+		if err != nil {
+			return err
+		}
+		for _, account := range accounts.Data {
+			if slices.Contains(addresses, account.Email) {
+				return fmt.Errorf("email account %q still exists", account.Email)
+			}
+		}
+
+		return nil
+	}
+}
+
+func testAccDeleteEmailAccount(t *testing.T, address string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+
+	user, domain, err := splitEmailAccountAddress(address)
+	if err != nil {
+		t.Fatalf("split email account address: %v", err)
+	}
+	if err := cpanelmail.NewClient(client).DeleteAccount(ctx, user, domain); err != nil {
+		t.Fatalf("delete email account %q: %v", address, err)
 	}
 }

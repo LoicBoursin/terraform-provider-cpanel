@@ -154,6 +154,70 @@ func TestValidateMySQLName(t *testing.T) {
 	}
 }
 
+func TestSplitEmailAccountAddress(t *testing.T) {
+	t.Parallel()
+
+	testCases := map[string]struct {
+		address    string
+		wantUser   string
+		wantDomain string
+		wantError  bool
+	}{
+		"valid": {
+			address:    "terraform.user@example.test",
+			wantUser:   "terraform.user",
+			wantDomain: "example.test",
+		},
+		"multiple at": {
+			address:   "terraform@@example.test",
+			wantError: true,
+		},
+		"invalid user": {
+			address:   "terraform+tag@example.test",
+			wantError: true,
+		},
+		"invalid dot": {
+			address:   ".terraform@example.test",
+			wantError: true,
+		},
+		"uppercase domain": {
+			address:   "terraform@Example.test",
+			wantError: true,
+		},
+		"invalid domain label": {
+			address:   "terraform@-example.test",
+			wantError: true,
+		},
+	}
+
+	for name, testCase := range testCases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			user, domain, err := splitEmailAccountAddress(testCase.address)
+			if testCase.wantError {
+				if err == nil {
+					t.Fatalf("splitEmailAccountAddress(%q) returned no error", testCase.address)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("splitEmailAccountAddress(%q) error: %v", testCase.address, err)
+			}
+			if user != testCase.wantUser || domain != testCase.wantDomain {
+				t.Fatalf(
+					"splitEmailAccountAddress(%q) = %q, %q; want %q, %q",
+					testCase.address,
+					user,
+					domain,
+					testCase.wantUser,
+					testCase.wantDomain,
+				)
+			}
+		})
+	}
+}
+
 func TestCronJobModelLookupsIgnoreVariables(t *testing.T) {
 	t.Parallel()
 
@@ -368,6 +432,21 @@ func TestMySQLUserDataSourceSchemaDoesNotExposePassword(t *testing.T) {
 
 	if _, exists := response.Schema.Attributes["password"]; exists {
 		t.Fatal("MySQL user data source schema exposes password")
+	}
+}
+
+func TestEmailAccountDataSourceSchemaDoesNotExposePassword(t *testing.T) {
+	t.Parallel()
+
+	var response frameworkdatasource.SchemaResponse
+	(&emailAccountDataSource{}).Schema(
+		context.Background(),
+		frameworkdatasource.SchemaRequest{},
+		&response,
+	)
+
+	if _, exists := response.Schema.Attributes["password"]; exists {
+		t.Fatal("email account data source schema exposes password")
 	}
 }
 
