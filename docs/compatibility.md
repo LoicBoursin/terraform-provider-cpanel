@@ -27,15 +27,29 @@ security fixes.
 | Certified o2switch environment | 134.0 build 44 |
 
 The o2switch certification environment uses the cPanel account API over HTTPS
-on port 2083. Certification covers authentication, cron jobs, DNS records,
-addon domains, domain aliases, web subdomains, email accounts, forwarders and
-autoresponders, FTP accounts, website IP blocks, MySQL or MariaDB databases and
-users, PostgreSQL databases and users, imports, drift detection, and cleanup.
+on port 2083. Certification covers authentication, full-access API tokens, cron
+jobs, DNS records, addon domains, domain aliases, web subdomains, email
+accounts, forwarders and autoresponders, FTP accounts, website IP blocks,
+MySQL or MariaDB databases and users, PostgreSQL databases and users, imports,
+drift detection, and cleanup.
 
 ## API policy
 
 Email account, direct and domain email forwarder, autoresponder, FTP account,
 MySQL, MariaDB, and PostgreSQL operations use cPanel UAPI.
+
+API token operations use UAPI `Tokens::create_full_access`, `Tokens::list`,
+`Tokens::rename`, and `Tokens::revoke`. cPanel returns a token secret only when
+it creates the token. Terraform therefore stores newly created secrets as
+sensitive state, while imported resources expose metadata only and cannot
+recover the existing secret. Changing `expires_at` replaces the token because
+cPanel does not expose an expiration update operation.
+
+The API token that authenticates the provider must remain outside the resource
+being managed. In particular, do not import that active token into
+`cpanel_api_token`: cPanel does not identify the current authentication token
+in list responses, and revoking it would interrupt all subsequent provider
+operations.
 
 DNS record reads and mutations use UAPI `DNS::parse_zone` and
 `DNS::mass_edit_zone`. Every mutation uses the current SOA serial and is

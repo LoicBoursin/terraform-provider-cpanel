@@ -187,6 +187,7 @@ remove_cron_line() {
 }
 
 test_prefix="${CPANEL_USERNAME}_tf"
+deleted_api_tokens=0
 deleted_databases=0
 deleted_users=0
 deleted_mysql_databases=0
@@ -203,6 +204,19 @@ deleted_domain_aliases=0
 deleted_subdomains=0
 deleted_domain_directories=0
 deleted_cron_lines=0
+
+get_request 'execute/Tokens/list' 'API token inventory'
+while IFS= read -r token_name; do
+  if [[ -z "${token_name}" ]]; then
+    continue
+  fi
+  uapi_post 'Tokens' 'revoke' "Revoke test API token ${token_name}" "name=${token_name}"
+  deleted_api_tokens=$((deleted_api_tokens + 1))
+done < <(
+  jq -r \
+    '.data[].name | select(startswith("tfcpaneltoken"))' \
+    "${response_file}"
+)
 
 get_request 'execute/Postgresql/list_databases' 'PostgreSQL database inventory'
 while IFS= read -r database; do
@@ -587,6 +601,7 @@ if [[ "${cron_command_count}" == "0" ]]; then
 fi
 
 printf 'cPanel test cleanup passed\n'
+printf '  API tokens revoked: %d\n' "${deleted_api_tokens}"
 printf '  PostgreSQL databases deleted: %d\n' "${deleted_databases}"
 printf '  PostgreSQL users deleted: %d\n' "${deleted_users}"
 printf '  MySQL databases deleted: %d\n' "${deleted_mysql_databases}"

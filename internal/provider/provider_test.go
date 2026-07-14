@@ -20,6 +20,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 
 	"terraform-provider-cpanel/internal/cpanel"
+	cpanelapitoken "terraform-provider-cpanel/internal/cpanel/apitoken"
 	"terraform-provider-cpanel/internal/cpanel/cron"
 	cpaneldns "terraform-provider-cpanel/internal/cpanel/dns"
 	cpaneldomain "terraform-provider-cpanel/internal/cpanel/domain"
@@ -57,6 +58,9 @@ func testAccPreCheck(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	if _, err := cpanelapitoken.NewClient(client).List(ctx); err != nil {
+		t.Fatalf("verify API token access: %v", err)
+	}
 	if _, err := cron.NewClient(client).GetCronJobs(ctx); err != nil {
 		t.Fatalf("verify Cron API access: %v", err)
 	}
@@ -126,6 +130,18 @@ func testAccMySQLName(kind string) string {
 		kind,
 		acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum),
 	)
+}
+
+func testAccAPITokenName(kind string) string {
+	name := fmt.Sprintf(
+		"tfcpaneltoken%s%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(12, acctest.CharSetAlphaNum)),
+	)
+
+	testAccRegisterAPITokenCandidate(name, time.Now().Add(-5*time.Minute).Unix())
+
+	return name
 }
 
 func testAccEmailAddress(t *testing.T, kind string) string {
@@ -285,6 +301,84 @@ func testAccDNSRecordData(kind string) string {
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
 	)
+}
+
+func testAccCheckAPITokenExists(
+	name string,
+	expectedExpiresAt int64,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		token, err := cpanelapitoken.NewClient(client).Get(ctx, name)
+		if err != nil {
+			return err
+		}
+		if token == nil {
+			return fmt.Errorf("API token %q was not found", name)
+		}
+		if token.ExpiresAt.ValueOrZero() != expectedExpiresAt {
+			return fmt.Errorf(
+				"API token %q expires at %d; want %d",
+				name,
+				token.ExpiresAt.ValueOrZero(),
+				expectedExpiresAt,
+			)
+		}
+		if token.HasFullAccess != 1 {
+			return fmt.Errorf("API token %q does not have full access", name)
+		}
+
+		return nil
+	}
+}
+
+func testAccCheckAPITokensDestroyed(
+	names ...string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		apiTokenClient := cpanelapitoken.NewClient(client)
+		for _, name := range names {
+			token, err := apiTokenClient.Get(ctx, name)
+			if err != nil {
+				return err
+			}
+			if token != nil {
+				return fmt.Errorf("API token %q still exists", name)
+			}
+		}
+
+		return nil
+	}
+}
+
+func testAccRevokeAPIToken(t *testing.T, name string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	if err := cpanelapitoken.NewClient(client).Revoke(ctx, name); err != nil {
+		t.Fatalf("revoke API token %q: %v", name, err)
+	}
 }
 
 func testAccCheckIPBlockExists(

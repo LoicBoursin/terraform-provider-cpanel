@@ -74,12 +74,20 @@ cpanel_version="$(
 )"
 
 request 'execute/Features/list_features' 'feature check'
-for feature in addondomains blockers cron ftpaccts mysql parkeddomains popaccts postgres subdomains zoneedit; do
+for feature in addondomains apitokens blockers cron ftpaccts mysql parkeddomains popaccts postgres subdomains zoneedit; do
   if [[ "$(jq -r --arg feature "${feature}" '.data[$feature] // 0' "${response_file}")" != "1" ]]; then
     printf 'Required cPanel feature is disabled: %s\n' "${feature}" >&2
     exit 1
   fi
 done
+
+request 'execute/Tokens/list' 'API token check'
+api_token_count="$(jq -r '.data | length' "${response_file}")"
+api_test_token_count="$(
+  jq -r \
+    '[.data[].name | select(startswith("tfcpaneltoken"))] | length' \
+    "${response_file}"
+)"
 
 request 'execute/Postgresql/list_databases' 'PostgreSQL database check'
 database_count="$(jq -r '.data | length' "${response_file}")"
@@ -272,7 +280,8 @@ cron_variable_count="$(
 
 if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
   if [[
-    "${database_count}" != "0"
+    "${api_test_token_count}" != "0"
+    || "${database_count}" != "0"
     || "${user_count}" != "0"
     || "${mysql_test_database_count}" != "0"
     || "${mysql_test_user_count}" != "0"
@@ -290,6 +299,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${cron_count}" != "0"
   ]]; then
     printf 'cPanel test-managed inventory is not empty\n' >&2
+    printf '  test API tokens: %s\n' "${api_test_token_count}" >&2
     printf '  PostgreSQL databases: %s\n' "${database_count}" >&2
     printf '  PostgreSQL users: %s\n' "${user_count}" >&2
     printf '  MySQL test databases: %s\n' "${mysql_test_database_count}" >&2
@@ -317,6 +327,9 @@ printf 'cPanel smoke test passed\n'
 printf '  account: %s\n' "${CPANEL_USERNAME}"
 printf '  host: %s\n' "${host}"
 printf '  version: %s\n' "${cpanel_version}"
+printf '  API tokens: %s (%s test-managed)\n' \
+  "${api_token_count}" \
+  "${api_test_token_count}"
 printf '  PostgreSQL databases: %s\n' "${database_count}"
 printf '  PostgreSQL users: %s\n' "${user_count}"
 printf '  MySQL databases: %s (%s test-managed)\n' \

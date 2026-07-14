@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"os"
 	"terraform-provider-cpanel/internal/cpanel"
+	"terraform-provider-cpanel/internal/cpanel/apitoken"
 	"terraform-provider-cpanel/internal/cpanel/cron"
 	cpaneldns "terraform-provider-cpanel/internal/cpanel/dns"
 	cpaneldomain "terraform-provider-cpanel/internal/cpanel/domain"
@@ -52,8 +53,8 @@ func (p *cpanelProvider) Metadata(_ context.Context, _ provider.MetadataRequest,
 // Schema defines the provider-level schema for configuration data.
 func (p *cpanelProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description:         "Manage cPanel account cron jobs, DNS records, domains, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, and MySQL, MariaDB, and PostgreSQL users and databases.",
-		MarkdownDescription: "Manage cPanel account cron jobs, DNS records, domains, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		Description:         "Manage cPanel account API tokens, cron jobs, DNS records, domains, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		MarkdownDescription: "Manage cPanel account API tokens, cron jobs, DNS records, domains, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, and MySQL, MariaDB, and PostgreSQL users and databases.",
 		Attributes: map[string]schema.Attribute{
 			"username": schema.StringAttribute{
 				Optional:            true,
@@ -191,6 +192,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	}
 
 	// Initialize module clients
+	apiTokenClient := apitoken.NewClient(client)
 	cronClient := cron.NewClient(client)
 	dnsClient := cpaneldns.NewClient(client)
 	domainClient := cpaneldomain.NewClient(client)
@@ -203,6 +205,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	// Make the module clients available during DataSource and Resource
 	// type Configure methods.
 	resp.DataSourceData = map[string]interface{}{
+		"apitoken":   apiTokenClient,
 		"cron":       cronClient,
 		"dns":        dnsClient,
 		"domain":     domainClient,
@@ -213,6 +216,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		"postgresql": postgreSQLClient,
 	}
 	resp.ResourceData = map[string]interface{}{
+		"apitoken":   apiTokenClient,
 		"cron":       cronClient,
 		"dns":        dnsClient,
 		"domain":     domainClient,
@@ -230,6 +234,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 func (p *cpanelProvider) DataSources(_ context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
 		NewAddonDomainDataSource,
+		NewAPITokenDataSource,
 		NewCronJobDataSource,
 		NewDNSRecordDataSource,
 		NewDomainAliasDataSource,
@@ -251,6 +256,7 @@ func (p *cpanelProvider) DataSources(_ context.Context) []func() datasource.Data
 func (p *cpanelProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewAddonDomainResource,
+		NewAPITokenResource,
 		NewCronJobResource,
 		NewDNSRecordResource,
 		NewDomainAliasResource,

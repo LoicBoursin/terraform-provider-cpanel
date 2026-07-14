@@ -1,0 +1,1 @@
+terraform import cpanel_api_token.automation terraform-automation

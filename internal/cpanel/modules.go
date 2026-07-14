@@ -14,4 +14,5 @@ const (
 	ModulePark        = "Park"
 	ModulePostgresql  = "Postgresql"
 	ModuleSubDomain   = "SubDomain"
+	ModuleTokens      = "Tokens"
 )
