@@ -17,8 +17,9 @@ The CI and release configuration currently pins:
 ## cPanel acceptance environment
 
 Acceptance tests create and delete real cron jobs, DNS records, domains, email
-and FTP accounts, MySQL or MariaDB users and databases, PostgreSQL users and
-databases, and database grants. Use a dedicated cPanel test account.
+accounts and forwarders, FTP accounts, MySQL or MariaDB users and databases,
+PostgreSQL users and databases, and database grants. Use a dedicated cPanel
+test account.
 
 The scripts load credentials from the file specified by `CPANEL_ENV_FILE`. When
 that variable is unset, they use:
@@ -66,6 +67,7 @@ that follow the test naming contract:
 - MySQL or MariaDB databases and users beginning with
   `${CPANEL_USERNAME}_tf`;
 - email account local parts beginning with `tfcpanel`;
+- email forwarder source local parts beginning with `tfcpanelfwd`;
 - FTP account names beginning with `tfcpanelftp`;
 - DNS record names beginning with `tfcpaneldns`;
 - addon domains beginning with `tfcpaneladdon`;

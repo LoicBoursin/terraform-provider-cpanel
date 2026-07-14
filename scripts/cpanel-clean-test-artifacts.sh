@@ -192,6 +192,7 @@ deleted_users=0
 deleted_mysql_databases=0
 deleted_mysql_users=0
 deleted_email_accounts=0
+deleted_email_forwarders=0
 deleted_ftp_accounts=0
 deleted_dns_records=0
 deleted_addon_domains=0
@@ -268,6 +269,37 @@ done < <(
     '.data[].email | select(startswith("tfcpanel"))' \
     "${response_file}"
 )
+
+get_request 'execute/Email/list_mail_domains' 'Email forwarder domain inventory'
+mail_domains="$(jq -r '.data[].domain' "${response_file}")"
+while IFS= read -r domain; do
+  if [[ -z "${domain}" ]]; then
+    continue
+  fi
+
+  get_request \
+    "execute/Email/list_forwarders?domain=${domain}" \
+    "Email forwarder inventory for ${domain}"
+  while IFS=$'\t' read -r address destination; do
+    if [[ -z "${address}" || -z "${destination}" ]]; then
+      continue
+    fi
+    uapi_post \
+      'Email' \
+      'delete_forwarder' \
+      "Delete test email forwarder ${address}" \
+      "address=${address}" \
+      "forwarder=${destination}"
+    deleted_email_forwarders=$((deleted_email_forwarders + 1))
+  done < <(
+    jq -r \
+      '.data[]
+        | select(.dest | startswith("tfcpanelfwd"))
+        | [.dest, .forward]
+        | @tsv' \
+      "${response_file}"
+  )
+done <<<"${mail_domains}"
 
 get_request 'execute/Ftp/list_ftp_with_disk?include_acct_types=sub' 'FTP account inventory'
 while IFS= read -r login; do
@@ -484,6 +516,7 @@ printf '  PostgreSQL users deleted: %d\n' "${deleted_users}"
 printf '  MySQL databases deleted: %d\n' "${deleted_mysql_databases}"
 printf '  MySQL users deleted: %d\n' "${deleted_mysql_users}"
 printf '  email accounts deleted: %d\n' "${deleted_email_accounts}"
+printf '  email forwarders deleted: %d\n' "${deleted_email_forwarders}"
 printf '  FTP accounts deleted: %d\n' "${deleted_ftp_accounts}"
 printf '  DNS records deleted: %d\n' "${deleted_dns_records}"
 printf '  addon domains deleted: %d\n' "${deleted_addon_domains}"

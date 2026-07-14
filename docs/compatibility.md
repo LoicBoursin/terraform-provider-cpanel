@@ -28,14 +28,14 @@ security fixes.
 
 The o2switch certification environment uses the cPanel account API over HTTPS
 on port 2083. Certification covers authentication, cron jobs, DNS records,
-addon domains, domain aliases, web subdomains, email and FTP accounts, MySQL or
-MariaDB databases and users, PostgreSQL databases and users, imports, drift
-detection, and cleanup.
+addon domains, domain aliases, web subdomains, email accounts and forwarders,
+FTP accounts, MySQL or MariaDB databases and users, PostgreSQL databases and
+users, imports, drift detection, and cleanup.
 
 ## API policy
 
-Email account, FTP account, MySQL, MariaDB, and PostgreSQL operations use
-cPanel UAPI.
+Email account, direct email forwarder, FTP account, MySQL, MariaDB, and
+PostgreSQL operations use cPanel UAPI.
 
 DNS record reads and mutations use UAPI `DNS::parse_zone` and
 `DNS::mass_edit_zone`. Every mutation uses the current SOA serial and is
@@ -50,6 +50,12 @@ the `SVCB` capability function.
 The email account resource deliberately uses the email-service API instead of
 creating a cPanel subaccount. It manages only the mailbox and cannot
 accidentally enable or delete FTP and WebDisk services that share a username.
+
+The email forwarder resource manages one direct source-to-destination email
+address pair. cPanel permits multiple destinations for the same source address,
+so both addresses form the resource identity. Domain-level forwarders, failure
+routes, pipes, and system-account routes use different cPanel semantics and are
+not represented by this resource.
 
 The FTP resource manages cPanel virtual FTP accounts. Its home directory is
 relative to the cPanel account home, and Terraform preserves that directory by

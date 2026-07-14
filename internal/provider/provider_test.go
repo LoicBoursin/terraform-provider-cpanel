@@ -75,6 +75,9 @@ func testAccPreCheck(t *testing.T) {
 	if _, err := cpaneldns.NewClient(client).ParseZone(ctx, mainDomain); err != nil {
 		t.Fatalf("verify DNS API access: %v", err)
 	}
+	if _, err := cpanelmail.NewClient(client).ListForwarders(ctx, mainDomain); err != nil {
+		t.Fatalf("verify email forwarder API access: %v", err)
+	}
 	if _, err := postgresql.NewClient(client).GetDatabases(ctx); err != nil {
 		t.Fatalf("verify PostgreSQL API access: %v", err)
 	}
@@ -127,6 +130,29 @@ func testAccEmailAddress(t *testing.T, kind string) string {
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
 		testAccMainDomain(t),
+	)
+}
+
+func testAccEmailForwarderAddress(t *testing.T, kind string) string {
+	t.Helper()
+
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("TF_ACC must be set for acceptance tests")
+	}
+
+	return fmt.Sprintf(
+		"tfcpanelfwd%s%s@%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
+		testAccMainDomain(t),
+	)
+}
+
+func testAccEmailForwarderDestination(kind string) string {
+	return fmt.Sprintf(
+		"tfcpanel-%s-%s@example.net",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
 	)
 }
 
@@ -787,6 +813,108 @@ func testAccDeleteEmailAccount(t *testing.T, address string) {
 	}
 	if err := cpanelmail.NewClient(client).DeleteAccount(ctx, user, domain); err != nil {
 		t.Fatalf("delete email account %q: %v", address, err)
+	}
+}
+
+func testAccCheckEmailForwarderExists(
+	address string,
+	destination string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		_, domain, err := splitEmailAccountAddress(address)
+		if err != nil {
+			return err
+		}
+		forwarder, err := cpanelmail.NewClient(client).GetForwarder(
+			ctx,
+			domain,
+			address,
+			destination,
+		)
+		if err != nil {
+			return err
+		}
+		if forwarder == nil {
+			return fmt.Errorf(
+				"email forwarder %q to %q was not found",
+				address,
+				destination,
+			)
+		}
+
+		return nil
+	}
+}
+
+func testAccCheckEmailForwardersDestroyed(
+	address string,
+	destinations ...string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		_, domain, err := splitEmailAccountAddress(address)
+		if err != nil {
+			return err
+		}
+		forwarders, err := cpanelmail.NewClient(client).ListForwarders(ctx, domain)
+		if err != nil {
+			return err
+		}
+		for _, forwarder := range forwarders {
+			if forwarder.Address == address &&
+				slices.Contains(destinations, forwarder.Destination) {
+				return fmt.Errorf(
+					"email forwarder %q to %q still exists",
+					address,
+					forwarder.Destination,
+				)
+			}
+		}
+
+		return nil
+	}
+}
+
+func testAccDeleteEmailForwarder(
+	t *testing.T,
+	address string,
+	destination string,
+) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	if err := cpanelmail.NewClient(client).DeleteForwarder(
+		ctx,
+		address,
+		destination,
+	); err != nil {
+		t.Fatalf(
+			"delete email forwarder %q to %q: %v",
+			address,
+			destination,
+			err,
+		)
 	}
 }
 

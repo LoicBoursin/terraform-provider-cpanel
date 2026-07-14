@@ -51,8 +51,8 @@ func (p *cpanelProvider) Metadata(_ context.Context, _ provider.MetadataRequest,
 // Schema defines the provider-level schema for configuration data.
 func (p *cpanelProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description:         "Manage cPanel account cron jobs, DNS records, domains, email and FTP accounts, and MySQL, MariaDB, and PostgreSQL users and databases.",
-		MarkdownDescription: "Manage cPanel account cron jobs, DNS records, domains, email and FTP accounts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		Description:         "Manage cPanel account cron jobs, DNS records, domains, email accounts and forwarders, FTP accounts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		MarkdownDescription: "Manage cPanel account cron jobs, DNS records, domains, email accounts and forwarders, FTP accounts, and MySQL, MariaDB, and PostgreSQL users and databases.",
 		Attributes: map[string]schema.Attribute{
 			"username": schema.StringAttribute{
 				Optional:            true,
@@ -230,6 +230,7 @@ func (p *cpanelProvider) DataSources(_ context.Context) []func() datasource.Data
 		NewDNSRecordDataSource,
 		NewDomainAliasDataSource,
 		NewEmailAccountDataSource,
+		NewEmailForwarderDataSource,
 		NewFTPAccountDataSource,
 		NewMySQLDatabaseDataSource,
 		NewMySQLUserDataSource,
@@ -247,6 +248,7 @@ func (p *cpanelProvider) Resources(_ context.Context) []func() resource.Resource
 		NewDNSRecordResource,
 		NewDomainAliasResource,
 		NewEmailAccountResource,
+		NewEmailForwarderResource,
 		NewFTPAccountResource,
 		NewMySQLDatabaseResource,
 		NewMySQLUserResource,
