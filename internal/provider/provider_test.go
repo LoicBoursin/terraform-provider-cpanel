@@ -22,6 +22,7 @@ import (
 	"terraform-provider-cpanel/internal/cpanel"
 	"terraform-provider-cpanel/internal/cpanel/cron"
 	cpanelmail "terraform-provider-cpanel/internal/cpanel/email"
+	cpanelftp "terraform-provider-cpanel/internal/cpanel/ftp"
 	"terraform-provider-cpanel/internal/cpanel/mysql"
 	"terraform-provider-cpanel/internal/cpanel/postgresql"
 )
@@ -65,6 +66,9 @@ func testAccPreCheck(t *testing.T) {
 	if _, err := cpanelmail.NewClient(client).ListMailDomains(ctx); err != nil {
 		t.Fatalf("verify Email API access: %v", err)
 	}
+	if _, err := cpanelftp.NewClient(client).ListAccounts(ctx); err != nil {
+		t.Fatalf("verify FTP API access: %v", err)
+	}
 }
 
 func testAccClient() (*cpanel.Client, error) {
@@ -105,6 +109,29 @@ func testAccEmailAddress(t *testing.T, kind string) string {
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
 		testAccMainDomain(t),
+	)
+}
+
+func testAccFTPUsername(t *testing.T, kind string) string {
+	t.Helper()
+
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("TF_ACC must be set for acceptance tests")
+	}
+
+	return fmt.Sprintf(
+		"tfcpanelftp%s%s@%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
+		testAccMainDomain(t),
+	)
+}
+
+func testAccFTPHomeDirectory(kind string) string {
+	return fmt.Sprintf(
+		"tfcpanel-ftp-%s-%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
 	)
 }
 
@@ -648,5 +675,96 @@ func testAccDeleteEmailAccount(t *testing.T, address string) {
 	}
 	if err := cpanelmail.NewClient(client).DeleteAccount(ctx, user, domain); err != nil {
 		t.Fatalf("delete email account %q: %v", address, err)
+	}
+}
+
+func testAccCheckFTPAccountExists(
+	username string,
+	expectedHomeDirectory string,
+	expectedQuotaMiB int64,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		account, err := cpanelftp.NewClient(client).GetAccount(ctx, username)
+		if err != nil {
+			return err
+		}
+		if account == nil {
+			return fmt.Errorf("FTP account %q was not found", username)
+		}
+		if account.RelativeDirectory != expectedHomeDirectory {
+			return fmt.Errorf(
+				"FTP account %q home directory = %q, want %q",
+				username,
+				account.RelativeDirectory,
+				expectedHomeDirectory,
+			)
+		}
+
+		quotaMiB, err := account.QuotaMiB()
+		if err != nil {
+			return err
+		}
+		if quotaMiB != expectedQuotaMiB {
+			return fmt.Errorf(
+				"FTP account %q quota = %d MiB, want %d MiB",
+				username,
+				quotaMiB,
+				expectedQuotaMiB,
+			)
+		}
+
+		return nil
+	}
+}
+
+func testAccCheckFTPAccountsDestroyed(usernames ...string) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		accounts, err := cpanelftp.NewClient(client).ListAccounts(ctx)
+		if err != nil {
+			return err
+		}
+		for _, account := range accounts.Data {
+			if slices.Contains(usernames, account.Login) {
+				return fmt.Errorf("FTP account %q still exists", account.Login)
+			}
+		}
+
+		return nil
+	}
+}
+
+func testAccDeleteFTPAccount(t *testing.T, username string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+
+	user, domain, err := splitFTPAccountUsername(username)
+	if err != nil {
+		t.Fatalf("split FTP account username: %v", err)
+	}
+	if err := cpanelftp.NewClient(client).DeleteAccount(ctx, user, domain, true); err != nil {
+		t.Fatalf("delete FTP account %q: %v", username, err)
 	}
 }

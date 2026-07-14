@@ -74,7 +74,7 @@ cpanel_version="$(
 )"
 
 request 'execute/Features/list_features' 'feature check'
-for feature in cron mysql popaccts postgres; do
+for feature in cron ftpaccts mysql popaccts postgres; do
   if [[ "$(jq -r --arg feature "${feature}" '.data[$feature] // 0' "${response_file}")" != "1" ]]; then
     printf 'Required cPanel feature is disabled: %s\n' "${feature}" >&2
     exit 1
@@ -113,6 +113,14 @@ email_test_account_count="$(
     "${response_file}"
 )"
 
+request 'execute/Ftp/list_ftp_with_disk?include_acct_types=sub' 'FTP account check'
+ftp_account_count="$(jq -r '.data | length' "${response_file}")"
+ftp_test_account_count="$(
+  jq -r \
+    '[.data[].login | select(startswith("tfcpanelftp"))] | length' \
+    "${response_file}"
+)"
+
 request \
   "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=Cron&cpanel_jsonapi_func=fetchcron" \
   'cron check'
@@ -131,6 +139,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${mysql_test_database_count}" != "0"
     || "${mysql_test_user_count}" != "0"
     || "${email_test_account_count}" != "0"
+    || "${ftp_test_account_count}" != "0"
     || "${cron_count}" != "0"
   ]]; then
     printf 'cPanel test-managed inventory is not empty\n' >&2
@@ -139,6 +148,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     printf '  MySQL test databases: %s\n' "${mysql_test_database_count}" >&2
     printf '  MySQL test users: %s\n' "${mysql_test_user_count}" >&2
     printf '  email test accounts: %s\n' "${email_test_account_count}" >&2
+    printf '  FTP test accounts: %s\n' "${ftp_test_account_count}" >&2
     printf '  cron commands: %s\n' "${cron_command_count}" >&2
     printf '  cron variables: %s\n' "${cron_variable_count}" >&2
     exit 1
@@ -160,5 +170,8 @@ printf '  MySQL users: %s (%s test-managed)\n' \
 printf '  email accounts: %s (%s test-managed)\n' \
   "${email_account_count}" \
   "${email_test_account_count}"
+printf '  FTP accounts: %s (%s test-managed)\n' \
+  "${ftp_account_count}" \
+  "${ftp_test_account_count}"
 printf '  cron commands: %s\n' "${cron_command_count}"
 printf '  cron variables: %s\n' "${cron_variable_count}"

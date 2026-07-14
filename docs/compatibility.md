@@ -27,17 +27,24 @@ security fixes.
 | Certified o2switch environment | 134.0 build 44 |
 
 The o2switch certification environment uses the cPanel account API over HTTPS
-on port 2083. Certification covers authentication, cron jobs, email accounts,
-MySQL or MariaDB databases and users, PostgreSQL databases and users, imports,
-drift detection, and cleanup.
+on port 2083. Certification covers authentication, cron jobs, email and FTP
+accounts, MySQL or MariaDB databases and users, PostgreSQL databases and users,
+imports, drift detection, and cleanup.
 
 ## API policy
 
-Email account, MySQL, MariaDB, and PostgreSQL operations use cPanel UAPI.
+Email account, FTP account, MySQL, MariaDB, and PostgreSQL operations use
+cPanel UAPI.
 
 The email account resource deliberately uses the email-service API instead of
 creating a cPanel subaccount. It manages only the mailbox and cannot
 accidentally enable or delete FTP and WebDisk services that share a username.
+
+The FTP resource manages cPanel virtual FTP accounts. Its home directory is
+relative to the cPanel account home, and Terraform preserves that directory by
+default when deleting the account. cPanel SFTP access uses the main cPanel
+system account and does not have an independent account lifecycle API, so the
+provider does not advertise a separate SFTP resource.
 
 Cron operations currently use cPanel API 2 because cPanel does not provide UAPI
 equivalents for the required cron functions. API 2 is deprecated, so each

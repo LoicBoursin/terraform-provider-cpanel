@@ -12,6 +12,7 @@ import (
 	resourceschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 
 	"terraform-provider-cpanel/internal/cpanel/cron"
+	"terraform-provider-cpanel/internal/cpanel/ftp"
 	"terraform-provider-cpanel/internal/cpanel/mysql"
 	"terraform-provider-cpanel/internal/cpanel/postgresql"
 )
@@ -212,6 +213,95 @@ func TestSplitEmailAccountAddress(t *testing.T) {
 					domain,
 					testCase.wantUser,
 					testCase.wantDomain,
+				)
+			}
+		})
+	}
+}
+
+func TestSplitFTPAccountUsername(t *testing.T) {
+	t.Parallel()
+
+	testCases := map[string]struct {
+		username   string
+		wantUser   string
+		wantDomain string
+		wantError  bool
+	}{
+		"valid": {
+			username:   "terraform.user@example.test",
+			wantUser:   "terraform.user",
+			wantDomain: "example.test",
+		},
+		"multiple at": {
+			username:  "terraform@@example.test",
+			wantError: true,
+		},
+		"invalid user": {
+			username:  "terraform+tag@example.test",
+			wantError: true,
+		},
+		"uppercase domain": {
+			username:  "terraform@Example.test",
+			wantError: true,
+		},
+	}
+
+	for name, testCase := range testCases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			user, domain, err := splitFTPAccountUsername(testCase.username)
+			if testCase.wantError {
+				if err == nil {
+					t.Fatalf("splitFTPAccountUsername(%q) returned no error", testCase.username)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("splitFTPAccountUsername(%q) error: %v", testCase.username, err)
+			}
+			if user != testCase.wantUser || domain != testCase.wantDomain {
+				t.Fatalf(
+					"splitFTPAccountUsername(%q) = %q, %q; want %q, %q",
+					testCase.username,
+					user,
+					domain,
+					testCase.wantUser,
+					testCase.wantDomain,
+				)
+			}
+		})
+	}
+}
+
+func TestValidateFTPHomeDirectory(t *testing.T) {
+	t.Parallel()
+
+	testCases := map[string]struct {
+		homeDirectory string
+		wantError     bool
+	}{
+		"valid":          {homeDirectory: "sites/terraform"},
+		"absolute":       {homeDirectory: "/home/account/sites", wantError: true},
+		"parent segment": {homeDirectory: "sites/../private", wantError: true},
+		"dot segment":    {homeDirectory: "sites/./public", wantError: true},
+		"empty":          {homeDirectory: "", wantError: true},
+	}
+
+	for name, testCase := range testCases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validateFTPHomeDirectory(testCase.homeDirectory)
+			if testCase.wantError && err == nil {
+				t.Fatalf("validateFTPHomeDirectory(%q) returned no error", testCase.homeDirectory)
+			}
+			if !testCase.wantError && err != nil {
+				t.Fatalf(
+					"validateFTPHomeDirectory(%q) returned error: %v",
+					testCase.homeDirectory,
+					err,
 				)
 			}
 		})
@@ -447,6 +537,62 @@ func TestEmailAccountDataSourceSchemaDoesNotExposePassword(t *testing.T) {
 
 	if _, exists := response.Schema.Attributes["password"]; exists {
 		t.Fatal("email account data source schema exposes password")
+	}
+}
+
+func TestFTPAccountDataSourceSchemaDoesNotExposePassword(t *testing.T) {
+	t.Parallel()
+
+	var response frameworkdatasource.SchemaResponse
+	(&ftpAccountDataSource{}).Schema(
+		context.Background(),
+		frameworkdatasource.SchemaRequest{},
+		&response,
+	)
+
+	if _, exists := response.Schema.Attributes["password"]; exists {
+		t.Fatal("FTP account data source schema exposes password")
+	}
+}
+
+func TestFTPAccountDefaultsToPreservingHomeDirectory(t *testing.T) {
+	t.Parallel()
+
+	var response frameworkresource.SchemaResponse
+	(&ftpAccountResource{}).Schema(
+		context.Background(),
+		frameworkresource.SchemaRequest{},
+		&response,
+	)
+
+	attribute, ok := response.Schema.Attributes["delete_home_directory"].(resourceschema.BoolAttribute)
+	if !ok {
+		t.Fatalf(
+			"delete_home_directory has type %T, want schema.BoolAttribute",
+			response.Schema.Attributes["delete_home_directory"],
+		)
+	}
+	if attribute.Default == nil {
+		t.Fatal("delete_home_directory has no default")
+	}
+	deleteOnDestroy, ok := response.Schema.Attributes["delete_on_destroy"].(resourceschema.BoolAttribute)
+	if !ok {
+		t.Fatalf(
+			"delete_on_destroy has type %T, want schema.BoolAttribute",
+			response.Schema.Attributes["delete_on_destroy"],
+		)
+	}
+	if deleteOnDestroy.Default == nil {
+		t.Fatal("delete_on_destroy has no default")
+	}
+}
+
+func TestFTPAccountModelParsesWholeQuota(t *testing.T) {
+	t.Parallel()
+
+	account := ftp.Account{DiskQuotaRaw: []byte(`"50.50"`)}
+	if _, err := account.QuotaMiB(); err == nil {
+		t.Fatal("FTP quota with a fractional MiB returned no error")
 	}
 }
 

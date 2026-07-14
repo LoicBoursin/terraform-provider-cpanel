@@ -69,24 +69,27 @@ get_request() {
 uapi_post() {
   local module="$1"
   local function="$2"
-  local parameter="$3"
-  local label="$4"
+  local label="$3"
   local http_code
+  local parameter
   local status
+  local curl_arguments=(
+    --silent
+    --show-error
+    --max-time 20
+    --request POST
+    --output "${response_file}"
+    --write-out '%{http_code}'
+    --header "${authorization}"
+    --header 'Content-Type: application/x-www-form-urlencoded'
+  )
 
-  http_code="$(
-    curl \
-      --silent \
-      --show-error \
-      --max-time 20 \
-      --request POST \
-      --output "${response_file}" \
-      --write-out '%{http_code}' \
-      --header "${authorization}" \
-      --header 'Content-Type: application/x-www-form-urlencoded' \
-      --data-urlencode "${parameter}" \
-      "${host}/execute/${module}/${function}"
-  )"
+  shift 3
+  for parameter in "$@"; do
+    curl_arguments+=(--data-urlencode "${parameter}")
+  done
+
+  http_code="$(curl "${curl_arguments[@]}" "${host}/execute/${module}/${function}")"
 
   if [[ "${http_code}" != "200" ]]; then
     printf '%s failed with HTTP %s\n' "${label}" "${http_code}" >&2
@@ -146,6 +149,7 @@ deleted_users=0
 deleted_mysql_databases=0
 deleted_mysql_users=0
 deleted_email_accounts=0
+deleted_ftp_accounts=0
 deleted_cron_lines=0
 
 get_request 'execute/Postgresql/list_databases' 'PostgreSQL database inventory'
@@ -153,7 +157,7 @@ while IFS= read -r database; do
   if [[ -z "${database}" ]]; then
     continue
   fi
-  uapi_post 'Postgresql' 'delete_database' "name=${database}" "Delete test database ${database}"
+  uapi_post 'Postgresql' 'delete_database' "Delete test database ${database}" "name=${database}"
   deleted_databases=$((deleted_databases + 1))
 done < <(
   jq -r \
@@ -167,7 +171,7 @@ while IFS= read -r user; do
   if [[ -z "${user}" ]]; then
     continue
   fi
-  uapi_post 'Postgresql' 'delete_user' "name=${user}" "Delete test user ${user}"
+  uapi_post 'Postgresql' 'delete_user' "Delete test user ${user}" "name=${user}"
   deleted_users=$((deleted_users + 1))
 done < <(
   jq -r \
@@ -181,7 +185,7 @@ while IFS= read -r database; do
   if [[ -z "${database}" ]]; then
     continue
   fi
-  uapi_post 'Mysql' 'delete_database' "name=${database}" "Delete test MySQL database ${database}"
+  uapi_post 'Mysql' 'delete_database' "Delete test MySQL database ${database}" "name=${database}"
   deleted_mysql_databases=$((deleted_mysql_databases + 1))
 done < <(
   jq -r \
@@ -195,7 +199,7 @@ while IFS= read -r user; do
   if [[ -z "${user}" ]]; then
     continue
   fi
-  uapi_post 'Mysql' 'delete_user' "name=${user}" "Delete test MySQL user ${user}"
+  uapi_post 'Mysql' 'delete_user' "Delete test MySQL user ${user}" "name=${user}"
   deleted_mysql_users=$((deleted_mysql_users + 1))
 done < <(
   jq -r \
@@ -209,11 +213,32 @@ while IFS= read -r address; do
   if [[ -z "${address}" ]]; then
     continue
   fi
-  uapi_post 'Email' 'delete_pop' "email=${address}" "Delete test email account ${address}"
+  uapi_post 'Email' 'delete_pop' "Delete test email account ${address}" "email=${address}"
   deleted_email_accounts=$((deleted_email_accounts + 1))
 done < <(
   jq -r \
     '.data[].email | select(startswith("tfcpanel"))' \
+    "${response_file}"
+)
+
+get_request 'execute/Ftp/list_ftp_with_disk?include_acct_types=sub' 'FTP account inventory'
+while IFS= read -r login; do
+  if [[ -z "${login}" ]]; then
+    continue
+  fi
+  user="${login%@*}"
+  domain="${login#*@}"
+  uapi_post \
+    'Ftp' \
+    'delete_ftp' \
+    "Delete test FTP account ${login}" \
+    "user=${user}" \
+    "domain=${domain}" \
+    'destroy=1'
+  deleted_ftp_accounts=$((deleted_ftp_accounts + 1))
+done < <(
+  jq -r \
+    '.data[].login | select(startswith("tfcpanelftp"))' \
     "${response_file}"
 )
 
@@ -268,4 +293,5 @@ printf '  PostgreSQL users deleted: %d\n' "${deleted_users}"
 printf '  MySQL databases deleted: %d\n' "${deleted_mysql_databases}"
 printf '  MySQL users deleted: %d\n' "${deleted_mysql_users}"
 printf '  email accounts deleted: %d\n' "${deleted_email_accounts}"
+printf '  FTP accounts deleted: %d\n' "${deleted_ftp_accounts}"
 printf '  cron lines deleted: %d\n' "${deleted_cron_lines}"
