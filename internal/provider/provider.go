@@ -12,6 +12,7 @@ import (
 	"os"
 	"terraform-provider-cpanel/internal/cpanel"
 	"terraform-provider-cpanel/internal/cpanel/cron"
+	"terraform-provider-cpanel/internal/cpanel/mysql"
 	"terraform-provider-cpanel/internal/cpanel/postgresql"
 )
 
@@ -46,8 +47,8 @@ func (p *cpanelProvider) Metadata(_ context.Context, _ provider.MetadataRequest,
 // Schema defines the provider-level schema for configuration data.
 func (p *cpanelProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description:         "Manage cPanel account cron jobs and PostgreSQL users and databases.",
-		MarkdownDescription: "Manage cPanel account cron jobs and PostgreSQL users and databases.",
+		Description:         "Manage cPanel account cron jobs and MySQL, MariaDB, and PostgreSQL users and databases.",
+		MarkdownDescription: "Manage cPanel account cron jobs and MySQL, MariaDB, and PostgreSQL users and databases.",
 		Attributes: map[string]schema.Attribute{
 			"username": schema.StringAttribute{
 				Optional:            true,
@@ -186,16 +187,19 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 
 	// Initialize module clients
 	cronClient := cron.NewClient(client)
+	mySQLClient := mysql.NewClient(client)
 	postgreSQLClient := postgresql.NewClient(client)
 
 	// Make the module clients available during DataSource and Resource
 	// type Configure methods.
 	resp.DataSourceData = map[string]interface{}{
 		"cron":       cronClient,
+		"mysql":      mySQLClient,
 		"postgresql": postgreSQLClient,
 	}
 	resp.ResourceData = map[string]interface{}{
 		"cron":       cronClient,
+		"mysql":      mySQLClient,
 		"postgresql": postgreSQLClient,
 	}
 
@@ -206,6 +210,8 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 func (p *cpanelProvider) DataSources(_ context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
 		NewCronJobDataSource,
+		NewMySQLDatabaseDataSource,
+		NewMySQLUserDataSource,
 		NewPostgreSQLDatabaseDataSource,
 		NewPostgreSQLUserDataSource,
 	}
@@ -215,6 +221,8 @@ func (p *cpanelProvider) DataSources(_ context.Context) []func() datasource.Data
 func (p *cpanelProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewCronJobResource,
+		NewMySQLDatabaseResource,
+		NewMySQLUserResource,
 		NewPostgreSQLDatabaseResource,
 		NewPostgreSQLUserResource,
 	}

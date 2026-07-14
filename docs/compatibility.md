@@ -27,12 +27,13 @@ security fixes.
 | Certified o2switch environment | 134.0 build 44 |
 
 The o2switch certification environment uses the cPanel account API over HTTPS
-on port 2083. Certification covers authentication, cron jobs, PostgreSQL
-databases, PostgreSQL users, imports, drift detection, and cleanup.
+on port 2083. Certification covers authentication, cron jobs, MySQL or MariaDB
+databases and users, PostgreSQL databases and users, imports, drift detection,
+and cleanup.
 
 ## API policy
 
-PostgreSQL operations use cPanel UAPI.
+MySQL, MariaDB, and PostgreSQL operations use cPanel UAPI.
 
 Cron operations currently use cPanel API 2 because cPanel does not provide UAPI
 equivalents for the required cron functions. API 2 is deprecated, so each

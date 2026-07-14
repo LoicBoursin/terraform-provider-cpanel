@@ -19,6 +19,7 @@ import (
 
 	"terraform-provider-cpanel/internal/cpanel"
 	"terraform-provider-cpanel/internal/cpanel/cron"
+	"terraform-provider-cpanel/internal/cpanel/mysql"
 	"terraform-provider-cpanel/internal/cpanel/postgresql"
 )
 
@@ -55,6 +56,9 @@ func testAccPreCheck(t *testing.T) {
 	if _, err := postgresql.NewClient(client).GetDatabases(ctx); err != nil {
 		t.Fatalf("verify PostgreSQL API access: %v", err)
 	}
+	if _, err := mysql.NewClient(client).GetRestrictions(ctx); err != nil {
+		t.Fatalf("verify MySQL API access: %v", err)
+	}
 }
 
 func testAccClient() (*cpanel.Client, error) {
@@ -66,6 +70,15 @@ func testAccClient() (*cpanel.Client, error) {
 }
 
 func testAccPostgreSQLName(kind string) string {
+	return fmt.Sprintf(
+		"%s_tf%s%s",
+		os.Getenv("CPANEL_USERNAME"),
+		kind,
+		acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum),
+	)
+}
+
+func testAccMySQLName(kind string) string {
 	return fmt.Sprintf(
 		"%s_tf%s%s",
 		os.Getenv("CPANEL_USERNAME"),
@@ -330,5 +343,170 @@ func testAccDeletePostgreSQLDatabase(t *testing.T, name string) {
 		postgresql.DatabaseDeleteModel{Name: name},
 	); err != nil {
 		t.Fatalf("delete PostgreSQL database %q: %v", name, err)
+	}
+}
+
+func testAccCheckMySQLUserExists(name string) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		exists, err := mysql.NewClient(client).UserExists(ctx, name)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return fmt.Errorf("MySQL user %q was not found", name)
+		}
+
+		return nil
+	}
+}
+
+func testAccCheckMySQLUsersDestroyed(names ...string) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		users, err := mysql.NewClient(client).ListUsers(ctx)
+		if err != nil {
+			return err
+		}
+
+		for _, user := range users.Data {
+			if slices.Contains(names, user.User) {
+				return fmt.Errorf("MySQL user %q still exists", user.User)
+			}
+		}
+
+		return nil
+	}
+}
+
+func testAccDeleteMySQLUser(t *testing.T, name string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+
+	if err := mysql.NewClient(client).DeleteUser(ctx, name); err != nil {
+		t.Fatalf("delete MySQL user %q: %v", name, err)
+	}
+}
+
+func testAccCheckMySQLDatabaseExists(
+	name string,
+	expectedUsers ...string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		mysqlClient := mysql.NewClient(client)
+		databases, err := mysqlClient.ListDatabases(ctx)
+		if err != nil {
+			return err
+		}
+
+		for _, database := range databases.Data {
+			if database.Database != name {
+				continue
+			}
+			if len(database.Users) != len(expectedUsers) {
+				return fmt.Errorf(
+					"MySQL database %q users = %v, want %v",
+					name,
+					database.Users,
+					expectedUsers,
+				)
+			}
+			for _, expectedUser := range expectedUsers {
+				if !slices.Contains(database.Users, expectedUser) {
+					return fmt.Errorf(
+						"MySQL database %q does not grant access to %q",
+						name,
+						expectedUser,
+					)
+				}
+
+				privileges, err := mysqlClient.GetPrivileges(ctx, expectedUser, name)
+				if err != nil {
+					return err
+				}
+				if !slices.Contains(privileges, "ALL PRIVILEGES") {
+					return fmt.Errorf(
+						"MySQL database %q privileges for %q = %v",
+						name,
+						expectedUser,
+						privileges,
+					)
+				}
+			}
+
+			return nil
+		}
+
+		return fmt.Errorf("MySQL database %q was not found", name)
+	}
+}
+
+func testAccCheckMySQLDatabasesDestroyed(names ...string) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		databases, err := mysql.NewClient(client).ListDatabases(ctx)
+		if err != nil {
+			return err
+		}
+
+		for _, database := range databases.Data {
+			if slices.Contains(names, database.Database) {
+				return fmt.Errorf("MySQL database %q still exists", database.Database)
+			}
+		}
+
+		return nil
+	}
+}
+
+func testAccDeleteMySQLDatabase(t *testing.T, name string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+
+	if err := mysql.NewClient(client).DeleteDatabase(ctx, name); err != nil {
+		t.Fatalf("delete MySQL database %q: %v", name, err)
 	}
 }

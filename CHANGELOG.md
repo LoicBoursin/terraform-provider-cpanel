@@ -16,6 +16,8 @@
 
 ### Added
 
+- MySQL and MariaDB user and database resources, matching data sources, import,
+  drift recovery, privilege management, and cPanel 134 acceptance coverage.
 - Import support for cron jobs by cPanel line key.
 - Stable drift and remote-deletion handling for every resource.
 - cPanel 134 acceptance coverage for CRUD, import, drift, recreation, and
@@ -36,7 +38,7 @@
 
 ### Security
 
-- Keep API tokens and PostgreSQL passwords out of URLs and diagnostics.
+- Keep API tokens and database passwords out of URLs and diagnostics.
 - Pin CI actions and release tools.
 - Add race, lint, vulnerability, dependency, and workflow validation.
 

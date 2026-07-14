@@ -12,6 +12,7 @@ import (
 	resourceschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 
 	"terraform-provider-cpanel/internal/cpanel/cron"
+	"terraform-provider-cpanel/internal/cpanel/mysql"
 	"terraform-provider-cpanel/internal/cpanel/postgresql"
 )
 
@@ -119,6 +120,40 @@ func TestValidatePostgreSQLAccountName(t *testing.T) {
 	}
 }
 
+func TestValidateMySQLName(t *testing.T) {
+	t.Parallel()
+
+	const (
+		prefix    = "account1234_"
+		maxLength = 32
+	)
+	testCases := map[string]struct {
+		name      string
+		wantError bool
+	}{
+		"valid":             {name: prefix + "database"},
+		"maximum length":    {name: prefix + strings.Repeat("a", maxLength-len(prefix))},
+		"missing prefix":    {name: "other_database", wantError: true},
+		"prefix only":       {name: prefix, wantError: true},
+		"invalid character": {name: prefix + "invalid-name", wantError: true},
+		"too long":          {name: prefix + strings.Repeat("a", maxLength-len(prefix)+1), wantError: true},
+	}
+
+	for name, testCase := range testCases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validateMySQLName(testCase.name, prefix, maxLength)
+			if testCase.wantError && err == nil {
+				t.Fatalf("validateMySQLName(%q) returned no error", testCase.name)
+			}
+			if !testCase.wantError && err != nil {
+				t.Fatalf("validateMySQLName(%q) returned error: %v", testCase.name, err)
+			}
+		})
+	}
+}
+
 func TestCronJobModelLookupsIgnoreVariables(t *testing.T) {
 	t.Parallel()
 
@@ -211,6 +246,62 @@ func TestPostgreSQLDatabaseAPIToModelUsesSet(t *testing.T) {
 	}
 }
 
+func TestMySQLDatabaseAPIToModelUsesSet(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	data := &mysql.DatabaseListResponse{
+		Data: []mysql.Database{
+			{
+				Database: "account1234_database",
+				Users: []string{
+					"account1234_second",
+					"account1234_first",
+				},
+			},
+		},
+	}
+
+	model, diagnostics := MySQLDatabaseAPIToModel(ctx, data, "account1234_database")
+	if diagnostics.HasError() {
+		t.Fatalf("MySQLDatabaseAPIToModel returned diagnostics: %v", diagnostics)
+	}
+	if model == nil {
+		t.Fatal("MySQLDatabaseAPIToModel returned nil")
+	}
+
+	var users []string
+	diagnostics = model.Users.ElementsAs(ctx, &users, false)
+	if diagnostics.HasError() {
+		t.Fatalf("read users set: %v", diagnostics)
+	}
+	if len(users) != 2 {
+		t.Fatalf("users count = %d, want 2", len(users))
+	}
+
+	data.Data[0].Users = nil
+	model, diagnostics = MySQLDatabaseAPIToModel(
+		ctx,
+		data,
+		"account1234_database",
+	)
+	if diagnostics.HasError() {
+		t.Fatalf("nil users returned diagnostics: %v", diagnostics)
+	}
+	if model.Users.IsNull() || model.Users.IsUnknown() ||
+		len(model.Users.Elements()) != 0 {
+		t.Fatalf("nil users produced %#v, want a known empty set", model.Users)
+	}
+
+	missing, diagnostics := MySQLDatabaseAPIToModel(ctx, data, "account1234_missing")
+	if diagnostics.HasError() {
+		t.Fatalf("missing database returned diagnostics: %v", diagnostics)
+	}
+	if missing != nil {
+		t.Fatalf("missing database model = %#v, want nil", missing)
+	}
+}
+
 func TestStringSetDifference(t *testing.T) {
 	t.Parallel()
 
@@ -265,6 +356,21 @@ func TestPostgreSQLUserDataSourceSchemaDoesNotExposePassword(t *testing.T) {
 	}
 }
 
+func TestMySQLUserDataSourceSchemaDoesNotExposePassword(t *testing.T) {
+	t.Parallel()
+
+	var response frameworkdatasource.SchemaResponse
+	(&mySQLUserDataSource{}).Schema(
+		context.Background(),
+		frameworkdatasource.SchemaRequest{},
+		&response,
+	)
+
+	if _, exists := response.Schema.Attributes["password"]; exists {
+		t.Fatal("MySQL user data source schema exposes password")
+	}
+}
+
 func TestPostgreSQLDatabaseUsersAreASet(t *testing.T) {
 	t.Parallel()
 
@@ -277,6 +383,25 @@ func TestPostgreSQLDatabaseUsersAreASet(t *testing.T) {
 
 	if _, ok := response.Schema.Attributes["users"].(resourceschema.SetAttribute); !ok {
 		t.Fatalf("users has type %T, want schema.SetAttribute", response.Schema.Attributes["users"])
+	}
+}
+
+func TestMySQLDatabaseUsersAreASet(t *testing.T) {
+	t.Parallel()
+
+	var response frameworkresource.SchemaResponse
+	(&mySQLDatabaseResource{}).Schema(
+		context.Background(),
+		frameworkresource.SchemaRequest{},
+		&response,
+	)
+
+	if _, ok := response.Schema.Attributes["users"].(resourceschema.SetAttribute); !ok {
+		t.Fatalf("users has type %T, want schema.SetAttribute", response.Schema.Attributes["users"])
+	}
+	deleteOnDestroy, ok := response.Schema.Attributes["delete_on_destroy"].(resourceschema.BoolAttribute)
+	if !ok || deleteOnDestroy.Default == nil {
+		t.Fatal("delete_on_destroy must be a defaulted boolean")
 	}
 }
 

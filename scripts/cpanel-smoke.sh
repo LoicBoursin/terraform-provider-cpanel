@@ -74,7 +74,7 @@ cpanel_version="$(
 )"
 
 request 'execute/Features/list_features' 'feature check'
-for feature in cron postgres; do
+for feature in cron mysql postgres; do
   if [[ "$(jq -r --arg feature "${feature}" '.data[$feature] // 0' "${response_file}")" != "1" ]]; then
     printf 'Required cPanel feature is disabled: %s\n' "${feature}" >&2
     exit 1
@@ -86,6 +86,24 @@ database_count="$(jq -r '.data | length' "${response_file}")"
 
 request 'execute/Postgresql/list_users' 'PostgreSQL user check'
 user_count="$(jq -r '.data | length' "${response_file}")"
+
+test_prefix="${CPANEL_USERNAME}_tf"
+
+request 'execute/Mysql/list_databases' 'MySQL database check'
+mysql_database_count="$(jq -r '.data | length' "${response_file}")"
+mysql_test_database_count="$(
+  jq -r --arg prefix "${test_prefix}" \
+    '[.data[].database | select(startswith($prefix))] | length' \
+    "${response_file}"
+)"
+
+request 'execute/Mysql/list_users' 'MySQL user check'
+mysql_user_count="$(jq -r '.data | length' "${response_file}")"
+mysql_test_user_count="$(
+  jq -r --arg prefix "${test_prefix}" \
+    '[.data[].user | select(startswith($prefix))] | length' \
+    "${response_file}"
+)"
 
 request \
   "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=Cron&cpanel_jsonapi_func=fetchcron" \
@@ -99,10 +117,18 @@ cron_variable_count="$(
 )"
 
 if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
-  if [[ "${database_count}" != "0" || "${user_count}" != "0" || "${cron_count}" != "0" ]]; then
-    printf 'cPanel test account is not empty\n' >&2
+  if [[
+    "${database_count}" != "0"
+    || "${user_count}" != "0"
+    || "${mysql_test_database_count}" != "0"
+    || "${mysql_test_user_count}" != "0"
+    || "${cron_count}" != "0"
+  ]]; then
+    printf 'cPanel test-managed inventory is not empty\n' >&2
     printf '  PostgreSQL databases: %s\n' "${database_count}" >&2
     printf '  PostgreSQL users: %s\n' "${user_count}" >&2
+    printf '  MySQL test databases: %s\n' "${mysql_test_database_count}" >&2
+    printf '  MySQL test users: %s\n' "${mysql_test_user_count}" >&2
     printf '  cron commands: %s\n' "${cron_command_count}" >&2
     printf '  cron variables: %s\n' "${cron_variable_count}" >&2
     exit 1
@@ -115,5 +141,11 @@ printf '  host: %s\n' "${host}"
 printf '  version: %s\n' "${cpanel_version}"
 printf '  PostgreSQL databases: %s\n' "${database_count}"
 printf '  PostgreSQL users: %s\n' "${user_count}"
+printf '  MySQL databases: %s (%s test-managed)\n' \
+  "${mysql_database_count}" \
+  "${mysql_test_database_count}"
+printf '  MySQL users: %s (%s test-managed)\n' \
+  "${mysql_user_count}" \
+  "${mysql_test_user_count}"
 printf '  cron commands: %s\n' "${cron_command_count}"
 printf '  cron variables: %s\n' "${cron_variable_count}"

@@ -67,9 +67,10 @@ get_request() {
 }
 
 uapi_post() {
-  local function="$1"
-  local parameter="$2"
-  local label="$3"
+  local module="$1"
+  local function="$2"
+  local parameter="$3"
+  local label="$4"
   local http_code
   local status
 
@@ -84,7 +85,7 @@ uapi_post() {
       --header "${authorization}" \
       --header 'Content-Type: application/x-www-form-urlencoded' \
       --data-urlencode "${parameter}" \
-      "${host}/execute/Postgresql/${function}"
+      "${host}/execute/${module}/${function}"
   )"
 
   if [[ "${http_code}" != "200" ]]; then
@@ -142,6 +143,8 @@ remove_cron_line() {
 test_prefix="${CPANEL_USERNAME}_tf"
 deleted_databases=0
 deleted_users=0
+deleted_mysql_databases=0
+deleted_mysql_users=0
 deleted_cron_lines=0
 
 get_request 'execute/Postgresql/list_databases' 'PostgreSQL database inventory'
@@ -149,7 +152,7 @@ while IFS= read -r database; do
   if [[ -z "${database}" ]]; then
     continue
   fi
-  uapi_post 'delete_database' "name=${database}" "Delete test database ${database}"
+  uapi_post 'Postgresql' 'delete_database' "name=${database}" "Delete test database ${database}"
   deleted_databases=$((deleted_databases + 1))
 done < <(
   jq -r \
@@ -163,12 +166,40 @@ while IFS= read -r user; do
   if [[ -z "${user}" ]]; then
     continue
   fi
-  uapi_post 'delete_user' "name=${user}" "Delete test user ${user}"
+  uapi_post 'Postgresql' 'delete_user' "name=${user}" "Delete test user ${user}"
   deleted_users=$((deleted_users + 1))
 done < <(
   jq -r \
     --arg prefix "${test_prefix}" \
     '.data[] | select(startswith($prefix))' \
+    "${response_file}"
+)
+
+get_request 'execute/Mysql/list_databases' 'MySQL database inventory'
+while IFS= read -r database; do
+  if [[ -z "${database}" ]]; then
+    continue
+  fi
+  uapi_post 'Mysql' 'delete_database' "name=${database}" "Delete test MySQL database ${database}"
+  deleted_mysql_databases=$((deleted_mysql_databases + 1))
+done < <(
+  jq -r \
+    --arg prefix "${test_prefix}" \
+    '.data[].database | select(startswith($prefix))' \
+    "${response_file}"
+)
+
+get_request 'execute/Mysql/list_users' 'MySQL user inventory'
+while IFS= read -r user; do
+  if [[ -z "${user}" ]]; then
+    continue
+  fi
+  uapi_post 'Mysql' 'delete_user' "name=${user}" "Delete test MySQL user ${user}"
+  deleted_mysql_users=$((deleted_mysql_users + 1))
+done < <(
+  jq -r \
+    --arg prefix "${test_prefix}" \
+    '.data[].user | select(startswith($prefix))' \
     "${response_file}"
 )
 
@@ -220,4 +251,6 @@ fi
 printf 'cPanel test cleanup passed\n'
 printf '  PostgreSQL databases deleted: %d\n' "${deleted_databases}"
 printf '  PostgreSQL users deleted: %d\n' "${deleted_users}"
+printf '  MySQL databases deleted: %d\n' "${deleted_mysql_databases}"
+printf '  MySQL users deleted: %d\n' "${deleted_mysql_users}"
 printf '  cron lines deleted: %d\n' "${deleted_cron_lines}"
