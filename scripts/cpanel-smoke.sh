@@ -91,6 +91,23 @@ request \
   "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=Cron&cpanel_jsonapi_func=fetchcron" \
   'cron check'
 cron_count="$(jq -r '.cpanelresult.data | length' "${response_file}")"
+cron_command_count="$(
+  jq -r '[.cpanelresult.data[] | select(.type == "command")] | length' "${response_file}"
+)"
+cron_variable_count="$(
+  jq -r '[.cpanelresult.data[] | select(.type == "variable")] | length' "${response_file}"
+)"
+
+if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
+  if [[ "${database_count}" != "0" || "${user_count}" != "0" || "${cron_count}" != "0" ]]; then
+    printf 'cPanel test account is not empty\n' >&2
+    printf '  PostgreSQL databases: %s\n' "${database_count}" >&2
+    printf '  PostgreSQL users: %s\n' "${user_count}" >&2
+    printf '  cron commands: %s\n' "${cron_command_count}" >&2
+    printf '  cron variables: %s\n' "${cron_variable_count}" >&2
+    exit 1
+  fi
+fi
 
 printf 'cPanel smoke test passed\n'
 printf '  account: %s\n' "${CPANEL_USERNAME}"
@@ -98,4 +115,5 @@ printf '  host: %s\n' "${host}"
 printf '  version: %s\n' "${cpanel_version}"
 printf '  PostgreSQL databases: %s\n' "${database_count}"
 printf '  PostgreSQL users: %s\n' "${user_count}"
-printf '  cron jobs: %s\n' "${cron_count}"
+printf '  cron commands: %s\n' "${cron_command_count}"
+printf '  cron variables: %s\n' "${cron_variable_count}"

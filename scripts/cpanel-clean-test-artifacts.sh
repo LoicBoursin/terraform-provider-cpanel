@@ -1,0 +1,223 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+env_file="${CPANEL_ENV_FILE:-${HOME}/.config/terraform-provider-cpanel/acceptance.env}"
+
+if [[ -f "${env_file}" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "${env_file}"
+  set +a
+fi
+
+for variable in CPANEL_HOST CPANEL_USERNAME CPANEL_API_TOKEN; do
+  if [[ -z "${!variable:-}" ]]; then
+    printf 'Missing required environment variable: %s\n' "${variable}" >&2
+    exit 1
+  fi
+done
+
+for command in curl jq; do
+  if ! command -v "${command}" >/dev/null 2>&1; then
+    printf 'Missing required command: %s\n' "${command}" >&2
+    exit 1
+  fi
+done
+
+host="${CPANEL_HOST%/}"
+authorization="Authorization: cpanel ${CPANEL_USERNAME}:${CPANEL_API_TOKEN}"
+response_file="$(mktemp)"
+
+cleanup() {
+  rm -f "${response_file}"
+}
+
+trap cleanup EXIT
+
+get_request() {
+  local endpoint="$1"
+  local label="$2"
+  local http_code
+  local status
+
+  http_code="$(
+    curl \
+      --silent \
+      --show-error \
+      --max-time 20 \
+      --output "${response_file}" \
+      --write-out '%{http_code}' \
+      --header "${authorization}" \
+      "${host}/${endpoint}"
+  )"
+
+  if [[ "${http_code}" != "200" ]]; then
+    printf '%s failed with HTTP %s\n' "${label}" "${http_code}" >&2
+    exit 1
+  fi
+
+  status="$(jq -r '.status // .cpanelresult.event.result // empty' "${response_file}")"
+  if [[ "${status}" != "1" ]]; then
+    printf '%s failed: %s\n' \
+      "${label}" \
+      "$(jq -c '{errors, messages, cpanelresult}' "${response_file}")" >&2
+    exit 1
+  fi
+}
+
+uapi_post() {
+  local function="$1"
+  local parameter="$2"
+  local label="$3"
+  local http_code
+  local status
+
+  http_code="$(
+    curl \
+      --silent \
+      --show-error \
+      --max-time 20 \
+      --request POST \
+      --output "${response_file}" \
+      --write-out '%{http_code}' \
+      --header "${authorization}" \
+      --header 'Content-Type: application/x-www-form-urlencoded' \
+      --data-urlencode "${parameter}" \
+      "${host}/execute/Postgresql/${function}"
+  )"
+
+  if [[ "${http_code}" != "200" ]]; then
+    printf '%s failed with HTTP %s\n' "${label}" "${http_code}" >&2
+    exit 1
+  fi
+
+  status="$(jq -r '.status // empty' "${response_file}")"
+  if [[ "${status}" != "1" ]]; then
+    printf '%s failed: %s\n' \
+      "${label}" \
+      "$(jq -c '{errors, messages}' "${response_file}")" >&2
+    exit 1
+  fi
+}
+
+remove_cron_line() {
+  local linekey="$1"
+  local label="$2"
+  local http_code
+  local status
+
+  http_code="$(
+    curl \
+      --silent \
+      --show-error \
+      --max-time 20 \
+      --request POST \
+      --output "${response_file}" \
+      --write-out '%{http_code}' \
+      --header "${authorization}" \
+      --header 'Content-Type: application/x-www-form-urlencoded' \
+      --data-urlencode 'cpanel_jsonapi_apiversion=2' \
+      --data-urlencode "cpanel_jsonapi_user=${CPANEL_USERNAME}" \
+      --data-urlencode 'cpanel_jsonapi_module=Cron' \
+      --data-urlencode 'cpanel_jsonapi_func=remove_line' \
+      --data-urlencode "linekey=${linekey}" \
+      "${host}/json-api/cpanel"
+  )"
+
+  if [[ "${http_code}" != "200" ]]; then
+    printf '%s failed with HTTP %s\n' "${label}" "${http_code}" >&2
+    exit 1
+  fi
+
+  status="$(jq -r '.cpanelresult.event.result // empty' "${response_file}")"
+  if [[ "${status}" != "1" ]]; then
+    printf '%s failed: %s\n' \
+      "${label}" \
+      "$(jq -c '{cpanelresult}' "${response_file}")" >&2
+    exit 1
+  fi
+}
+
+test_prefix="${CPANEL_USERNAME}_tf"
+deleted_databases=0
+deleted_users=0
+deleted_cron_lines=0
+
+get_request 'execute/Postgresql/list_databases' 'PostgreSQL database inventory'
+while IFS= read -r database; do
+  if [[ -z "${database}" ]]; then
+    continue
+  fi
+  uapi_post 'delete_database' "name=${database}" "Delete test database ${database}"
+  deleted_databases=$((deleted_databases + 1))
+done < <(
+  jq -r \
+    --arg prefix "${test_prefix}" \
+    '.data[].database | select(startswith($prefix))' \
+    "${response_file}"
+)
+
+get_request 'execute/Postgresql/list_users' 'PostgreSQL user inventory'
+while IFS= read -r user; do
+  if [[ -z "${user}" ]]; then
+    continue
+  fi
+  uapi_post 'delete_user' "name=${user}" "Delete test user ${user}"
+  deleted_users=$((deleted_users + 1))
+done < <(
+  jq -r \
+    --arg prefix "${test_prefix}" \
+    '.data[] | select(startswith($prefix))' \
+    "${response_file}"
+)
+
+get_request \
+  "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=Cron&cpanel_jsonapi_func=fetchcron" \
+  'Cron inventory'
+while IFS= read -r linekey; do
+  if [[ -z "${linekey}" ]]; then
+    continue
+  fi
+  remove_cron_line "${linekey}" "Delete test cron line ${linekey}"
+  deleted_cron_lines=$((deleted_cron_lines + 1))
+done < <(
+  jq -r \
+    '.cpanelresult.data[]
+      | select(.type == "command")
+      | select((.command // "") | contains("# terraform-provider-cpanel-"))
+      | .linekey' \
+    "${response_file}"
+)
+
+get_request \
+  "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=Cron&cpanel_jsonapi_func=fetchcron" \
+  'Cron inventory after test cleanup'
+cron_command_count="$(
+  jq -r '[.cpanelresult.data[] | select(.type == "command")] | length' "${response_file}"
+)"
+
+if [[ "${cron_command_count}" == "0" ]]; then
+  while IFS= read -r linekey; do
+    if [[ -z "${linekey}" ]]; then
+      continue
+    fi
+    remove_cron_line "${linekey}" "Delete generated cron variable ${linekey}"
+    deleted_cron_lines=$((deleted_cron_lines + 1))
+  done < <(
+    jq -r \
+      '.cpanelresult.data[]
+        | select(.type == "variable")
+        | select(
+            (.key == "MAILTO" and (.value // "") == "")
+            or (.key == "SHELL" and (.value // "") == "/bin/bash")
+          )
+        | .linekey' \
+      "${response_file}"
+  )
+fi
+
+printf 'cPanel test cleanup passed\n'
+printf '  PostgreSQL databases deleted: %d\n' "${deleted_databases}"
+printf '  PostgreSQL users deleted: %d\n' "${deleted_users}"
+printf '  cron lines deleted: %d\n' "${deleted_cron_lines}"

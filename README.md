@@ -1,95 +1,75 @@
 # Terraform Provider cPanel
 
-## Project Status
+Terraform provider for managing account-level cron jobs and PostgreSQL users
+and databases through the cPanel API.
 
-Version `0.1.0` is an experimental release from February 2024. The current
-`v1.0` effort is focused on making the existing cron and PostgreSQL resources
-production-ready and certifying them against o2switch cPanel 134.
+## Status
 
-The supported-version policy is documented in
+Version `0.1.0` is the latest published release. The current source tree is the
+`v1.0` release candidate, certified against o2switch cPanel `134.0` build `44`.
+
+The supported versions and API policy are documented in
 [`docs/compatibility.md`](docs/compatibility.md).
-Local setup and acceptance testing are documented in
-[`docs/development.md`](docs/development.md).
+## Supported resources
 
-## Available Resources
+- `cpanel_cron_job`
+- `cpanel_postgresql_database`
+- `cpanel_postgresql_user`
 
-The v1.0 scope contains:
-
-- Cron Jobs
-- PostgreSQL Databases & Users
-
-Other cPanel resource families are outside the v1.0 scope and can be added in
-later releases.
+Matching data sources are available for each resource family. Other cPanel
+features are outside the `v1.0` scope.
 
 ## Requirements
 
-- [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.4
-- [Go](https://golang.org/doc/install) >= 1.20
+- Terraform CLI `1.14.x` or `1.15.x`
+- Go `1.26.x` for development
+- cPanel `134.x` over HTTPS with Cron and PostgreSQL enabled
 
-## Building The Provider
+## Configuration
 
-1. Clone the repository
-1. Enter the repository directory
-1. Build the provider using the Go `install` command:
+Keep credentials outside Terraform configuration:
+
+```shell
+export CPANEL_HOST="https://cpanel.example.com:2083"
+export CPANEL_USERNAME="account"
+export CPANEL_API_TOKEN="token"
+```
+
+Then configure the provider without embedding secrets:
+
+```terraform
+provider "cpanel" {}
+```
+
+The same values can be supplied through the `host`, `username`, and
+`api_token` provider attributes when required. `api_token` is sensitive, but
+Terraform configuration and state must still be protected.
+
+The provider serializes cPanel requests internally. Standard `terraform plan`
+and `terraform apply` commands are supported; no manual `-parallelism=1` flag
+is required.
+
+## Development
+
+Build and run the local test suite:
 
 ```shell
 go install
+make test
+make lint
 ```
 
-## Adding Dependencies
-
-This provider uses [Go modules](https://github.com/golang/go/wiki/Modules).
-Please see the Go documentation for the most up to date information about using Go modules.
-
-To add a new dependency `github.com/author/dependency` to your Terraform provider:
-
-```shell
-go get github.com/author/dependency
-go mod tidy
-```
-
-Then commit the changes to `go.mod` and `go.sum`.
-
-## Using the provider
-
-You **MUST** disable parallelism when using the provider, because cPanel's API does not support concurrent requests. 
-To do so, you can run the defined commands:
-
-```shell
-make plan
-```
-
-```shell
-make apply
-```
-
-
-Or you can manually:
-- Set an environment variable: `export TF_CLI_ARGS_apply="-parallelism=1"`
-- Set a CLI flag: `terraform apply -parallelism=1`
-
-## Developing the Provider
-
-If you wish to work on the provider, you'll first need [Go](http://www.golang.org) installed on your machine (see [Requirements](#requirements) above).
-
-To compile the provider, run `go install`. This will build the provider and put the provider binary in the `$GOPATH/bin` directory.
-
-To generate or update documentation, run:
+Generate Registry documentation:
 
 ```shell
 make generate-documentation
 ```
 
-To lint the code, run:
+Run the destructive cPanel acceptance suite:
 
 ```shell
-make lint
+make test-acceptance
 ```
 
-In order to run the full suite of Acceptance tests, run:
-
-```shell
-make test
-```
-
-*Note:* Acceptance tests create real resources, and requires a real cPanel account to run. Please be aware of the costs associated with running acceptance tests. For more information, refer to the [Acceptance Testing](https://www.terraform.io/docs/extend/testing/acceptance-tests/index.html) documentation.
+Acceptance credentials, cleanup rules, and release validation are documented
+in [`docs/development.md`](docs/development.md).

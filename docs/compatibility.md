@@ -41,10 +41,14 @@ cPanel environment.
 
 ## Concurrency
 
-The v0.1.0 documentation requires Terraform parallelism to be disabled. This
-requirement is not part of the v1.0 contract until it has been reproduced and
-measured against cPanel 134. The provider must serialize calls internally if
-the server cannot process the supported operations concurrently.
+The provider serializes all cPanel requests through its shared client. Users do
+not need to disable Terraform parallelism.
+
+Each HTTP request has a 30-second timeout and honors Terraform context
+cancellation. The provider does not automatically retry API calls. cPanel
+mutations are not reliably idempotent, so retrying after an interrupted
+response could apply an operation twice. Terraform instead refreshes the
+remote state before deciding what must be retried.
 
 ## Compatibility evidence
 
@@ -55,3 +59,6 @@ A release is compatible only when:
 - the complete acceptance suite passes on the certified cPanel environment;
 - a second refresh after the test run reports no unexpected state changes;
 - the test account contains no residual resources after cleanup.
+
+The release workflow repeats the complete acceptance suite on Terraform
+`1.14.9` and `1.15.8` before it can sign and publish artifacts.

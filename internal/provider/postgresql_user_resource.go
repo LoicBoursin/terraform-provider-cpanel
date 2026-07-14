@@ -3,13 +3,14 @@ package provider
 import (
 	"context"
 	"fmt"
+
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
 	"strings"
 	"terraform-provider-cpanel/internal/cpanel/postgresql"
-	"time"
 )
 
 // Ensure the implementation satisfies the expected interfaces.
@@ -37,20 +38,20 @@ func (r *postgreSQLUserResource) Metadata(_ context.Context, req resource.Metada
 // Schema defines the schema for the resource.
 func (r *postgreSQLUserResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description:         "Manages a cPanel PostgreSQL user and its password.",
+		MarkdownDescription: "Manages a cPanel PostgreSQL user and its password.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Required:            true,
-				Description:         "The user name.",
-				MarkdownDescription: "The user name.",
+				Description:         "The PostgreSQL user name, including the cPanel account prefix.",
+				MarkdownDescription: "The PostgreSQL user name, including the cPanel account prefix.",
+				Validators:          postgreSQLNameValidators(),
 			},
 			"password": schema.StringAttribute{
 				Required:            true,
 				Sensitive:           true,
-				Description:         "The user password.",
-				MarkdownDescription: "The user password.",
-			},
-			"last_updated": schema.StringAttribute{
-				Computed: true,
+				Description:         "The PostgreSQL user password. cPanel cannot return it, so Terraform stores the configured value in state.",
+				MarkdownDescription: "The PostgreSQL user password. cPanel cannot return it, so Terraform stores the configured value in state.",
 			},
 		},
 	}
@@ -68,26 +69,18 @@ func (r *postgreSQLUserResource) Read(ctx context.Context, req resource.ReadRequ
 	}
 
 	// Read users
-	postgreSQLUserDataSource, err := r.client.GetUsers()
+	userExists, err := r.client.UserExists(ctx, state.Name.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError(
-			"Error getting users",
-			"Could not get users, unexpected error: "+err.Error(),
+			"Unable to read PostgreSQL user",
+			"Could not read PostgreSQL users: "+err.Error(),
 		)
 		return
 	}
-
-	var currentUser string
-
-	for _, user := range postgreSQLUserDataSource.Data {
-		if user != state.Name.ValueString() {
-			continue
-		}
-
-		currentUser = user
+	if !userExists {
+		resp.State.RemoveResource(ctx)
+		return
 	}
-
-	state.Name = types.StringValue(currentUser)
 
 	// Set refreshed state
 	diags = resp.State.Set(ctx, &state)
@@ -107,6 +100,13 @@ func (r *postgreSQLUserResource) Create(ctx context.Context, req resource.Create
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	if err := validatePostgreSQLAccountName(r.client.Auth.Username, plan.Name.ValueString()); err != nil {
+		resp.Diagnostics.AddError(
+			"Invalid PostgreSQL user name",
+			err.Error(),
+		)
+		return
+	}
 
 	// Generate API request parameters from plan
 	var user postgresql.UserCreateModel
@@ -114,7 +114,7 @@ func (r *postgreSQLUserResource) Create(ctx context.Context, req resource.Create
 	user.Password = plan.Password.ValueString()
 
 	// Create new database
-	postgreSQLUserDataSourceModel, err := r.client.CreateUser(user)
+	postgreSQLUserDataSourceModel, err := r.client.CreateUser(ctx, user)
 
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -133,8 +133,6 @@ func (r *postgreSQLUserResource) Create(ctx context.Context, req resource.Create
 
 	plan.Name = types.StringValue(user.Name)
 	plan.Password = types.StringValue(user.Password)
-	plan.LastUpdated = types.StringValue(time.Now().Format(time.RFC3339))
-
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
@@ -151,6 +149,13 @@ func (r *postgreSQLUserResource) Update(ctx context.Context, req resource.Update
 	diags := req.Plan.Get(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+	if err := validatePostgreSQLAccountName(r.client.Auth.Username, plan.Name.ValueString()); err != nil {
+		resp.Diagnostics.AddError(
+			"Invalid PostgreSQL user name",
+			err.Error(),
+		)
 		return
 	}
 
@@ -177,9 +182,9 @@ func (r *postgreSQLUserResource) Update(ctx context.Context, req resource.Update
 	var err error
 
 	if userRename.OldName != userRename.NewName {
-		postgreSQLUserDataSourceModel, err = r.client.RenameUser(userRename)
+		postgreSQLUserDataSourceModel, err = r.client.RenameUser(ctx, userRename)
 	} else {
-		postgreSQLUserDataSourceModel, err = r.client.SetPassword(userSetPassword)
+		postgreSQLUserDataSourceModel, err = r.client.SetPassword(ctx, userSetPassword)
 	}
 
 	if err != nil {
@@ -200,8 +205,6 @@ func (r *postgreSQLUserResource) Update(ctx context.Context, req resource.Update
 
 	plan.Name = types.StringValue(userRename.NewName)
 	plan.Password = types.StringValue(userRename.Password)
-	plan.LastUpdated = types.StringValue(time.Now().Format(time.RFC3339))
-
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
@@ -224,7 +227,7 @@ func (r *postgreSQLUserResource) Delete(ctx context.Context, req resource.Delete
 	user.Name = state.Name.ValueString()
 
 	// Delete existing user
-	postgreSQLUserDataSourceModel, err := r.client.DeleteUser(user)
+	postgreSQLUserDataSourceModel, err := r.client.DeleteUser(ctx, user)
 
 	if err != nil {
 		resp.Diagnostics.AddError(

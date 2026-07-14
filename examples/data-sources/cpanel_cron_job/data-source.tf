@@ -1,4 +1,4 @@
-resource "cpanel_cron_job" "cron" {
+data "cpanel_cron_job" "cron" {
   command = "ls -la"
   minute  = "0"
   hour    = "0"

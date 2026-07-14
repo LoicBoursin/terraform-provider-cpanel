@@ -13,7 +13,10 @@ permissions:
   contents: read
 
 env:
+  ACTIONLINT_VERSION: v1.7.12
   GOLANGCI_LINT_VERSION: v2.12.2
+  GOVULNCHECK_VERSION: v1.6.0
+  GOTOOLCHAIN: go1.26.5
   TERRAFORM_CURRENT_VERSION: 1.15.8
 
 jobs:
@@ -32,12 +35,11 @@ jobs:
       - run: go build -v .
       - run: go test -race ./...
       - run: go vet ./...
+      - run: go run github.com/rhysd/actionlint/cmd/actionlint@${{ env.ACTIONLINT_VERSION }}
       - uses: golangci/golangci-lint-action@d583c34f0599d37dbac4a198b9c83201be380893 # v9.3.0
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
-      - uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
-        with:
-          go-package: ./...
+      - run: go run golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }} ./...
 
   generate:
     name: Generated files

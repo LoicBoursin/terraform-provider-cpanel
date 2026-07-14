@@ -4,24 +4,24 @@ import "terraform-provider-cpanel/internal/cpanel"
 
 type DatabaseDataSourceModel struct {
 	cpanel.UAPIDataSourceModel
-	Data []DatabaseDataSourceDataModel `tfsdk:"data"`
+	Data []DatabaseDataSourceDataModel `json:"data" tfsdk:"data"`
 }
 
 type DatabaseDataSourceDataModel struct {
-	Database  string   `tfsdk:"database"`
-	DiskUsage int64    `tfsdk:"disk_usage"`
-	Users     []string `tfsdk:"users"`
+	Database  string   `json:"database" tfsdk:"database"`
+	DiskUsage int64    `json:"disk_usage" tfsdk:"disk_usage"`
+	Users     []string `json:"users" tfsdk:"users"`
 }
 
 type DatabaseCreateModel struct {
-	Name string `tfsdk:"name"`
+	Name string `json:"name" tfsdk:"name"`
 }
 
 type DatabaseUpdateModel struct {
-	NewName string `tfsdk:"new_name"`
-	OldName string `tfsdk:"old_name"`
+	NewName string `json:"new_name" tfsdk:"new_name"`
+	OldName string `json:"old_name" tfsdk:"old_name"`
 }
 
 type DatabaseDeleteModel struct {
-	Name string `tfsdk:"name"`
+	Name string `json:"name" tfsdk:"name"`
 }

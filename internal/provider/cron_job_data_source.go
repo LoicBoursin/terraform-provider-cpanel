@@ -3,10 +3,10 @@ package provider
 import (
 	"context"
 	"fmt"
-	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+
 	"terraform-provider-cpanel/internal/cpanel/cron"
 )
 
@@ -61,6 +61,8 @@ func (d *cronJobDataSource) Metadata(_ context.Context, req datasource.MetadataR
 // Schema defines the schema for the data source.
 func (d *cronJobDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description:         "Looks up one cPanel cron command by its schedule and command.",
+		MarkdownDescription: "Looks up one cPanel cron command by its schedule and command.",
 		Attributes: map[string]schema.Attribute{
 			"command": schema.StringAttribute{
 				Required:            true,
@@ -71,37 +73,36 @@ func (d *cronJobDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 				Required:            true,
 				Description:         "The minute of the hour to run the cron job. Expressions such as */5 or 0,30 are allowed.",
 				MarkdownDescription: "The minute of the hour to run the cron job. Expressions such as */5 or 0,30 are allowed.",
+				Validators:          cronMinuteValidators(),
 			},
 			"hour": schema.StringAttribute{
 				Required:            true,
 				Description:         "The hour of the day to run the cron job. Expressions such as */2 or 0,12 are allowed.",
 				MarkdownDescription: "The hour of the day to run the cron job. Expressions such as */2 or 0,12 are allowed.",
+				Validators:          cronHourValidators(),
 			},
 			"day": schema.StringAttribute{
 				Required:            true,
 				Description:         "The day of the month to run the cron job. Expressions such as */15 are allowed.",
 				MarkdownDescription: "The day of the month to run the cron job. Expressions such as */15 are allowed.",
+				Validators:          cronDayValidators(),
 			},
 			"weekday": schema.StringAttribute{
 				Required:            true,
 				Description:         "The day of the week to run the cron job.",
 				MarkdownDescription: "The day of the week to run the cron job.",
-				Validators: []validator.String{
-					stringvalidator.OneOf("0", "1", "2", "3", "4", "5", "6", "7", "*"),
-				},
+				Validators:          cronWeekdayValidators(),
 			},
 			"month": schema.StringAttribute{
 				Required:            true,
-				Description:         "The month of the year to run the cron job. Expressions such as */3 or 1,4,7 are allowed.",
-				MarkdownDescription: "The month of the year to run the cron job. Expressions such as */3 or 1,4,7 are allowed.",
+				Description:         "The month of the year to run the cron job. Expressions such as */3 are allowed.",
+				MarkdownDescription: "The month of the year to run the cron job. Expressions such as */3 are allowed.",
+				Validators:          cronMonthValidators(),
 			},
 			"linekey": schema.Int64Attribute{
 				Computed:            true,
-				Description:         "The cron job ID.",
-				MarkdownDescription: "The cron job ID.",
-			},
-			"last_updated": schema.StringAttribute{
-				Computed: true,
+				Description:         "The matching cPanel cron line key.",
+				MarkdownDescription: "The matching cPanel cron line key.",
 			},
 		},
 	}
@@ -118,7 +119,7 @@ func (d *cronJobDataSource) Read(ctx context.Context, req datasource.ReadRequest
 		return
 	}
 
-	cronJobs, err := d.client.GetCronJobs()
+	cronJobs, err := d.client.GetCronJobs(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			fmt.Sprintf("Unable to Read Cron jobs: %s", err),
@@ -127,8 +128,23 @@ func (d *cronJobDataSource) Read(ctx context.Context, req datasource.ReadRequest
 		return
 	}
 
-	state := CronJobAPIToModel(cronJobs, CalculateCronJobModelInternalId(config))
+	matches := CronJobAPIToModelsByInternalID(cronJobs, CalculateCronJobModelInternalID(config))
+	if len(matches) == 0 {
+		resp.Diagnostics.AddError(
+			"Cron job not found",
+			"No cron job matches the configured schedule and command.",
+		)
+		return
+	}
+	if len(matches) > 1 {
+		resp.Diagnostics.AddError(
+			"Multiple cron jobs matched",
+			"More than one cron job matches the configured schedule and command. "+
+				"Use the managed resource or make the remote jobs unique.",
+		)
+		return
+	}
 
 	// Save data into Terraform state
-	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+	resp.Diagnostics.Append(resp.State.Set(ctx, matches[0])...)
 }

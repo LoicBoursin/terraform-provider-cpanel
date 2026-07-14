@@ -1,6 +1,11 @@
 package postgresql
 
-import "terraform-provider-cpanel/internal/cpanel"
+import (
+	"context"
+	"net/http"
+
+	"terraform-provider-cpanel/internal/cpanel"
+)
 
 type Client struct {
 	*cpanel.Client
@@ -12,6 +17,34 @@ func NewClient(c *cpanel.Client) *Client {
 	}
 }
 
-func (c *Client) executeOperation(function string, queryParams map[string]string, inputModel interface{}) error {
-	return c.Client.ExecuteUAPIOperation(cpanel.ModulePostgresql, function, queryParams, inputModel)
+func (c *Client) executeReadOperation(
+	ctx context.Context,
+	function string,
+	parameters map[string]string,
+	output any,
+) error {
+	return c.ExecuteUAPIOperation(
+		ctx,
+		http.MethodGet,
+		cpanel.ModulePostgresql,
+		function,
+		parameters,
+		output,
+	)
+}
+
+func (c *Client) executeMutation(
+	ctx context.Context,
+	function string,
+	parameters map[string]string,
+	output any,
+) error {
+	return c.ExecuteUAPIOperation(
+		ctx,
+		http.MethodPost,
+		cpanel.ModulePostgresql,
+		function,
+		parameters,
+		output,
+	)
 }

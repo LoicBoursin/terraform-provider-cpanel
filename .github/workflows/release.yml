@@ -8,13 +8,77 @@ on:
 permissions:
   contents: write
 
+env:
+  ACTIONLINT_VERSION: v1.7.12
+  GOVULNCHECK_VERSION: v1.6.0
+  GOTOOLCHAIN: go1.26.5
+  TERRAFORM_CURRENT_VERSION: 1.15.8
+  SYFT_VERSION: v1.42.3
+
 jobs:
-  release:
+  quality:
+    name: Validate release source
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_CURRENT_VERSION }}
+          terraform_wrapper: false
+      - run: go mod download
+      - run: go mod verify
+      - run: go build -v .
+      - run: go test -race ./...
+      - run: go vet ./...
+      - run: go run github.com/rhysd/actionlint/cmd/actionlint@${{ env.ACTIONLINT_VERSION }}
+      - run: go run golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }} ./...
+      - run: go generate ./...
+      - name: Check generated files
+        run: git diff --compact-summary --exit-code
+
+  acceptance:
+    name: Acceptance tests (Terraform ${{ matrix.terraform }})
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
     concurrency:
-      group: cpanel-release
+      group: cpanel-release-acceptance
       cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        terraform:
+          - 1.14.9
+          - 1.15.8
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ matrix.terraform }}
+          terraform_wrapper: false
+      - env:
+          CPANEL_HOST: ${{ secrets.CPANEL_HOST }}
+          CPANEL_USERNAME: ${{ secrets.CPANEL_USERNAME }}
+          CPANEL_API_TOKEN: ${{ secrets.CPANEL_API_TOKEN }}
+        run: ./scripts/test-acceptance.sh
+
+  release:
+    name: Sign and publish
+    needs:
+      - quality
+      - acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -23,23 +87,16 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+      - name: Download Syft
+        id: syft
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
-          terraform_version: 1.15.8
-          terraform_wrapper: false
-      - run: go mod download
-      - run: go mod verify
-      - run: go test -race ./...
-      - run: go vet ./...
-      - uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
-        with:
-          go-package: ./...
-      - name: Run cPanel acceptance tests
-        env:
-          CPANEL_HOST: ${{ secrets.CPANEL_HOST }}
-          CPANEL_USERNAME: ${{ secrets.CPANEL_USERNAME }}
-          CPANEL_API_TOKEN: ${{ secrets.CPANEL_API_TOKEN }}
-        run: ./scripts/test-acceptance.sh
+          syft-version: ${{ env.SYFT_VERSION }}
+      - name: Add Syft to PATH
+        run: |
+          mkdir -p "${RUNNER_TEMP}/bin"
+          ln -s "${{ steps.syft.outputs.cmd }}" "${RUNNER_TEMP}/bin/syft"
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
       - name: Import GPG key
         id: import_gpg
         uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0

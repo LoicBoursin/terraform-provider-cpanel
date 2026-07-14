@@ -1,0 +1,13 @@
+{
+  "schema_version": 0,
+  "attributes": {
+    "linekey": 42,
+    "weekday": "2",
+    "minute": "7",
+    "hour": "3",
+    "day": "15",
+    "month": "6",
+    "command": "/usr/bin/true",
+    "last_updated": "2024-02-10T00:00:00Z"
+  }
+}

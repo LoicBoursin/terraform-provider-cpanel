@@ -46,16 +46,24 @@ func (p *cpanelProvider) Metadata(_ context.Context, _ provider.MetadataRequest,
 // Schema defines the provider-level schema for configuration data.
 func (p *cpanelProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description:         "Manage cPanel account cron jobs and PostgreSQL users and databases.",
+		MarkdownDescription: "Manage cPanel account cron jobs and PostgreSQL users and databases.",
 		Attributes: map[string]schema.Attribute{
 			"username": schema.StringAttribute{
-				Optional: true,
+				Optional:            true,
+				Description:         "The cPanel account username. May also be set with CPANEL_USERNAME.",
+				MarkdownDescription: "The cPanel account username. May also be set with `CPANEL_USERNAME`.",
 			},
 			"api_token": schema.StringAttribute{
-				Optional:  true,
-				Sensitive: true,
+				Optional:            true,
+				Sensitive:           true,
+				Description:         "The cPanel API token. May also be set with CPANEL_API_TOKEN.",
+				MarkdownDescription: "The cPanel API token. May also be set with `CPANEL_API_TOKEN`.",
 			},
 			"host": schema.StringAttribute{
-				Optional: true,
+				Optional:            true,
+				Description:         "The HTTPS cPanel account API endpoint, usually including port 2083. May also be set with CPANEL_HOST.",
+				MarkdownDescription: "The HTTPS cPanel account API endpoint, usually including port `2083`. May also be set with `CPANEL_HOST`.",
 			},
 		},
 	}
@@ -162,12 +170,10 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 
 	ctx = tflog.SetField(ctx, "cpanel_host", host)
 	ctx = tflog.SetField(ctx, "cpanel_username", username)
-	ctx = tflog.MaskFieldValuesWithFieldKeys(ctx, "cpanel_api_token", apiToken)
-
 	tflog.Info(ctx, "Creating cpanel client")
 
 	// Create a new cpanel client using the configuration values
-	client, err := cpanel.NewClient(&host, &username, &apiToken)
+	client, err := cpanel.NewClient(host, username, apiToken)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Unable to Create cpanel API Client",
@@ -193,7 +199,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		"postgresql": postgreSQLClient,
 	}
 
-	tflog.Error(ctx, "Configured module clients", map[string]any{"success": true})
+	tflog.Info(ctx, "Configured module clients", map[string]any{"success": true})
 }
 
 // DataSources defines the data sources implemented in the provider.
