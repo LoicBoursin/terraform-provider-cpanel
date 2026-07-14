@@ -67,3 +67,20 @@ type AddonDomain struct {
 	BaseDirectory     string `json:"basedir"`
 	Status            string `json:"status"`
 }
+
+type DomainAliasListResponse struct {
+	CpanelResult DomainAliasListResult `json:"cpanelresult"`
+}
+
+type DomainAliasListResult struct {
+	cpanel.API2DataSourceCpanelResultModel
+	Data []DomainAlias `json:"data"`
+}
+
+type DomainAlias struct {
+	Domain        string `json:"domain"`
+	Directory     string `json:"dir"`
+	RelativeDir   string `json:"reldir"`
+	BaseDirectory string `json:"basedir"`
+	Status        string `json:"status"`
+}

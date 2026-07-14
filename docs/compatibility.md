@@ -28,8 +28,9 @@ security fixes.
 
 The o2switch certification environment uses the cPanel account API over HTTPS
 on port 2083. Certification covers authentication, cron jobs, addon domains,
-web subdomains, email and FTP accounts, MySQL or MariaDB databases and users,
-PostgreSQL databases and users, imports, drift detection, and cleanup.
+domain aliases, web subdomains, email and FTP accounts, MySQL or MariaDB
+databases and users, PostgreSQL databases and users, imports, drift detection,
+and cleanup.
 
 ## API policy
 
@@ -51,11 +52,13 @@ equivalents for the required cron functions. API 2 is deprecated, so each
 provider release must run the cron acceptance suite against the certified
 cPanel environment.
 
-Addon-domain and web-subdomain creation, document-root changes, and deletion
-also use cPanel API 2 because cPanel does not provide equivalent account-level
-UAPI mutations. Reads use the domain inventory exposed by cPanel, and every
-release must repeat the domain acceptance suites against the certified
-environment.
+Addon-domain, domain-alias, and web-subdomain creation and deletion, plus
+document-root changes, use cPanel API 2 because cPanel does not provide
+equivalent account-level UAPI mutations. A domain alias always targets the
+account main domain and shares its `public_html` document root; Terraform never
+deletes that shared directory. Reads use the domain inventory exposed by
+cPanel, and every release must repeat the domain acceptance suites against the
+certified environment.
 
 ## Concurrency
 

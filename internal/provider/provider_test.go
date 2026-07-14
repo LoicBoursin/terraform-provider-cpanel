@@ -64,6 +64,9 @@ func testAccPreCheck(t *testing.T) {
 	if _, err := cpaneldomain.NewClient(client).ListAddonDomains(ctx); err != nil {
 		t.Fatalf("verify AddonDomain API access: %v", err)
 	}
+	if _, err := cpaneldomain.NewClient(client).ListDomainAliases(ctx); err != nil {
+		t.Fatalf("verify domain alias API access: %v", err)
+	}
 	if _, err := postgresql.NewClient(client).GetDatabases(ctx); err != nil {
 		t.Fatalf("verify PostgreSQL API access: %v", err)
 	}
@@ -179,6 +182,20 @@ func testAccAddonDomain(t *testing.T, kind string) (string, string) {
 	)
 
 	return internalSubdomain + ".example.test", internalSubdomain
+}
+
+func testAccDomainAlias(t *testing.T, kind string) string {
+	t.Helper()
+
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("TF_ACC must be set for acceptance tests")
+	}
+
+	return fmt.Sprintf(
+		"tfcpanelalias%s%s.example.test",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
+	)
 }
 
 func testAccMainDomain(t *testing.T) string {
@@ -979,5 +996,102 @@ func testAccDeleteAddonDomain(t *testing.T, domain string) {
 		addonDomain.DomainKey,
 	); err != nil {
 		t.Fatalf("delete addon domain %q: %v", domain, err)
+	}
+}
+
+func testAccCheckDomainAliasExists(
+	domain string,
+	expectedTargetDomain string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		const expectedDocumentRoot = "public_html"
+
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		domainClient := cpaneldomain.NewClient(client)
+		domainAlias, err := domainClient.GetDomainAlias(ctx, domain)
+		if err != nil {
+			return err
+		}
+		if domainAlias == nil {
+			return fmt.Errorf("domain alias %q was not found", domain)
+		}
+		if domainAlias.BaseDirectory != expectedDocumentRoot {
+			return fmt.Errorf(
+				"domain alias %q document root = %q, want %q",
+				domain,
+				domainAlias.BaseDirectory,
+				expectedDocumentRoot,
+			)
+		}
+
+		targetDomain, err := domainClient.GetMainDomain(ctx)
+		if err != nil {
+			return err
+		}
+		if targetDomain != expectedTargetDomain {
+			return fmt.Errorf(
+				"domain alias %q target domain = %q, want %q",
+				domain,
+				targetDomain,
+				expectedTargetDomain,
+			)
+		}
+
+		return nil
+	}
+}
+
+func testAccCheckDomainAliasesDestroyed(domains ...string) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		response, err := cpaneldomain.NewClient(client).ListDomainAliases(ctx)
+		if err != nil {
+			return err
+		}
+		for _, domainAlias := range response.CpanelResult.Data {
+			if slices.Contains(domains, domainAlias.Domain) {
+				return fmt.Errorf("domain alias %q still exists", domainAlias.Domain)
+			}
+		}
+
+		return nil
+	}
+}
+
+func testAccDeleteDomainAlias(t *testing.T, domain string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+
+	domainClient := cpaneldomain.NewClient(client)
+	domainAlias, err := domainClient.GetDomainAlias(ctx, domain)
+	if err != nil {
+		t.Fatalf("read domain alias %q: %v", domain, err)
+	}
+	if domainAlias == nil {
+		return
+	}
+	if err := domainClient.DeleteDomainAlias(ctx, domain); err != nil {
+		t.Fatalf("delete domain alias %q: %v", domain, err)
 	}
 }

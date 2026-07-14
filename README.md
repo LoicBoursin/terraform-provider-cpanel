@@ -15,7 +15,9 @@ The supported versions and API policy are documented in
 
 - `cpanel_addon_domain`
 - `cpanel_cron_job`
+- `cpanel_domain_alias`
 - `cpanel_email_account`
+- `cpanel_ftp_account`
 - `cpanel_mysql_database`
 - `cpanel_mysql_user`
 - `cpanel_postgresql_database`

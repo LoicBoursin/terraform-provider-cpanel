@@ -194,6 +194,7 @@ deleted_mysql_users=0
 deleted_email_accounts=0
 deleted_ftp_accounts=0
 deleted_addon_domains=0
+deleted_domain_aliases=0
 deleted_subdomains=0
 deleted_domain_directories=0
 deleted_cron_lines=0
@@ -285,6 +286,25 @@ while IFS= read -r login; do
 done < <(
   jq -r \
     '.data[].login | select(startswith("tfcpanelftp"))' \
+    "${response_file}"
+)
+
+get_request \
+  "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=Park&cpanel_jsonapi_func=listparkeddomains" \
+  'Domain alias inventory'
+while IFS= read -r domain; do
+  if [[ -z "${domain}" ]]; then
+    continue
+  fi
+  api2_post \
+    'Park' \
+    'unpark' \
+    "Delete test domain alias ${domain}" \
+    "domain=${domain}"
+  deleted_domain_aliases=$((deleted_domain_aliases + 1))
+done < <(
+  jq -r \
+    '.cpanelresult.data[].domain | select(startswith("tfcpanelalias"))' \
     "${response_file}"
 )
 
@@ -410,6 +430,7 @@ printf '  MySQL users deleted: %d\n' "${deleted_mysql_users}"
 printf '  email accounts deleted: %d\n' "${deleted_email_accounts}"
 printf '  FTP accounts deleted: %d\n' "${deleted_ftp_accounts}"
 printf '  addon domains deleted: %d\n' "${deleted_addon_domains}"
+printf '  domain aliases deleted: %d\n' "${deleted_domain_aliases}"
 printf '  subdomains deleted: %d\n' "${deleted_subdomains}"
 printf '  test domain directories deleted: %d\n' "${deleted_domain_directories}"
 printf '  cron lines deleted: %d\n' "${deleted_cron_lines}"

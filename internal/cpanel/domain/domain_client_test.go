@@ -238,6 +238,85 @@ func TestClientGetsExactAddonDomain(t *testing.T) {
 	}
 }
 
+func TestClientCreatesDomainAliasWithoutTopDomain(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(
+		response http.ResponseWriter,
+		request *http.Request,
+	) {
+		if request.Method != http.MethodPost {
+			t.Errorf("method = %s, want POST", request.Method)
+		}
+		if err := request.ParseForm(); err != nil {
+			t.Fatalf("ParseForm() error: %v", err)
+		}
+		expected := map[string]string{
+			"cpanel_jsonapi_module": "Park",
+			"cpanel_jsonapi_func":   "park",
+			"domain":                "terraform-alias.example.test",
+			"disallowdot":           "0",
+		}
+		for key, want := range expected {
+			if got := request.Form.Get(key); got != want {
+				t.Errorf("%s = %q, want %q", key, got, want)
+			}
+		}
+		if got := request.Form.Get("topdomain"); got != "" {
+			t.Errorf("topdomain = %q, want empty", got)
+		}
+
+		_, _ = response.Write([]byte(
+			`{"cpanelresult":{"event":{"result":1},"data":[{"result":1}]}}`,
+		))
+	}))
+	defer server.Close()
+
+	client := newDomainTestClient(t, server.URL)
+	if err := client.CreateDomainAlias(
+		context.Background(),
+		"terraform-alias.example.test",
+	); err != nil {
+		t.Fatalf("CreateDomainAlias() error: %v", err)
+	}
+}
+
+func TestClientGetsExactDomainAlias(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(
+		response http.ResponseWriter,
+		request *http.Request,
+	) {
+		if request.Method != http.MethodGet {
+			t.Errorf("method = %s, want GET", request.Method)
+		}
+		if request.URL.Query().Get("cpanel_jsonapi_module") != "Park" {
+			t.Errorf("module = %q", request.URL.Query().Get("cpanel_jsonapi_module"))
+		}
+		if request.URL.Query().Get("cpanel_jsonapi_func") != "listparkeddomains" {
+			t.Errorf("function = %q", request.URL.Query().Get("cpanel_jsonapi_func"))
+		}
+
+		_, _ = response.Write([]byte(
+			`{"cpanelresult":{"event":{"result":1},"data":[{"domain":"other.example.test"},{"domain":"terraform-alias.example.test","basedir":"public_html","reldir":"home:public_html","status":"not redirected"}]}}`,
+		))
+	}))
+	defer server.Close()
+
+	client := newDomainTestClient(t, server.URL)
+	domainAlias, err := client.GetDomainAlias(
+		context.Background(),
+		"terraform-alias.example.test",
+	)
+	if err != nil {
+		t.Fatalf("GetDomainAlias() error: %v", err)
+	}
+	if domainAlias == nil || domainAlias.BaseDirectory != "public_html" {
+		t.Fatalf("domainAlias = %#v", domainAlias)
+	}
+}
+
 func newDomainTestClient(t *testing.T, host string) *Client {
 	t.Helper()
 

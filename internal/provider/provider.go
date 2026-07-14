@@ -223,6 +223,7 @@ func (p *cpanelProvider) DataSources(_ context.Context) []func() datasource.Data
 	return []func() datasource.DataSource{
 		NewAddonDomainDataSource,
 		NewCronJobDataSource,
+		NewDomainAliasDataSource,
 		NewEmailAccountDataSource,
 		NewFTPAccountDataSource,
 		NewMySQLDatabaseDataSource,
@@ -238,6 +239,7 @@ func (p *cpanelProvider) Resources(_ context.Context) []func() resource.Resource
 	return []func() resource.Resource{
 		NewAddonDomainResource,
 		NewCronJobResource,
+		NewDomainAliasResource,
 		NewEmailAccountResource,
 		NewFTPAccountResource,
 		NewMySQLDatabaseResource,
