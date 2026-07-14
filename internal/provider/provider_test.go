@@ -36,6 +36,7 @@ import (
 	"terraform-provider-cpanel/internal/cpanel/mysql"
 	"terraform-provider-cpanel/internal/cpanel/postgresql"
 	cpanelredirect "terraform-provider-cpanel/internal/cpanel/redirect"
+	cpanelversioncontrol "terraform-provider-cpanel/internal/cpanel/versioncontrol"
 )
 
 const providerConfig = ``
@@ -148,6 +149,9 @@ func testAccPreCheck(t *testing.T) {
 	}
 	if _, err := cpanelredirect.NewClient(client).List(ctx); err != nil {
 		t.Fatalf("verify Redirects API access: %v", err)
+	}
+	if _, err := cpanelversioncontrol.NewClient(client).List(ctx); err != nil {
+		t.Fatalf("verify Version Control API access: %v", err)
 	}
 }
 
@@ -271,6 +275,14 @@ func testAccDirectoryPrivacyDirectory(kind string) string {
 func testAccDirectoryPrivacyUsername(kind string) string {
 	return fmt.Sprintf(
 		"tfcpanelprivacy%s%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
+	)
+}
+
+func testAccGitRepositoryRoot(kind string) string {
+	return fmt.Sprintf(
+		"tfcpanel-git-%s-%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
 	)
@@ -1550,6 +1562,273 @@ func testAccCheckDirectoryPrivacyUsersDestroyed(
 			directories...,
 		)(state); cleanupErr != nil && validationErr == nil {
 			validationErr = cleanupErr
+		}
+
+		return validationErr
+	}
+}
+
+func testAccSetGitRepositoryName(
+	t *testing.T,
+	repositoryRoot string,
+	name string,
+) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	if _, err := cpanelversioncontrol.NewClient(client).Update(
+		ctx,
+		repositoryRoot,
+		name,
+	); err != nil {
+		t.Fatalf(
+			"update Git repository %q name to %q: %v",
+			repositoryRoot,
+			name,
+			err,
+		)
+	}
+}
+
+func testAccDeleteGitRepository(
+	t *testing.T,
+	repositoryRoot string,
+) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	versionControlClient := cpanelversioncontrol.NewClient(client)
+	repository, err := versionControlClient.Get(ctx, repositoryRoot)
+	if err != nil {
+		t.Fatalf("read Git repository %q: %v", repositoryRoot, err)
+	}
+	if repository == nil {
+		if err := versionControlClient.DeleteDirectory(
+			ctx,
+			repositoryRoot,
+		); err != nil {
+			t.Fatalf(
+				"delete Git repository directory %q: %v",
+				repositoryRoot,
+				err,
+			)
+		}
+
+		return
+	}
+	if err := versionControlClient.Delete(ctx, repositoryRoot); err != nil {
+		t.Fatalf("unregister Git repository %q: %v", repositoryRoot, err)
+	}
+	if err := versionControlClient.DeleteDirectory(
+		ctx,
+		repositoryRoot,
+	); err != nil {
+		t.Fatalf(
+			"delete Git repository directory %q: %v",
+			repositoryRoot,
+			err,
+		)
+	}
+}
+
+func testAccCheckGitRepositoryExists(
+	expected cpanelversioncontrol.Definition,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+		repository, err := cpanelversioncontrol.NewClient(client).Get(
+			ctx,
+			expected.RepositoryRoot,
+		)
+		if err != nil {
+			return err
+		}
+		if repository == nil {
+			return fmt.Errorf(
+				"Git repository %q was not found",
+				expected.RepositoryRoot,
+			)
+		}
+		if repository.Name != expected.Name {
+			return fmt.Errorf(
+				"Git repository %q name is %q; want %q",
+				expected.RepositoryRoot,
+				repository.Name,
+				expected.Name,
+			)
+		}
+		if repository.SourceRepositoryURL != expected.SourceRepositoryURL {
+			return fmt.Errorf(
+				"Git repository %q source URL does not match",
+				expected.RepositoryRoot,
+			)
+		}
+
+		return nil
+	}
+}
+
+func testAccCheckDirectoryEntryExists(
+	directory string,
+	entryName string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+		response := cpaneldirectoryindex.FileListResponse{}
+		if err := client.ExecuteUAPIOperation(
+			ctx,
+			http.MethodGet,
+			cpanel.ModuleFileman,
+			"list_files",
+			map[string]string{
+				"dir":         directory,
+				"limit":       "100000",
+				"show_hidden": "1",
+			},
+			&response,
+		); err != nil {
+			return err
+		}
+		for _, entry := range response.Data {
+			if entry.File == entryName {
+				return nil
+			}
+		}
+
+		return fmt.Errorf(
+			"directory %q does not contain %q",
+			directory,
+			entryName,
+		)
+	}
+}
+
+func testAccCheckGitRepositoryMissing(
+	repositoryRoot string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+		versionControlClient := cpanelversioncontrol.NewClient(client)
+		repository, err := versionControlClient.Get(ctx, repositoryRoot)
+		if err != nil {
+			return err
+		}
+		if repository != nil {
+			return fmt.Errorf(
+				"Git repository %q still exists",
+				repositoryRoot,
+			)
+		}
+		rootExists, err := versionControlClient.RootExists(ctx, repositoryRoot)
+		if err != nil {
+			return err
+		}
+		if rootExists {
+			return fmt.Errorf(
+				"Git repository directory %q still exists",
+				repositoryRoot,
+			)
+		}
+
+		return nil
+	}
+}
+
+func testAccCheckGitRepositoriesDestroyed(
+	repositoryRoots ...string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+		versionControlClient := cpanelversioncontrol.NewClient(client)
+		var validationErr error
+		for _, repositoryRoot := range repositoryRoots {
+			repository, err := versionControlClient.Get(ctx, repositoryRoot)
+			if err != nil && validationErr == nil {
+				validationErr = err
+			}
+			if repository != nil {
+				if validationErr == nil {
+					validationErr = fmt.Errorf(
+						"Git repository %q still exists after destroy",
+						repositoryRoot,
+					)
+				}
+				if err := versionControlClient.Delete(
+					ctx,
+					repositoryRoot,
+				); err != nil && validationErr == nil {
+					validationErr = err
+				}
+			}
+
+			rootExists, err := versionControlClient.RootExists(
+				ctx,
+				repositoryRoot,
+			)
+			if err != nil && validationErr == nil {
+				validationErr = err
+			}
+			if rootExists && validationErr == nil {
+				validationErr = fmt.Errorf(
+					"Git repository directory %q still exists after destroy",
+					repositoryRoot,
+				)
+			}
+			if rootExists {
+				if err := versionControlClient.DeleteDirectory(
+					ctx,
+					repositoryRoot,
+				); err != nil && validationErr == nil {
+					validationErr = err
+				}
+			}
+
+			topLevelDirectory := strings.Split(repositoryRoot, "/")[0]
+			if topLevelDirectory != repositoryRoot &&
+				strings.HasPrefix(topLevelDirectory, "tfcpanel-git-") {
+				if err := versionControlClient.DeleteDirectory(
+					ctx,
+					topLevelDirectory,
+				); err != nil && validationErr == nil {
+					validationErr = err
+				}
+			}
 		}
 
 		return validationErr

@@ -148,6 +148,52 @@ api2_post() {
   fi
 }
 
+purge_test_git_directory() {
+  local directory="$1"
+  local name="${directory##*/}"
+
+  case "${name}" in
+    tfcpanel-git-* | .terraform-cpanel-git-delete-*) ;;
+    *)
+      printf 'Refusing to purge non-test Git directory: %s\n' \
+        "${directory}" >&2
+      exit 1
+      ;;
+  esac
+
+  api2_post \
+    'Fileman' \
+    'fileop' \
+    "Move test Git directory ${directory} to trash" \
+    'op=trash' \
+    "sourcefiles=${directory}" \
+    'doubledecode=0'
+  if [[
+    "$(jq -r '[.cpanelresult.data[]? | select(.result == 1)] | length' "${response_file}")" != "1"
+  ]]; then
+    printf 'Move test Git directory %s to trash failed: %s\n' \
+      "${directory}" \
+      "$(jq -c '.cpanelresult.data' "${response_file}")" >&2
+    exit 1
+  fi
+
+  uapi_post \
+    'Fileman' \
+    'empty_trash' \
+    "Permanently delete test Git directory ${name}" \
+    "only_these_files=${name}"
+
+  get_request \
+    'execute/Fileman/list_files?dir=.trash&show_hidden=1&limit=1000' \
+    'cPanel trash verification'
+  if jq -e --arg name "${name}" \
+    '.data[] | select(.file == $name)' \
+    "${response_file}" >/dev/null; then
+    printf 'Test Git trash entry still exists: %s\n' "${name}" >&2
+    exit 1
+  fi
+}
+
 remove_cron_line() {
   local linekey="$1"
   local label="$2"
@@ -192,6 +238,9 @@ deleted_dynamic_dns_domains=0
 deleted_redirects=0
 deleted_mime_types=0
 deleted_apache_handlers=0
+deleted_git_repositories=0
+deleted_git_repository_directories=0
+deleted_git_repository_trash_entries=0
 deleted_databases=0
 deleted_users=0
 deleted_mysql_databases=0
@@ -220,6 +269,30 @@ while IFS= read -r token_name; do
 done < <(
   jq -r \
     '.data[].name | select(startswith("tfcpaneltoken"))' \
+    "${response_file}"
+)
+
+get_request 'execute/VersionControl/retrieve' 'Git repository inventory'
+while IFS= read -r repository_root; do
+  if [[ -z "${repository_root}" ]]; then
+    continue
+  fi
+  uapi_post \
+    'VersionControl' \
+    'delete' \
+    "Delete test Git repository ${repository_root}" \
+    "repository_root=${repository_root}"
+  deleted_git_repositories=$((deleted_git_repositories + 1))
+done < <(
+  jq -r \
+    '.data[]
+      | select(
+          .repository_root
+          | split("/")
+          | last
+          | startswith("tfcpanel-git-")
+        )
+      | .repository_root' \
     "${response_file}"
 )
 
@@ -638,6 +711,60 @@ done <<<"${test_domain_directories}"
 get_request \
   'execute/Fileman/list_files?dir=&show_hidden=1&limit=1000' \
   'cPanel home directory inventory'
+test_git_repository_directories="$(
+  jq -r \
+    '.data[]
+      | select(.type == "dir")
+      | .file
+      | select(
+          startswith("tfcpanel-git-")
+          or startswith(".terraform-cpanel-git-delete-")
+        )' \
+    "${response_file}"
+)"
+home_has_trash="$(
+  jq -r \
+    '[.data[] | select(.type == "dir" and .file == ".trash")] | length' \
+    "${response_file}"
+)"
+if [[ "${home_has_trash}" != "0" ]]; then
+  get_request \
+    'execute/Fileman/list_files?dir=.trash&show_hidden=1&limit=1000' \
+    'cPanel trash inventory'
+  test_git_repository_trash_entries="$(
+    jq -r \
+      '.data[]
+        | select(.type == "dir")
+        | .file
+        | select(
+            startswith("tfcpanel-git-")
+            or startswith(".terraform-cpanel-git-delete-")
+          )' \
+      "${response_file}"
+  )"
+  while IFS= read -r trash_entry; do
+    if [[ -z "${trash_entry}" ]]; then
+      continue
+    fi
+    uapi_post \
+      'Fileman' \
+      'empty_trash' \
+      "Permanently delete stale test Git trash entry ${trash_entry}" \
+      "only_these_files=${trash_entry}"
+    deleted_git_repository_trash_entries=$((deleted_git_repository_trash_entries + 1))
+  done <<<"${test_git_repository_trash_entries}"
+fi
+while IFS= read -r directory; do
+  if [[ -z "${directory}" ]]; then
+    continue
+  fi
+  purge_test_git_directory "${directory}"
+  deleted_git_repository_directories=$((deleted_git_repository_directories + 1))
+done <<<"${test_git_repository_directories}"
+
+get_request \
+  'execute/Fileman/list_files?dir=&show_hidden=1&limit=1000' \
+  'cPanel home directory inventory after Git cleanup'
 if jq -e \
   '.data[] | select(.type == "dir" and .file == ".htpasswds")' \
   "${response_file}" >/dev/null; then
@@ -726,6 +853,11 @@ printf '  Dynamic DNS domains deleted: %d\n' \
 printf '  HTTP redirects deleted: %d\n' "${deleted_redirects}"
 printf '  custom MIME types deleted: %d\n' "${deleted_mime_types}"
 printf '  Apache handlers deleted: %d\n' "${deleted_apache_handlers}"
+printf '  Git repositories deleted: %d\n' "${deleted_git_repositories}"
+printf '  Git repository directories deleted: %d\n' \
+  "${deleted_git_repository_directories}"
+printf '  stale Git trash entries deleted: %d\n' \
+  "${deleted_git_repository_trash_entries}"
 printf '  PostgreSQL databases deleted: %d\n' "${deleted_databases}"
 printf '  PostgreSQL users deleted: %d\n' "${deleted_users}"
 printf '  MySQL databases deleted: %d\n' "${deleted_mysql_databases}"

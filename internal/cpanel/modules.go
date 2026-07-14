@@ -20,4 +20,5 @@ const (
 	ModuleSubDomain        = "SubDomain"
 	ModuleTokens           = "Tokens"
 	ModuleVariables        = "Variables"
+	ModuleVersionControl   = "VersionControl"
 )

@@ -31,8 +31,8 @@ on port 2083. Certification covers authentication, full-access API tokens, cron
 jobs, DNS records, Dynamic DNS domains, addon domains, domain aliases, web
 subdomains, HTTP redirects, email accounts, forwarders and autoresponders, FTP
 accounts, directory indexes and privacy, custom MIME types, Apache handlers,
-website IP blocks, MySQL or MariaDB databases and users, PostgreSQL databases
-and users, imports, drift detection, and cleanup.
+Git repositories, website IP blocks, MySQL or MariaDB databases and users,
+PostgreSQL databases and users, imports, drift detection, and cleanup.
 
 ## API policy
 
@@ -109,6 +109,27 @@ passwords. Terraform therefore stores the configured password as sensitive
 state, and updating a password calls `add_user` again for the same identity.
 An imported user has no password in state until configuration sets it. Password
 changes made outside Terraform cannot be detected during refresh.
+
+Git repository operations use UAPI `VersionControl::retrieve`,
+`VersionControl::create`, `VersionControl::update`, and
+`VersionControl::delete`. Repository roots are normalized relative to the
+cPanel account home and cannot use cPanel-controlled directories. Terraform
+refuses to take ownership of an existing directory or an already registered
+repository implicitly; import the cPanel-managed repository instead.
+
+The source repository URL is immutable and sensitive in state. Embedded
+passwords or tokens are rejected. cPanel exposes the current branch, available
+branches, clone URLs, source remote, and deployable status as read-only
+metadata.
+
+Destroying `cpanel_git_repository` is non-destructive by default: Terraform
+forgets the resource while the cPanel registration and repository contents
+remain intact. Setting `delete_contents_on_destroy = true` first unregisters
+the repository, renames its directory to a deterministic deletion marker,
+moves that marker to cPanel trash through API 2 `Fileman::fileop`, and
+permanently purges only that marker through UAPI `Fileman::empty_trash`. This
+explicit sequence is required because cPanel 134 can leave Git metadata behind
+after `VersionControl::delete`; the provider never empties unrelated trash.
 
 DNS record reads and mutations use UAPI `DNS::parse_zone` and
 `DNS::mass_edit_zone`. Every mutation uses the current SOA serial and is

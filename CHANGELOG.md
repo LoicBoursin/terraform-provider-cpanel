@@ -37,6 +37,9 @@
 - Directory Privacy authorized-user resource and data source with sensitive
   password state, password updates, composite import, isolated deletion, and
   cPanel 134 acceptance coverage.
+- Git repository resource and data source with optional source cloning, name
+  updates, import, replacement, drift recovery, non-destructive removal by
+  default, explicit recursive deletion, and cPanel 134 acceptance coverage.
 - Email account resource and data source with password and quota updates,
   import, replacement, drift recovery, and cPanel 134 acceptance coverage.
 - MySQL and MariaDB user and database resources, matching data sources, import,

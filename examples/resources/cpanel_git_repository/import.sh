@@ -1,0 +1,1 @@
+terraform import cpanel_git_repository.website repositories/website

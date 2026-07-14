@@ -26,6 +26,7 @@ import (
 	"terraform-provider-cpanel/internal/cpanel/mysql"
 	"terraform-provider-cpanel/internal/cpanel/postgresql"
 	cpanelredirect "terraform-provider-cpanel/internal/cpanel/redirect"
+	"terraform-provider-cpanel/internal/cpanel/versioncontrol"
 )
 
 // Ensure the implementation satisfies the expected interfaces.
@@ -59,8 +60,8 @@ func (p *cpanelProvider) Metadata(_ context.Context, _ provider.MetadataRequest,
 // Schema defines the provider-level schema for configuration data.
 func (p *cpanelProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description:         "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, HTTP redirects, directory indexes and privacy, custom MIME types and Apache handlers, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, and MySQL, MariaDB, and PostgreSQL users and databases.",
-		MarkdownDescription: "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, HTTP redirects, directory indexes and privacy, custom MIME types and Apache handlers, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		Description:         "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		MarkdownDescription: "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts, forwarders, autoresponders, FTP accounts, website IP blocks, and MySQL, MariaDB, and PostgreSQL users and databases.",
 		Attributes: map[string]schema.Attribute{
 			"username": schema.StringAttribute{
 				Optional:            true,
@@ -213,6 +214,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	mySQLClient := mysql.NewClient(client)
 	postgreSQLClient := postgresql.NewClient(client)
 	redirectClient := cpanelredirect.NewClient(client)
+	versionControlClient := versioncontrol.NewClient(client)
 
 	// Make the module clients available during DataSource and Resource
 	// type Configure methods.
@@ -232,6 +234,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		"mysql":            mySQLClient,
 		"postgresql":       postgreSQLClient,
 		"redirect":         redirectClient,
+		"versioncontrol":   versionControlClient,
 	}
 	resp.ResourceData = map[string]interface{}{
 		"apachehandler":    apacheHandlerClient,
@@ -249,6 +252,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		"mysql":            mySQLClient,
 		"postgresql":       postgreSQLClient,
 		"redirect":         redirectClient,
+		"versioncontrol":   versionControlClient,
 	}
 
 	tflog.Info(ctx, "Configured module clients", map[string]any{"success": true})
@@ -272,6 +276,7 @@ func (p *cpanelProvider) DataSources(_ context.Context) []func() datasource.Data
 		NewEmailDomainForwarderDataSource,
 		NewEmailForwarderDataSource,
 		NewFTPAccountDataSource,
+		NewGitRepositoryDataSource,
 		NewIPBlockDataSource,
 		NewMIMETypeDataSource,
 		NewMySQLDatabaseDataSource,
@@ -301,6 +306,7 @@ func (p *cpanelProvider) Resources(_ context.Context) []func() resource.Resource
 		NewEmailDomainForwarderResource,
 		NewEmailForwarderResource,
 		NewFTPAccountResource,
+		NewGitRepositoryResource,
 		NewIPBlockResource,
 		NewMIMETypeResource,
 		NewMySQLDatabaseResource,

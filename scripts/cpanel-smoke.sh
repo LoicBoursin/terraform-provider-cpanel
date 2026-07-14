@@ -74,7 +74,7 @@ cpanel_version="$(
 )"
 
 request 'execute/Features/list_features' 'feature check'
-for feature in addondomains apitokens blockers cron dynamicdns ftpaccts handlers indexmanager mime mysql parkeddomains popaccts postgres redirects subdomains webprotect zoneedit; do
+for feature in addondomains apitokens blockers cron dynamicdns ftpaccts handlers indexmanager mime mysql parkeddomains popaccts postgres redirects subdomains version_control webprotect zoneedit; do
   if [[ "$(jq -r --arg feature "${feature}" '.data[$feature] // 0' "${response_file}")" != "1" ]]; then
     printf 'Required cPanel feature is disabled: %s\n' "${feature}" >&2
     exit 1
@@ -135,6 +135,18 @@ apache_handler_count="$(jq -r '.data | length' "${response_file}")"
 apache_handler_test_count="$(
   jq -r \
     '[.data[].extension | select(startswith(".tfcpanelhandler"))] | length' \
+    "${response_file}"
+)"
+
+request 'execute/VersionControl/retrieve' 'Git repository check'
+git_repository_count="$(jq -r '.data | length' "${response_file}")"
+git_repository_test_count="$(
+  jq -r \
+    '[.data[]
+      | .repository_root
+      | split("/")
+      | last
+      | select(startswith("tfcpanel-git-"))] | length' \
     "${response_file}"
 )"
 
@@ -320,9 +332,45 @@ directory_privacy_test_directory_count=0
 request \
   'execute/Fileman/list_files?dir=&show_hidden=1&limit=1000' \
   'cPanel home directory check'
-if jq -e \
-  '.data[] | select(.type == "dir" and .file == ".htpasswds")' \
-  "${response_file}" >/dev/null; then
+git_repository_test_directory_count="$(
+  jq -r \
+    '[.data[]
+      | select(.type == "dir")
+      | .file
+      | select(
+          startswith("tfcpanel-git-")
+          or startswith(".terraform-cpanel-git-delete-")
+        )] | length' \
+    "${response_file}"
+)"
+home_has_trash="$(
+  jq -r \
+    '[.data[] | select(.type == "dir" and .file == ".trash")] | length' \
+    "${response_file}"
+)"
+home_has_password_root="$(
+  jq -r \
+    '[.data[] | select(.type == "dir" and .file == ".htpasswds")] | length' \
+    "${response_file}"
+)"
+git_repository_test_trash_count=0
+if [[ "${home_has_trash}" != "0" ]]; then
+  request \
+    'execute/Fileman/list_files?dir=.trash&show_hidden=1&limit=1000' \
+    'cPanel trash check'
+  git_repository_test_trash_count="$(
+    jq -r \
+      '[.data[]
+        | select(.type == "dir")
+        | .file
+        | select(
+            startswith("tfcpanel-git-")
+            or startswith(".terraform-cpanel-git-delete-")
+          )] | length' \
+      "${response_file}"
+  )"
+fi
+if [[ "${home_has_password_root}" != "0" ]]; then
   request \
     'execute/Fileman/list_files?dir=.htpasswds&show_hidden=1&limit=1000' \
     'Directory Privacy password root check'
@@ -361,6 +409,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${redirect_test_count}" != "0"
     || "${mime_type_test_count}" != "0"
     || "${apache_handler_test_count}" != "0"
+    || "${git_repository_test_count}" != "0"
     || "${database_count}" != "0"
     || "${user_count}" != "0"
     || "${mysql_test_database_count}" != "0"
@@ -376,6 +425,8 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${domain_alias_test_count}" != "0"
     || "${subdomain_test_count}" != "0"
     || "${domain_test_directory_count}" != "0"
+    || "${git_repository_test_directory_count}" != "0"
+    || "${git_repository_test_trash_count}" != "0"
     || "${directory_privacy_test_directory_count}" != "0"
     || "${cron_count}" != "0"
   ]]; then
@@ -387,6 +438,8 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     printf '  test custom MIME types: %s\n' "${mime_type_test_count}" >&2
     printf '  test Apache handlers: %s\n' \
       "${apache_handler_test_count}" >&2
+    printf '  test Git repositories: %s\n' \
+      "${git_repository_test_count}" >&2
     printf '  PostgreSQL databases: %s\n' "${database_count}" >&2
     printf '  PostgreSQL users: %s\n' "${user_count}" >&2
     printf '  MySQL test databases: %s\n' "${mysql_test_database_count}" >&2
@@ -404,6 +457,10 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     printf '  test domain aliases: %s\n' "${domain_alias_test_count}" >&2
     printf '  test subdomains: %s\n' "${subdomain_test_count}" >&2
     printf '  test domain directories: %s\n' "${domain_test_directory_count}" >&2
+    printf '  test Git repository directories: %s\n' \
+      "${git_repository_test_directory_count}" >&2
+    printf '  test Git trash entries: %s\n' \
+      "${git_repository_test_trash_count}" >&2
     printf '  test Directory Privacy password directories: %s\n' \
       "${directory_privacy_test_directory_count}" >&2
     printf '  cron commands: %s\n' "${cron_command_count}" >&2
@@ -431,6 +488,9 @@ printf '  custom MIME types: %s (%s test-managed)\n' \
 printf '  Apache handlers: %s (%s test-managed)\n' \
   "${apache_handler_count}" \
   "${apache_handler_test_count}"
+printf '  Git repositories: %s (%s test-managed)\n' \
+  "${git_repository_count}" \
+  "${git_repository_test_count}"
 printf '  public_html directory index: %s\n' "${public_html_index_type}"
 printf '  public_html directory protected: %s\n' "${public_html_protected}"
 printf '  PostgreSQL databases: %s\n' "${database_count}"
@@ -472,6 +532,10 @@ printf '  subdomains: %s (%s test-managed)\n' \
   "${subdomain_count}" \
   "${subdomain_test_count}"
 printf '  test domain directories: %s\n' "${domain_test_directory_count}"
+printf '  test Git repository directories: %s\n' \
+  "${git_repository_test_directory_count}"
+printf '  test Git trash entries: %s\n' \
+  "${git_repository_test_trash_count}"
 printf '  test Directory Privacy password directories: %s\n' \
   "${directory_privacy_test_directory_count}"
 printf '  cron commands: %s\n' "${cron_command_count}"
