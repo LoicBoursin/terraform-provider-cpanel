@@ -19,6 +19,7 @@ const (
 	ModuleMime             = "Mime"
 	ModuleModSecurity      = "ModSecurity"
 	ModulePark             = "Park"
+	ModulePassengerApps    = "PassengerApps"
 	ModulePostgresql       = "Postgresql"
 	ModuleSubDomain        = "SubDomain"
 	ModuleTokens           = "Tokens"

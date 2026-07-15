@@ -24,7 +24,7 @@ security fixes.
 | Terraform provider protocol | 6.0 |
 | Go development toolchain | 1.26.x |
 | cPanel & WHM | 134.x |
-| Certified o2switch environment | 134.0 build 44 |
+| Certified o2switch environment | 134.0 build 45 |
 
 The o2switch certification environment uses the cPanel account API over HTTPS
 on port 2083. Certification covers authentication, full-access API tokens, cron
@@ -35,7 +35,9 @@ Git repositories, website IP blocks, MySQL or MariaDB databases and users,
 remote MySQL hosts, PostgreSQL databases and users, imports, drift detection,
 per-domain ModSecurity status, email account suspension, and cleanup.
 Certification also covers reading and changing the account display locale,
-including restoration of its pre-test value.
+including restoration of its pre-test value, plus Passenger application
+registration, updates, replacement, import, drift detection, remote deletion,
+recreation, and cleanup.
 
 ## API policy
 
@@ -133,6 +135,20 @@ moves that marker to cPanel trash through API 2 `Fileman::fileop`, and
 permanently purges only that marker through UAPI `Fileman::empty_trash`. This
 explicit sequence is required because cPanel 134 can leave Git metadata behind
 after `VersionControl::delete`; the provider never empties unrelated trash.
+
+Passenger application operations use UAPI
+`PassengerApps::list_applications`, `PassengerApps::register_application`,
+`PassengerApps::edit_application`, and
+`PassengerApps::unregister_application`. The application directory and domain
+must already exist. Terraform refuses to take ownership of an application
+whose name is already registered; import it instead.
+
+The application name, path, domain, deployment mode, enabled state, and full
+environment-variable map are verified after every mutation. Environment
+variable values are sensitive in Terraform state. cPanel cannot edit
+`base_uri`, so changing it replaces the registration. Destroy unregisters the
+application without deleting its directory or executing dependency commands;
+the provider deliberately never calls `PassengerApps::ensure_deps`.
 
 DNS record reads and mutations use UAPI `DNS::parse_zone` and
 `DNS::mass_edit_zone`. Every mutation uses the current SOA serial and is

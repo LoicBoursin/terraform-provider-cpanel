@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -162,6 +164,56 @@ func TestExecuteUAPIOperationPOSTKeepsSecretsOutOfURL(t *testing.T) {
 	)
 	if err != nil {
 		t.Fatalf("ExecuteUAPIOperation() error: %v", err)
+	}
+}
+
+func TestExecuteUAPIOperationValuesPreservesRepeatedParameters(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(
+		response http.ResponseWriter,
+		request *http.Request,
+	) {
+		if request.Method != http.MethodPost {
+			t.Errorf("method = %s, want POST", request.Method)
+		}
+		if err := request.ParseForm(); err != nil {
+			t.Fatalf("ParseForm() error: %v", err)
+		}
+		if got := request.Form["envvar_name"]; !slices.Equal(
+			got,
+			[]string{"ALPHA", "BETA"},
+		) {
+			t.Errorf("envvar_name = %#v", got)
+		}
+		if got := request.Form["envvar_value"]; !slices.Equal(
+			got,
+			[]string{"one", "two"},
+		) {
+			t.Errorf("envvar_value = %#v", got)
+		}
+
+		_, _ = response.Write([]byte(`{"status":1,"data":{}}`))
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL)
+	parameters := url.Values{}
+	parameters.Add("envvar_name", "ALPHA")
+	parameters.Add("envvar_name", "BETA")
+	parameters.Add("envvar_value", "one")
+	parameters.Add("envvar_value", "two")
+
+	err := client.ExecuteUAPIOperationValues(
+		context.Background(),
+		http.MethodPost,
+		"PassengerApps",
+		"register_application",
+		parameters,
+		&map[string]any{},
+	)
+	if err != nil {
+		t.Fatalf("ExecuteUAPIOperationValues() error: %v", err)
 	}
 }
 

@@ -238,6 +238,7 @@ deleted_dynamic_dns_domains=0
 deleted_redirects=0
 deleted_mime_types=0
 deleted_apache_handlers=0
+deleted_passenger_applications=0
 deleted_git_repositories=0
 deleted_git_repository_directories=0
 deleted_git_repository_trash_entries=0
@@ -272,6 +273,28 @@ while IFS= read -r token_name; do
 done < <(
   jq -r \
     '.data[].name | select(startswith("tfcpaneltoken"))' \
+  "${response_file}"
+)
+
+get_request \
+  'execute/PassengerApps/list_applications' \
+  'Passenger application inventory'
+while IFS= read -r application_name; do
+  if [[ -z "${application_name}" ]]; then
+    continue
+  fi
+  uapi_post \
+    'PassengerApps' \
+    'unregister_application' \
+    "Unregister test Passenger application ${application_name}" \
+    "name=${application_name}"
+  deleted_passenger_applications=$((deleted_passenger_applications + 1))
+done < <(
+  jq -r \
+    '.data
+      | to_entries[]
+      | .key
+      | select(startswith("tfcpanelpassenger"))' \
     "${response_file}"
 )
 
@@ -956,6 +979,8 @@ printf '  Dynamic DNS domains deleted: %d\n' \
 printf '  HTTP redirects deleted: %d\n' "${deleted_redirects}"
 printf '  custom MIME types deleted: %d\n' "${deleted_mime_types}"
 printf '  Apache handlers deleted: %d\n' "${deleted_apache_handlers}"
+printf '  Passenger applications unregistered: %d\n' \
+  "${deleted_passenger_applications}"
 printf '  Git repositories deleted: %d\n' "${deleted_git_repositories}"
 printf '  Git repository directories deleted: %d\n' \
   "${deleted_git_repository_directories}"

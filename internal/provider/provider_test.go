@@ -35,6 +35,7 @@ import (
 	cpanellocale "terraform-provider-cpanel/internal/cpanel/locale"
 	cpanelmimetype "terraform-provider-cpanel/internal/cpanel/mimetype"
 	"terraform-provider-cpanel/internal/cpanel/mysql"
+	cpanelpassenger "terraform-provider-cpanel/internal/cpanel/passenger"
 	"terraform-provider-cpanel/internal/cpanel/postgresql"
 	cpanelredirect "terraform-provider-cpanel/internal/cpanel/redirect"
 	cpanelversioncontrol "terraform-provider-cpanel/internal/cpanel/versioncontrol"
@@ -159,6 +160,9 @@ func testAccPreCheck(t *testing.T) {
 	}
 	if _, err := cpanelversioncontrol.NewClient(client).List(ctx); err != nil {
 		t.Fatalf("verify Version Control API access: %v", err)
+	}
+	if _, err := cpanelpassenger.NewClient(client).List(ctx); err != nil {
+		t.Fatalf("verify Passenger API access: %v", err)
 	}
 }
 

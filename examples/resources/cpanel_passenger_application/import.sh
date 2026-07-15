@@ -1,0 +1,1 @@
+terraform import cpanel_passenger_application.application example

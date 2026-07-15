@@ -111,6 +111,24 @@ func (c *Client) ExecuteUAPIOperation(
 	parameters map[string]string,
 	output any,
 ) error {
+	return c.ExecuteUAPIOperationValues(
+		ctx,
+		method,
+		module,
+		function,
+		valuesFromParameters(parameters),
+		output,
+	)
+}
+
+func (c *Client) ExecuteUAPIOperationValues(
+	ctx context.Context,
+	method string,
+	module string,
+	function string,
+	parameters url.Values,
+	output any,
+) error {
 	endpoint := fmt.Sprintf("/execute/%s/%s", url.PathEscape(module), url.PathEscape(function))
 	body, err := c.execute(ctx, method, endpoint, parameters)
 	if err != nil {
@@ -163,7 +181,12 @@ func (c *Client) ExecuteAPI2Operation(
 		requestParameters[key] = value
 	}
 
-	body, err := c.execute(ctx, method, "/json-api/cpanel", requestParameters)
+	body, err := c.execute(
+		ctx,
+		method,
+		"/json-api/cpanel",
+		valuesFromParameters(requestParameters),
+	)
 	if err != nil {
 		return err
 	}
@@ -215,23 +238,18 @@ func (c *Client) execute(
 	ctx context.Context,
 	method string,
 	endpoint string,
-	parameters map[string]string,
+	parameters url.Values,
 ) ([]byte, error) {
-	values := url.Values{}
-	for key, value := range parameters {
-		values.Set(key, value)
-	}
-
 	requestURL := c.HostURL + endpoint
 	var body io.Reader
 
 	switch method {
 	case http.MethodGet:
-		if encodedParameters := values.Encode(); encodedParameters != "" {
+		if encodedParameters := parameters.Encode(); encodedParameters != "" {
 			requestURL += "?" + encodedParameters
 		}
 	case http.MethodPost:
-		body = strings.NewReader(values.Encode())
+		body = strings.NewReader(parameters.Encode())
 	default:
 		return nil, fmt.Errorf("unsupported HTTP method: %s", method)
 	}
@@ -275,4 +293,13 @@ func (c *Client) execute(
 	}
 
 	return responseBody, nil
+}
+
+func valuesFromParameters(parameters map[string]string) url.Values {
+	values := url.Values{}
+	for key, value := range parameters {
+		values.Set(key, value)
+	}
+
+	return values
 }

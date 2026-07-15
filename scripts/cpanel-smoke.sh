@@ -106,7 +106,7 @@ if [[
 fi
 
 request 'execute/Features/list_features' 'feature check'
-for feature in addondomains apitokens blockers cron dynamicdns ftpaccts handlers indexmanager mime modsecurity mysql parkeddomains popaccts postgres redirects subdomains version_control webprotect zoneedit; do
+for feature in addondomains apitokens blockers cron dynamicdns ftpaccts handlers indexmanager mime modsecurity mysql parkeddomains passengerapps popaccts postgres redirects subdomains version_control webprotect zoneedit; do
   if [[ "$(jq -r --arg feature "${feature}" '.data[$feature] // 0' "${response_file}")" != "1" ]]; then
     printf 'Required cPanel feature is disabled: %s\n' "${feature}" >&2
     exit 1
@@ -179,6 +179,17 @@ git_repository_test_count="$(
       | split("/")
       | last
       | select(startswith("tfcpanel-git-"))] | length' \
+    "${response_file}"
+)"
+
+request 'execute/PassengerApps/list_applications' 'Passenger application check'
+passenger_application_count="$(jq -r '.data | length' "${response_file}")"
+passenger_application_test_count="$(
+  jq -r \
+    '[.data
+      | to_entries[]
+      | .key
+      | select(startswith("tfcpanelpassenger"))] | length' \
     "${response_file}"
 )"
 
@@ -486,6 +497,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${mime_type_test_count}" != "0"
     || "${apache_handler_test_count}" != "0"
     || "${git_repository_test_count}" != "0"
+    || "${passenger_application_test_count}" != "0"
     || "${database_count}" != "0"
     || "${user_count}" != "0"
     || "${mysql_test_database_count}" != "0"
@@ -519,6 +531,8 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
       "${apache_handler_test_count}" >&2
     printf '  test Git repositories: %s\n' \
       "${git_repository_test_count}" >&2
+    printf '  test Passenger applications: %s\n' \
+      "${passenger_application_test_count}" >&2
     printf '  PostgreSQL databases: %s\n' "${database_count}" >&2
     printf '  PostgreSQL users: %s\n' "${user_count}" >&2
     printf '  MySQL test databases: %s\n' "${mysql_test_database_count}" >&2
@@ -581,6 +595,9 @@ printf '  Apache handlers: %s (%s test-managed)\n' \
 printf '  Git repositories: %s (%s test-managed)\n' \
   "${git_repository_count}" \
   "${git_repository_test_count}"
+printf '  Passenger applications: %s (%s test-managed)\n' \
+  "${passenger_application_count}" \
+  "${passenger_application_test_count}"
 printf '  public_html directory index: %s\n' "${public_html_index_type}"
 printf '  public_html directory protected: %s\n' "${public_html_protected}"
 printf '  PostgreSQL databases: %s\n' "${database_count}"

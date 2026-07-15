@@ -19,11 +19,11 @@ The CI and release configuration currently pins:
 Acceptance tests create and delete real API tokens, cron jobs, DNS records,
 Dynamic DNS domains, web domains, HTTP redirects, custom MIME types, email
 accounts, Apache handlers, directory indexes and privacy, Git repositories,
-forwarders and autoresponders, FTP accounts, MySQL or MariaDB users and
-databases and remote hosts, PostgreSQL users and databases, and database
-grants. Locale acceptance tests temporarily change the account display locale
-and restore the value captured before the test. Use a dedicated cPanel test
-account.
+Passenger applications, forwarders and autoresponders, FTP accounts, MySQL or
+MariaDB users and databases and remote hosts, PostgreSQL users and databases,
+and database grants. Locale acceptance tests temporarily change the account
+display locale and restore the value captured before the test. Use a dedicated
+cPanel test account.
 
 The scripts load credentials from the file specified by `CPANEL_ENV_FILE`. When
 that variable is unset, they use:
@@ -64,7 +64,7 @@ The acceptance entry point performs the smoke test first. It refuses to run
 when any credential is missing or when the server does not expose API Tokens,
 Cron, DNS Zone Editor, Dynamic DNS, domains, Redirects, MIME Types, email and
 FTP accounts, Directory Privacy, Git Version Control, MySQL or MariaDB, and
-PostgreSQL, plus ModSecurity.
+PostgreSQL, plus ModSecurity and Passenger Applications.
 
 Before and after the suite, the acceptance entry point removes only resources
 that follow the test naming contract:
@@ -88,6 +88,8 @@ that follow the test naming contract:
 - Git repositories and top-level account-home directories beginning with
   `tfcpanel-git-`, plus only matching Git deletion markers in the account home
   or cPanel trash;
+- Passenger applications beginning with `tfcpanelpassenger`; cleanup
+  unregisters them before removing their matching Git fixture directories;
 - email account local parts beginning with `tfcpanel`;
 - login, incoming-mail, and outgoing-mail restrictions on those test email
   accounts; cleanup refuses to delete a test mailbox with held outgoing mail;
