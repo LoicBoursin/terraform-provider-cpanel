@@ -35,6 +35,7 @@ import (
 	cpanelftp "terraform-provider-cpanel/internal/cpanel/ftp"
 	cpanelipblock "terraform-provider-cpanel/internal/cpanel/ipblock"
 	cpanellocale "terraform-provider-cpanel/internal/cpanel/locale"
+	cpanellogmanager "terraform-provider-cpanel/internal/cpanel/logmanager"
 	cpanelmimetype "terraform-provider-cpanel/internal/cpanel/mimetype"
 	"terraform-provider-cpanel/internal/cpanel/mysql"
 	cpanelpassenger "terraform-provider-cpanel/internal/cpanel/passenger"
@@ -160,6 +161,9 @@ func testAccPreCheck(t *testing.T) {
 	}
 	if _, err := cpanellocale.NewClient(client).GetCurrent(ctx); err != nil {
 		t.Fatalf("verify Locale API access: %v", err)
+	}
+	if _, err := cpanellogmanager.NewClient(client).Get(ctx); err != nil {
+		t.Fatalf("verify LogManager API access: %v", err)
 	}
 	if _, err := cpanelmimetype.NewClient(client).ListUser(ctx); err != nil {
 		t.Fatalf("verify MIME type API access: %v", err)

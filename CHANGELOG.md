@@ -64,6 +64,9 @@
 - Account locale resource and data source with import, drift recovery,
   restoration of the pre-management locale, and cPanel 134 acceptance
   coverage.
+- Raw access log settings resource and data source with server-default or
+  explicit retention, import, drift recovery, restoration of the complete
+  pre-management settings, and cPanel 134 acceptance coverage.
 - Import support for cron jobs by cPanel line key.
 - Stable drift and remote-deletion handling for every resource.
 - cPanel 134 acceptance coverage for CRUD, import, drift, recreation, and
@@ -77,6 +80,8 @@
   `-parallelism=1`.
 - Send mutations with POST, honor Terraform cancellation, and enforce request
   timeouts and response-size limits.
+- Restore persisted locale and raw-log singleton baselines from an acceptance
+  `EXIT` finalizer before cleaning prefix-addressable test artifacts.
 - Validate cron expressions and cPanel-prefixed PostgreSQL names before API
   mutation.
 - Verify PostgreSQL privilege changes and require inspection and re-import

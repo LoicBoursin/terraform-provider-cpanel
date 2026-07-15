@@ -12,6 +12,7 @@ smoke-test:
 
 .PHONY: clean-acceptance
 clean-acceptance:
+	./scripts/cpanel-restore-test-singletons.sh
 	./scripts/cpanel-clean-test-artifacts.sh
 
 .PHONY: test-acceptance

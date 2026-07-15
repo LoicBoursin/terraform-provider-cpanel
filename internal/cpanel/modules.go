@@ -17,6 +17,7 @@ const (
 	ModuleFileman          = "Fileman"
 	ModuleFtp              = "Ftp"
 	ModuleLocale           = "Locale"
+	ModuleLogManager       = "LogManager"
 	ModuleMysql            = "Mysql"
 	ModuleMysqlFE          = "MysqlFE"
 	ModuleMime             = "Mime"

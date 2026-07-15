@@ -237,6 +237,16 @@ User-level email filter operations use UAPI `Email::list_filters`,
 exist. Account-level filters are intentionally outside the resource because
 omitting the `account` parameter changes cPanel's ownership scope.
 
+Raw access log settings use UAPI `LogManager::get_settings` and
+`LogManager::set_settings`. The resource owns the complete account-level
+archive, monthly pruning, and retention configuration. A `retention_days`
+value of `-1` clears the per-account override and uses the server default;
+`effective_retention_days` reports the account's effective value, where `0`
+means indefinite retention. Removing the resource restores the full
+configuration captured before Terraform management. The acceptance wrapper
+uses a persisted clean-account baseline and an `EXIT` finalizer to restore
+these singleton values before artifact cleanup, including after a failed test.
+
 The resource preserves rule and action order, supports cPanel's string and
 numeric match operators, and limits actions to `deliver`, `fail`, and
 `finish`. It rejects `save` and `pipe`, which can write files or execute

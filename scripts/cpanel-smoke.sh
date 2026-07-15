@@ -105,6 +105,56 @@ if [[
   exit 1
 fi
 
+request 'execute/LogManager/get_settings' 'cPanel log settings check'
+if ! jq -e \
+  '
+    ((.data.archive_logs | tostring) | test("^[01]$"))
+    and ((.data.prune_archive | tostring) | test("^[01]$"))
+    and ((.data.using_default | tostring) | test("^[01]$"))
+    and ((.data.retention_days | tostring) | test("^[0-9]+$"))
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'cPanel returned incomplete log archival settings\n' >&2
+  exit 1
+fi
+log_archive_logs="$(jq -r '.data.archive_logs | tostring' "${response_file}")"
+log_prune_archive="$(jq -r '.data.prune_archive | tostring' "${response_file}")"
+log_using_default="$(jq -r '.data.using_default | tostring' "${response_file}")"
+log_effective_retention="$(
+  jq -r '.data.retention_days | tostring' "${response_file}"
+)"
+log_configured_retention="${log_effective_retention}"
+if [[ "${log_using_default}" == "1" ]]; then
+  log_configured_retention="-1"
+fi
+if [[
+  -n "${CPANEL_EXPECTED_LOG_ARCHIVE:-}"
+  && "${log_archive_logs}" != "${CPANEL_EXPECTED_LOG_ARCHIVE}"
+ ]]; then
+  printf 'cPanel archive_logs is %s; expected restored value %s\n' \
+    "${log_archive_logs}" \
+    "${CPANEL_EXPECTED_LOG_ARCHIVE}" >&2
+  exit 1
+fi
+if [[
+  -n "${CPANEL_EXPECTED_LOG_PRUNE:-}"
+  && "${log_prune_archive}" != "${CPANEL_EXPECTED_LOG_PRUNE}"
+ ]]; then
+  printf 'cPanel prune_archive is %s; expected restored value %s\n' \
+    "${log_prune_archive}" \
+    "${CPANEL_EXPECTED_LOG_PRUNE}" >&2
+  exit 1
+fi
+if [[
+  -n "${CPANEL_EXPECTED_LOG_RETENTION:-}"
+  && "${log_configured_retention}" != "${CPANEL_EXPECTED_LOG_RETENTION}"
+ ]]; then
+  printf 'cPanel log retention is %s; expected restored value %s\n' \
+    "${log_configured_retention}" \
+    "${CPANEL_EXPECTED_LOG_RETENTION}" >&2
+  exit 1
+fi
+
 request 'execute/Features/list_features' 'feature check'
 for feature in addondomains apitokens blockers cron dynamicdns ftpaccts handlers indexmanager mime modsecurity mysql parkeddomains passengerapps popaccts postgres redirects sslmanager subdomains version_control webprotect zoneedit; do
   if [[ "$(jq -r --arg feature "${feature}" '.data[$feature] // 0' "${response_file}")" != "1" ]]; then
@@ -710,6 +760,11 @@ printf '  locale: %s (%s, %s; %s available)\n' \
   "${account_locale_direction}" \
   "${account_locale_encoding}" \
   "${locale_count}"
+printf '  log archival: archive=%s prune=%s retention=%s (effective %s)\n' \
+  "${log_archive_logs}" \
+  "${log_prune_archive}" \
+  "${log_configured_retention}" \
+  "${log_effective_retention}"
 printf '  API tokens: %s (%s test-managed)\n' \
   "${api_token_count}" \
   "${api_test_token_count}"

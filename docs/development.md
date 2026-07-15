@@ -23,8 +23,9 @@ Passenger applications, stored public SSL certificates, email filters,
 calendar delegations, forwarders and autoresponders, FTP accounts, MySQL or MariaDB users and
 databases and remote hosts, PostgreSQL users and databases, and database
 grants. Locale acceptance tests temporarily change the account display locale
-and restore the value captured before the test. Use a dedicated cPanel test
-account.
+and restore the persisted test-account baseline. Log settings tests
+temporarily change archive, pruning, and retention preferences and restore the
+same durable baseline. Use a dedicated cPanel test account.
 
 The scripts load credentials from the file specified by `CPANEL_ENV_FILE`. When
 that variable is unset, they use:
@@ -42,6 +43,24 @@ CPANEL_API_TOKEN=token
 ```
 
 Set its permissions to `0600`. Never commit a populated credentials file.
+
+Destructive tests and cleanup also require a persistent singleton baseline.
+The scripts load it from `CPANEL_BASELINE_FILE`; when that variable is unset,
+they derive `terraform-provider-cpanel-baseline.env` next to the default
+credentials file. Its format matches
+[`.env.acceptance-baseline.example`](../.env.acceptance-baseline.example):
+
+```text
+CPANEL_EXPECTED_LOCALE=en
+CPANEL_EXPECTED_LOG_ARCHIVE=1
+CPANEL_EXPECTED_LOG_PRUNE=1
+CPANEL_EXPECTED_LOG_RETENTION=-1
+```
+
+`CPANEL_EXPECTED_LOG_RETENTION=-1` means the server default. Keep this file at
+`0600` and set it from the known clean account configuration, not from a test
+run. The persisted values let a later run recover the account even when an
+earlier Terraform or shell process was interrupted after mutation.
 
 Run the non-destructive API and capability checks with:
 
@@ -61,8 +80,11 @@ Run the destructive acceptance suite with:
 make test-acceptance
 ```
 
-The acceptance entry point performs the smoke test first. It refuses to run
-when any credential is missing or when the server does not expose API Tokens,
+The acceptance entry point first restores the persisted singleton baseline,
+then performs cleanup and the smoke test. An `EXIT` finalizer repeats singleton
+restoration before artifact cleanup and final inventory verification,
+including when the test command fails. It refuses to run when any credential
+or baseline value is missing, or when the server does not expose API Tokens,
 Cron, DNS Zone Editor, Dynamic DNS, domains, Redirects, MIME Types, email and
 FTP accounts, Directory Privacy, Git Version Control, MySQL or MariaDB, and
 PostgreSQL, plus ModSecurity, Passenger Applications, and SSL Manager.
@@ -119,8 +141,11 @@ that follow the test naming contract:
   `tfcpanelsubmodsecurity`; cleanup re-enables them before subdomain removal;
 - the account locale is not prefix-addressable, so each locale acceptance test
   captures and restores its original value with an independent Go test cleanup;
-  the acceptance wrapper also requires the final locale to match its initial
-  snapshot;
+  the acceptance finalizer independently restores and verifies the persisted
+  locale baseline before artifact cleanup;
+- account log settings are also singleton values; the finalizer restores and
+  verifies the persisted `archive_logs`, `prune_archive`, and configured
+  retention baseline before artifact cleanup;
 - top-level test directories in `public_html` beginning with `tfcpanel-`;
 - cron commands containing `# terraform-provider-cpanel-`;
 - the empty `MAILTO` and default `SHELL=/bin/bash` lines that cPanel creates
