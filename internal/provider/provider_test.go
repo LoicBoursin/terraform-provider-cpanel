@@ -83,8 +83,12 @@ func testAccPreCheck(t *testing.T) {
 	if _, err := cpanelapitoken.NewClient(client).List(ctx); err != nil {
 		t.Fatalf("verify API token access: %v", err)
 	}
-	if _, err := cpanelcapabilities.NewClient(client).Get(ctx); err != nil {
+	accountCapabilities, err := cpanelcapabilities.NewClient(client).Get(ctx)
+	if err != nil {
 		t.Fatalf("verify account capabilities API access: %v", err)
+	}
+	if !accountCapabilities.Features["changemx"] {
+		t.Fatal("verify email routing API access: changemx is disabled")
 	}
 	if _, err := cpanelcalendar.NewClient(client).ListDelegates(ctx); err != nil {
 		t.Fatalf("verify calendar delegation API access: %v", err)
@@ -160,6 +164,17 @@ func testAccPreCheck(t *testing.T) {
 	}
 	if _, err := cpanelmail.NewClient(client).ListMailDomains(ctx); err != nil {
 		t.Fatalf("verify Email API access: %v", err)
+	}
+	if routing, err := cpanelmail.NewClient(client).GetRouting(
+		ctx,
+		mainDomain,
+	); err != nil {
+		t.Fatalf("verify email routing API access: %v", err)
+	} else if routing == nil {
+		t.Fatalf(
+			"verify email routing API access: main domain %q not found",
+			mainDomain,
+		)
 	}
 	if _, err := cpanelftp.NewClient(client).ListAccounts(ctx); err != nil {
 		t.Fatalf("verify FTP API access: %v", err)

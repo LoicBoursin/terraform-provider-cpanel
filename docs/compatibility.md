@@ -36,6 +36,8 @@ remote MySQL hosts, PostgreSQL databases and users, imports, drift detection,
 per-domain ModSecurity status, stored SSL certificates, email account
 suspension, stored SSL certificate signing requests, default-calendar
 delegation, user-level email filters, Mailman mailing lists, and cleanup.
+Certification also covers per-domain email routing transitions and restoration
+without changing DNS MX records.
 Certification also covers reading and changing the account display locale,
 including restoration of its pre-test value, plus Passenger application
 registration, updates, replacement, import, drift detection, remote deletion,
@@ -375,6 +377,25 @@ list identifier plus exact attempted privacy. An ambiguous creation response
 never adopts or deletes the observed list automatically. Cleanup deletes only
 complete addresses whose local part begins with the reserved test prefix; that
 prefix is the ownership boundary for disposable acceptance-test lists.
+
+Email routing operations use UAPI `Email::list_mxs` and
+`Email::set_always_accept`. The resource manages cPanel's local delivery
+classification for one existing account domain; it does not create, update, or
+delete DNS MX records. Terraform exposes `backup` while cPanel represents that
+mode as `secondary` in API responses.
+
+The provider reads the complete unfiltered routing inventory because cPanel
+134 does not reliably scope `list_mxs` to a requested domain. It validates the
+one-hot routing flags, detected mode, ordered MX entries, primary exchanger,
+status, and the complete mutation response before accepting state. A domain
+with no MX entry has a null `primary_exchanger`.
+
+The resource captures the configured mode that preceded Terraform management
+and restores it on destroy. Transitions are serialized per domain. Ambiguous
+mutation failures trigger a bounded reread and rollback only when the observed
+state still matches the attempted transition; deterministic cPanel rejections
+and concurrent out-of-band changes are not overwritten. cPanel warnings are
+reported as Terraform warnings.
 
 The email forwarder resource manages one direct source-to-destination email
 address pair. cPanel permits multiple destinations for the same source address,
