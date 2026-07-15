@@ -134,6 +134,9 @@ that follow the test naming contract:
 - user-level email filter names beginning with `tfcpanelfilter`, only on test
   mailboxes whose local parts begin with `tfcpanelfilter`; cleanup deletes
   these filters before deleting their mailboxes;
+- Mailman mailing list local parts beginning with `tfcpanellist`; cleanup
+  re-reads the exact complete address and internal list identifier before
+  deletion;
 - email forwarder source local parts beginning with `tfcpanelfwd`;
 - email domain forwarder destinations beginning with `tfcpaneldomainfwd`;
 - email autoresponder local parts beginning with `tfcpanelauto`;

@@ -5,8 +5,11 @@ package provider
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"slices"
@@ -141,6 +144,9 @@ func testAccPreCheck(t *testing.T) {
 	}
 	if _, err := cpanelmail.NewClient(client).ListAutoResponders(ctx, mainDomain); err != nil {
 		t.Fatalf("verify email autoresponder API access: %v", err)
+	}
+	if _, err := cpanelmail.NewClient(client).ListMailingLists(ctx, mainDomain); err != nil {
+		t.Fatalf("verify email mailing list API access: %v", err)
 	}
 	if _, err := postgresql.NewClient(client).GetDatabases(ctx); err != nil {
 		t.Fatalf("verify PostgreSQL API access: %v", err)
@@ -400,6 +406,21 @@ func testAccEmailFilterName(kind string) string {
 		"tfcpanelfilter%s%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
+	)
+}
+
+func testAccEmailMailingListAddress(t *testing.T, kind string) string {
+	t.Helper()
+
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("TF_ACC must be set for acceptance tests")
+	}
+
+	return fmt.Sprintf(
+		"tfcpanellist%s%s@%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
+		testAccMainDomain(t),
 	)
 }
 
@@ -2890,6 +2911,517 @@ func testAccDeleteEmailAutoResponder(t *testing.T, address string) {
 	}
 	if err := cpanelmail.NewClient(client).DeleteAutoResponder(ctx, address); err != nil {
 		t.Fatalf("delete email autoresponder for %q: %v", address, err)
+	}
+}
+
+func testAccCheckEmailMailingList(
+	address string,
+	expected cpanelmail.MailingListPrivacyOptions,
+	expectedID *string,
+	capturedID *string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		_, domain, err := splitEmailAccountAddress(address)
+		if err != nil {
+			return err
+		}
+		mailingList, err := cpanelmail.NewClient(client).GetMailingList(
+			ctx,
+			address,
+			domain,
+		)
+		if err != nil {
+			return err
+		}
+		if mailingList == nil {
+			return fmt.Errorf("email mailing list %q was not found", address)
+		}
+		actual := cpanelmail.MailingListPrivacyOptions{
+			Advertised:      mailingList.Advertised,
+			ArchivePrivate:  mailingList.ArchivePrivate,
+			SubscribePolicy: mailingList.SubscribePolicy,
+		}
+		if actual != expected {
+			return fmt.Errorf(
+				"email mailing list %q privacy is %#v; want %#v",
+				address,
+				actual,
+				expected,
+			)
+		}
+		if expectedID != nil && mailingList.ID != *expectedID {
+			return fmt.Errorf(
+				"email mailing list %q id is %q; want %q",
+				address,
+				mailingList.ID,
+				*expectedID,
+			)
+		}
+		if capturedID != nil {
+			*capturedID = mailingList.ID
+		}
+
+		return nil
+	}
+}
+
+func testAccCheckEmailMailingListPassword(
+	address string,
+	password string,
+	accepted bool,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		_, domain, err := splitEmailAccountAddress(address)
+		if err != nil {
+			return err
+		}
+		mailingList, err := cpanelmail.NewClient(client).GetMailingList(
+			ctx,
+			address,
+			domain,
+		)
+		if err != nil {
+			return err
+		}
+		if mailingList == nil {
+			return fmt.Errorf("email mailing list %q was not found", address)
+		}
+
+		form := url.Values{
+			"adminpw":  {password},
+			"admlogin": {"Let me in..."},
+		}
+		request, err := http.NewRequestWithContext(
+			ctx,
+			http.MethodPost,
+			fmt.Sprintf(
+				"https://%s/mailman/admin/%s",
+				domain,
+				url.PathEscape(mailingList.ID),
+			),
+			strings.NewReader(form.Encode()),
+		)
+		if err != nil {
+			return fmt.Errorf("build Mailman administrator login request: %w", err)
+		}
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+		defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+		if !ok {
+			return fmt.Errorf("default HTTP transport has type %T; want *http.Transport", http.DefaultTransport)
+		}
+		transport := defaultTransport.Clone()
+		transport.TLSClientConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			// #nosec G402 -- the isolated acceptance domain uses cPanel's self-signed certificate.
+			InsecureSkipVerify: true,
+		}
+		httpClient := &http.Client{
+			Transport: transport,
+			Timeout:   30 * time.Second,
+		}
+		response, err := httpClient.Do(request)
+		if err != nil {
+			return fmt.Errorf("authenticate to Mailman administrator page: %w", err)
+		}
+		body, readErr := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+		closeErr := response.Body.Close()
+		if readErr != nil {
+			return fmt.Errorf("read Mailman administrator page: %w", readErr)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("close Mailman administrator page: %w", closeErr)
+		}
+		loginAccepted := response.StatusCode == http.StatusOK &&
+			!strings.Contains(string(body), `name="adminpw"`)
+		if loginAccepted != accepted {
+			return fmt.Errorf(
+				"Mailman administrator password acceptance for %q is %t; want %t",
+				address,
+				loginAccepted,
+				accepted,
+			)
+		}
+
+		return nil
+	}
+}
+
+type testAccMailmanDelegatesResponse struct {
+	Data struct {
+		Delegates []string `json:"delegates"`
+	} `json:"data"`
+}
+
+func testAccEnsureEmailMailingListDelegate(
+	t *testing.T,
+	address string,
+	delegate string,
+	delegatePassword string,
+) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	emailClient := cpanelmail.NewClient(client)
+
+	delegateUser, delegateDomain, err := splitEmailAccountAddress(delegate)
+	if err != nil {
+		t.Fatalf("split Mailman delegate address %q: %v", delegate, err)
+	}
+	account, err := emailClient.GetAccount(ctx, delegateUser, delegateDomain)
+	if err != nil {
+		t.Fatalf("read Mailman delegate account %q: %v", delegate, err)
+	}
+	if account == nil {
+		if err := emailClient.CreateAccount(
+			ctx,
+			delegateUser,
+			delegateDomain,
+			delegatePassword,
+			10,
+		); err != nil {
+			t.Fatalf("create Mailman delegate account %q: %v", delegate, err)
+		}
+	}
+
+	listUser, _, err := splitEmailAccountAddress(address)
+	if err != nil {
+		t.Fatalf("split email mailing list address %q: %v", address, err)
+	}
+	delegates, err := testAccGetMailmanDelegates(ctx, client, listUser)
+	if err != nil {
+		t.Fatalf("read Mailman delegates for %q: %v", address, err)
+	}
+	if !slices.Contains(delegates, delegate) {
+		response := testAccMailmanDelegatesResponse{}
+		if err := client.ExecuteUAPIOperation(
+			ctx,
+			http.MethodPost,
+			cpanel.ModuleEmail,
+			"add_mailman_delegates",
+			map[string]string{
+				"list":      listUser,
+				"delegates": delegate,
+			},
+			&response,
+		); err != nil {
+			t.Fatalf("add Mailman delegate %q to %q: %v", delegate, address, err)
+		}
+	}
+
+	t.Cleanup(func() {
+		testAccRemoveEmailMailingListDelegate(t, address, delegate)
+		testAccDeleteEmailAccountIfPresent(t, delegate)
+	})
+}
+
+func testAccCheckEmailMailingListDelegate(
+	address string,
+	delegate string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+		listUser, _, err := splitEmailAccountAddress(address)
+		if err != nil {
+			return err
+		}
+		delegates, err := testAccGetMailmanDelegates(ctx, client, listUser)
+		if err != nil {
+			return err
+		}
+		if !slices.Contains(delegates, delegate) {
+			return fmt.Errorf(
+				"Mailman delegate %q was not preserved on %q",
+				delegate,
+				address,
+			)
+		}
+
+		return nil
+	}
+}
+
+func testAccGetMailmanDelegates(
+	ctx context.Context,
+	client *cpanel.Client,
+	listUser string,
+) ([]string, error) {
+	response := testAccMailmanDelegatesResponse{}
+	if err := client.ExecuteUAPIOperation(
+		ctx,
+		http.MethodGet,
+		cpanel.ModuleEmail,
+		"get_mailman_delegates",
+		map[string]string{"list": listUser},
+		&response,
+	); err != nil {
+		return nil, err
+	}
+
+	return response.Data.Delegates, nil
+}
+
+func testAccRemoveEmailMailingListDelegate(
+	t *testing.T,
+	address string,
+	delegate string,
+) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Errorf("create cPanel client for Mailman delegate cleanup: %v", err)
+		return
+	}
+	listUser, domain, err := splitEmailAccountAddress(address)
+	if err != nil {
+		t.Errorf("split email mailing list address %q: %v", address, err)
+		return
+	}
+	mailingList, err := cpanelmail.NewClient(client).GetMailingList(
+		ctx,
+		address,
+		domain,
+	)
+	if err != nil {
+		t.Errorf("read mailing list %q during delegate cleanup: %v", address, err)
+		return
+	}
+	if mailingList == nil {
+		return
+	}
+	delegates, err := testAccGetMailmanDelegates(ctx, client, listUser)
+	if err != nil {
+		t.Errorf("read Mailman delegates for %q during cleanup: %v", address, err)
+		return
+	}
+	if !slices.Contains(delegates, delegate) {
+		return
+	}
+
+	response := testAccMailmanDelegatesResponse{}
+	if err := client.ExecuteUAPIOperation(
+		ctx,
+		http.MethodPost,
+		cpanel.ModuleEmail,
+		"remove_mailman_delegates",
+		map[string]string{
+			"list":      listUser,
+			"delegates": delegate,
+		},
+		&response,
+	); err != nil {
+		t.Errorf("remove Mailman delegate %q from %q: %v", delegate, address, err)
+	}
+}
+
+func testAccDeleteEmailAccountIfPresent(t *testing.T, address string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Errorf("create cPanel client for email account cleanup: %v", err)
+		return
+	}
+	user, domain, err := splitEmailAccountAddress(address)
+	if err != nil {
+		t.Errorf("split email account address %q: %v", address, err)
+		return
+	}
+	emailClient := cpanelmail.NewClient(client)
+	account, err := emailClient.GetAccount(ctx, user, domain)
+	if err != nil {
+		t.Errorf("read email account %q during cleanup: %v", address, err)
+		return
+	}
+	if account == nil {
+		return
+	}
+	if err := emailClient.DeleteAccount(ctx, user, domain); err != nil {
+		t.Errorf("delete email account %q: %v", address, err)
+	}
+}
+
+func testAccCheckEmailMailingListsDestroyed(
+	addresses ...string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+
+		emailClient := cpanelmail.NewClient(client)
+		for _, address := range addresses {
+			_, domain, err := splitEmailAccountAddress(address)
+			if err != nil {
+				return err
+			}
+			mailingList, err := emailClient.GetMailingList(ctx, address, domain)
+			if err != nil {
+				return err
+			}
+			if mailingList != nil {
+				return fmt.Errorf(
+					"email mailing list %q still exists",
+					address,
+				)
+			}
+		}
+
+		return nil
+	}
+}
+
+func testAccDeleteEmailMailingList(t *testing.T, address string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	_, domain, err := splitEmailAccountAddress(address)
+	if err != nil {
+		t.Fatalf("split email mailing list address %q: %v", address, err)
+	}
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	emailClient := cpanelmail.NewClient(client)
+	existing, err := emailClient.GetMailingList(ctx, address, domain)
+	if err != nil {
+		t.Fatalf("read email mailing list %q: %v", address, err)
+	}
+	if existing == nil {
+		return
+	}
+	if err := emailClient.DeleteMailingList(ctx, address); err != nil {
+		t.Fatalf("delete email mailing list %q: %v", address, err)
+	}
+}
+
+func testAccCreateEmailMailingList(
+	t *testing.T,
+	address string,
+	password string,
+	privacy cpanelmail.MailingListPrivacyOptions,
+) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	user, domain, err := splitEmailAccountAddress(address)
+	if err != nil {
+		t.Fatalf("split email mailing list address %q: %v", address, err)
+	}
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	emailClient := cpanelmail.NewClient(client)
+	existing, err := emailClient.GetMailingList(ctx, address, domain)
+	if err != nil {
+		t.Fatalf("read email mailing list %q: %v", address, err)
+	}
+	if existing != nil {
+		t.Fatalf("email mailing list %q already exists", address)
+	}
+	if err := emailClient.CreateMailingList(
+		ctx,
+		user,
+		domain,
+		password,
+		true,
+	); err != nil {
+		t.Fatalf("create email mailing list %q: %v", address, err)
+	}
+	if err := emailClient.SetMailingListPrivacyOptions(
+		ctx,
+		address,
+		privacy,
+	); err != nil {
+		t.Fatalf("set email mailing list %q privacy: %v", address, err)
+	}
+	created, err := emailClient.GetMailingList(ctx, address, domain)
+	if err != nil {
+		t.Fatalf("verify email mailing list %q: %v", address, err)
+	}
+	if created == nil {
+		t.Fatalf("email mailing list %q was not created", address)
+	}
+	actual := cpanelmail.MailingListPrivacyOptions{
+		Advertised:      created.Advertised,
+		ArchivePrivate:  created.ArchivePrivate,
+		SubscribePolicy: created.SubscribePolicy,
+	}
+	if actual != privacy {
+		t.Fatalf(
+			"email mailing list %q privacy is %#v; want %#v",
+			address,
+			actual,
+			privacy,
+		)
+	}
+}
+
+func testAccSetEmailMailingListPrivacy(
+	t *testing.T,
+	address string,
+	privacy cpanelmail.MailingListPrivacyOptions,
+) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	if err := cpanelmail.NewClient(client).SetMailingListPrivacyOptions(
+		ctx,
+		address,
+		privacy,
+	); err != nil {
+		t.Fatalf("set email mailing list %q privacy: %v", address, err)
 	}
 }
 

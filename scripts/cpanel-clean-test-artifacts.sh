@@ -252,6 +252,7 @@ deleted_mysql_remote_hosts=0
 deleted_email_accounts=0
 deleted_calendar_delegates=0
 deleted_email_filters=0
+deleted_email_mailing_lists=0
 unsuspended_email_restrictions=0
 deleted_email_forwarders=0
 deleted_email_domain_forwarders=0
@@ -840,6 +841,86 @@ if jq -e \
   exit 1
 fi
 
+get_request 'execute/Email/list_lists' 'Email mailing list inventory'
+if ! jq -e \
+  '
+    (.data | type == "array")
+    and (
+      ([.data[].list] | length)
+      == ([.data[].list] | unique | length)
+    )
+    and all(
+      .data[];
+      (.list? | type) == "string"
+      and (
+        (((.list | split("@")[0]) | startswith("tfcpanellist")) | not)
+        or (
+          (.list | contains("@"))
+          and (.listid? | type) == "string"
+          and (.listid | length > 0)
+        )
+      )
+    )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'Refusing to clean ambiguous test email mailing list inventory\n' >&2
+  exit 1
+fi
+email_mailing_list_candidates="$(
+  jq -r \
+    '
+      .data[]
+      | select((.list | split("@")[0]) | startswith("tfcpanellist"))
+      | [.list, .listid]
+      | @tsv
+    ' \
+    "${response_file}"
+)"
+while IFS=$'\t' read -r address list_id; do
+  if [[ -z "${address}" || -z "${list_id}" ]]; then
+    continue
+  fi
+
+  get_request 'execute/Email/list_lists' \
+    "Re-read test email mailing list ${address}"
+  if ! jq -e \
+    --arg address "${address}" \
+    --arg list_id "${list_id}" \
+    '
+      [
+        .data[]
+        | select(.list? == $address)
+      ] as $matches
+      | ($matches | length) == 1
+      and ($matches[0].listid? == $list_id)
+    ' \
+    "${response_file}" >/dev/null; then
+    printf 'Refusing to delete ambiguous test email mailing list: %s\n' \
+      "${address}" >&2
+    exit 1
+  fi
+
+  uapi_post \
+    'Email' \
+    'delete_list' \
+    "Delete test email mailing list ${address}" \
+    "list=${address}"
+  deleted_email_mailing_lists=$((deleted_email_mailing_lists + 1))
+done <<<"${email_mailing_list_candidates}"
+
+get_request \
+  'execute/Email/list_lists' \
+  'Email mailing list inventory after cleanup'
+if jq -e \
+  '
+    .data[].list
+    | select((split("@")[0]) | startswith("tfcpanellist"))
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'Test email mailing list still exists after cleanup\n' >&2
+  exit 1
+fi
+
 while IFS= read -r address; do
   if [[ -z "${address}" ]]; then
     continue
@@ -1406,6 +1487,8 @@ printf '  email account restrictions unsuspended: %d\n' \
 printf '  calendar delegates deleted: %d\n' \
   "${deleted_calendar_delegates}"
 printf '  email filters deleted: %d\n' "${deleted_email_filters}"
+printf '  email mailing lists deleted: %d\n' \
+  "${deleted_email_mailing_lists}"
 printf '  email accounts deleted: %d\n' "${deleted_email_accounts}"
 printf '  email forwarders deleted: %d\n' "${deleted_email_forwarders}"
 printf '  email domain forwarders deleted: %d\n' \

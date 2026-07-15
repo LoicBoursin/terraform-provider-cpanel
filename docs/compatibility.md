@@ -35,7 +35,7 @@ Git repositories, website IP blocks, MySQL or MariaDB databases and users,
 remote MySQL hosts, PostgreSQL databases and users, imports, drift detection,
 per-domain ModSecurity status, stored SSL certificates, email account
 suspension, stored SSL certificate signing requests, default-calendar
-delegation, user-level email filters, and cleanup.
+delegation, user-level email filters, Mailman mailing lists, and cleanup.
 Certification also covers reading and changing the account display locale,
 including restoration of its pre-test value, plus Passenger application
 registration, updates, replacement, import, drift detection, remote deletion,
@@ -301,6 +301,33 @@ Creating a resource refuses an existing filter instead of taking ownership
 implicitly, and rollback deletion requires the complete definition and
 enabled state to match the attempted state. Import identifiers use
 `account|name`.
+
+Mailman mailing list operations use UAPI `Email::list_lists`,
+`Email::add_list`, `Email::passwd_list`,
+`Email::set_list_privacy_options`, and `Email::delete_list`. The complete list
+address is the resource identity. Terraform manages the exact `advertised`,
+`archive_private`, and `subscribe_policy` values. The computed `private`
+summary is true only when the list is not advertised, its archive is private,
+and subscription requires administrator approval; every other valid
+combination is public.
+
+cPanel never returns the administrator password. The `password` attribute is
+write-only, so Terraform does not store it in plan or state artifacts.
+Configure it together with a positive `password_version`. Changing that
+version applies the accompanying password in place. Omitting both attributes
+after import preserves the remote password; setting both performs the first
+managed rotation.
+
+Creation starts with private settings before applying the exact configured
+options. Password and privacy updates are serialized per complete address and
+use cPanel's in-place operations, preserving subscribers, archives, and
+Mailman settings outside Terraform state. Destroy still deletes the complete
+Mailman list and its nested data. Create refuses an existing list, rollback is
+allowed only after cPanel confirms the creation and is bounded by the internal
+list identifier plus exact attempted privacy. An ambiguous creation response
+never adopts or deletes the observed list automatically. Cleanup deletes only
+complete addresses whose local part begins with the reserved test prefix; that
+prefix is the ownership boundary for disposable acceptance-test lists.
 
 The email forwarder resource manages one direct source-to-destination email
 address pair. cPanel permits multiple destinations for the same source address,

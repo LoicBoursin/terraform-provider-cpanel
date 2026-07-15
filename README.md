@@ -4,11 +4,10 @@ Terraform provider for managing account-level API tokens, cron jobs, DNS
 records, Dynamic DNS domains, account locale, web domains, HTTP redirects,
 email accounts, calendar delegations and filters, stored SSL certificates and
 certificate signing requests, Passenger applications, raw access log settings,
-ModSecurity settings,
-directory indexes and privacy, Git repositories, custom MIME types, Apache
-handlers, forwarders, autoresponders, FTP accounts, and MySQL, MariaDB, and
-PostgreSQL users and databases, remote MySQL hosts, plus website IP blocks,
-through the cPanel API.
+ModSecurity settings, directory indexes and privacy, Git repositories, custom
+MIME types, Apache handlers, forwarders, autoresponders, Mailman mailing lists,
+FTP accounts, and MySQL, MariaDB, and PostgreSQL users and databases, remote
+MySQL hosts, plus website IP blocks, through the cPanel API.
 
 ## Status
 
@@ -36,6 +35,7 @@ The supported versions and API policy are documented in
 - `cpanel_email_domain_forwarder`
 - `cpanel_email_filter`
 - `cpanel_email_forwarder`
+- `cpanel_email_mailing_list`
 - `cpanel_ftp_account`
 - `cpanel_git_repository`
 - `cpanel_ip_block`
@@ -69,8 +69,8 @@ Additional read-only account data sources:
   Apache Handlers, ModSecurity, Git Version Control, Passenger Applications,
   SSL Manager with an existing RSA key, account locales, Raw Access log
   settings, email accounts, filters, forwarders and autoresponders, CalDAV
-  calendar delegation, FTP accounts, MySQL or MariaDB with remote-host access,
-  and PostgreSQL enabled, plus the IP Blocker feature
+  calendar delegation, Mailman mailing lists, FTP accounts, MySQL or MariaDB
+  with remote-host access, and PostgreSQL enabled, plus the IP Blocker feature
 
 ## Configuration
 

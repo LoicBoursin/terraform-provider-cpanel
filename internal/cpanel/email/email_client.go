@@ -13,16 +13,25 @@ type Client struct {
 
 	filterLocksMu sync.Mutex
 	filterLocks   map[string]*filterAccountLock
+
+	mailingListLocksMu sync.Mutex
+	mailingListLocks   map[string]*mailingListAddressLock
 }
 
 func NewClient(client *cpanel.Client) *Client {
 	return &Client{
-		Client:      client,
-		filterLocks: make(map[string]*filterAccountLock),
+		Client:           client,
+		filterLocks:      make(map[string]*filterAccountLock),
+		mailingListLocks: make(map[string]*mailingListAddressLock),
 	}
 }
 
 type filterAccountLock struct {
+	mutex      sync.Mutex
+	references int
+}
+
+type mailingListAddressLock struct {
 	mutex      sync.Mutex
 	references int
 }
@@ -54,6 +63,37 @@ func (c *Client) LockFilterAccount(account string) func() {
 				delete(c.filterLocks, account)
 			}
 			c.filterLocksMu.Unlock()
+		})
+	}
+}
+
+func (c *Client) LockMailingList(address string) func() {
+	c.mailingListLocksMu.Lock()
+	if c.mailingListLocks == nil {
+		c.mailingListLocks = make(map[string]*mailingListAddressLock)
+	}
+	lock := c.mailingListLocks[address]
+	if lock == nil {
+		lock = &mailingListAddressLock{}
+		c.mailingListLocks[address] = lock
+	}
+	lock.references++
+	c.mailingListLocksMu.Unlock()
+
+	lock.mutex.Lock()
+
+	var once sync.Once
+
+	return func() {
+		once.Do(func() {
+			lock.mutex.Unlock()
+
+			c.mailingListLocksMu.Lock()
+			lock.references--
+			if lock.references == 0 {
+				delete(c.mailingListLocks, address)
+			}
+			c.mailingListLocksMu.Unlock()
 		})
 	}
 }

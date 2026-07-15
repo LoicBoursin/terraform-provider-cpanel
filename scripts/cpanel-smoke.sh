@@ -156,7 +156,7 @@ if [[
 fi
 
 request 'execute/Features/list_features' 'feature check'
-for feature in addondomains apitokens blockers cron dynamicdns ftpaccts handlers indexmanager mime modsecurity mysql parkeddomains passengerapps popaccts postgres redirects sslmanager subdomains version_control webprotect zoneedit; do
+for feature in addondomains apitokens blockers cron dynamicdns ftpaccts handlers indexmanager lists mime modsecurity mysql parkeddomains passengerapps popaccts postgres redirects sslmanager subdomains version_control webprotect zoneedit; do
   if [[ "$(jq -r --arg feature "${feature}" '.data[$feature] // 0' "${response_file}")" != "1" ]]; then
     printf 'Required cPanel feature is disabled: %s\n' "${feature}" >&2
     exit 1
@@ -422,6 +422,78 @@ email_test_suspended_count="$(
     "${response_file}"
 )"
 email_accounts="$(jq -r '.data[].email' "${response_file}")"
+
+request 'execute/Email/list_lists' 'Email mailing list check'
+if ! jq -e \
+  '
+    (.data | type == "array")
+    and (
+      ([.data[].list] | length)
+      == ([.data[].list] | unique | length)
+    )
+    and all(
+      .data[];
+      (.list? | type) == "string"
+      and (.list | contains("@"))
+      and (.listid? | type) == "string"
+      and (.listid | length > 0)
+      and (.listadmin? | type) == "string"
+      and (.humandiskused? | type) == "string"
+      and (
+        (
+          (
+            ((.advertised? | type) == "number")
+            and (.advertised? == 0)
+          ) as $not_advertised
+          | (
+            ((.archive_private? | type) == "number")
+            and (.archive_private? == 1)
+          ) as $private_archive
+          | (
+            ((.subscribe_policy? | type) == "number")
+            and (
+              (.subscribe_policy? == 2)
+              or (.subscribe_policy? == 3)
+            )
+          ) as $private_subscription
+          | (
+              $not_advertised
+              and $private_archive
+              and $private_subscription
+            ) as $private
+          | (
+              (.accesstype? == "private" and $private)
+              or
+              (.accesstype? == "public" and ($private | not))
+            )
+        )
+      )
+      and all(
+        .data[];
+        (.advertised? == 0 or .advertised? == 1)
+        and (.archive_private? == 0 or .archive_private? == 1)
+        and (
+          .subscribe_policy? == 1
+          or .subscribe_policy? == 2
+          or .subscribe_policy? == 3
+        )
+      )
+    )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'Email mailing list inventory is incomplete\n' >&2
+  exit 1
+fi
+email_mailing_list_count="$(jq -r '.data | length' "${response_file}")"
+email_test_mailing_list_count="$(
+  jq -r \
+    '[
+      .data[].list
+      | select((split("@")[0]) | startswith("tfcpanellist"))
+    ] | length' \
+    "${response_file}"
+)"
+
 email_filter_count=0
 email_test_filter_count=0
 while IFS= read -r address; do
@@ -722,6 +794,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${email_test_account_count}" != "0"
     || "${email_test_suspended_count}" != "0"
     || "${email_test_filter_count}" != "0"
+    || "${email_test_mailing_list_count}" != "0"
     || "${email_test_forwarder_count}" != "0"
     || "${email_test_domain_forwarder_count}" != "0"
     || "${email_test_auto_responder_count}" != "0"
@@ -766,6 +839,8 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     printf '  suspended email test accounts: %s\n' \
       "${email_test_suspended_count}" >&2
     printf '  test email filters: %s\n' "${email_test_filter_count}" >&2
+    printf '  test email mailing lists: %s\n' \
+      "${email_test_mailing_list_count}" >&2
     printf '  test email forwarders: %s\n' "${email_test_forwarder_count}" >&2
     printf '  test email domain forwarders: %s\n' \
       "${email_test_domain_forwarder_count}" >&2
@@ -857,6 +932,9 @@ printf '  email accounts: %s (%s suspended, %s test-managed, %s test-suspended)\
 printf '  email filters: %s (%s test-managed)\n' \
   "${email_filter_count}" \
   "${email_test_filter_count}"
+printf '  email mailing lists: %s (%s test-managed)\n' \
+  "${email_mailing_list_count}" \
+  "${email_test_mailing_list_count}"
 printf '  email forwarders: %s (%s test-managed)\n' \
   "${email_forwarder_count}" \
   "${email_test_forwarder_count}"
