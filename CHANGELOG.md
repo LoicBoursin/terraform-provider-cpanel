@@ -45,6 +45,12 @@
 - Email account suspension resource and data source with independently managed
   login, incoming-mail, and outgoing-mail restrictions, import, drift
   recovery, safe reset on removal, and cPanel 134 acceptance coverage.
+- BoxTrapper settings resource and data source for existing mailboxes and the
+  cPanel system account, with status and configuration updates, import, drift
+  recovery, restoration of the complete managed pre-management settings,
+  status-only support for null sender names, exact sender-name preservation
+  for configuration mutations, queue-preserving cleanup, and cPanel 134
+  acceptance coverage.
 - Calendar delegate resource and data source for the default cPanel CalDAV
   calendar, with read-only or read/write access, composite import, drift
   recovery, strict ownership checks, current CPDAVD support, unit-tested legacy

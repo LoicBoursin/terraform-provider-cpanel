@@ -26,6 +26,7 @@ import (
 	"terraform-provider-cpanel/internal/cpanel"
 	cpanelapachehandler "terraform-provider-cpanel/internal/cpanel/apachehandler"
 	cpanelapitoken "terraform-provider-cpanel/internal/cpanel/apitoken"
+	cpanelboxtrapper "terraform-provider-cpanel/internal/cpanel/boxtrapper"
 	cpanelcalendar "terraform-provider-cpanel/internal/cpanel/calendar"
 	cpanelcapabilities "terraform-provider-cpanel/internal/cpanel/capabilities"
 	"terraform-provider-cpanel/internal/cpanel/cron"
@@ -89,6 +90,19 @@ func testAccPreCheck(t *testing.T) {
 	}
 	if !accountCapabilities.Features["changemx"] {
 		t.Fatal("verify email routing API access: changemx is disabled")
+	}
+	if !accountCapabilities.Features["boxtrapper"] {
+		t.Fatal("verify BoxTrapper API access: boxtrapper is disabled")
+	}
+	boxTrapperSettings, err := cpanelboxtrapper.NewClient(client).Get(
+		ctx,
+		os.Getenv("CPANEL_USERNAME"),
+	)
+	if err != nil {
+		t.Fatalf("verify BoxTrapper API access: %v", err)
+	}
+	if boxTrapperSettings == nil {
+		t.Fatal("verify BoxTrapper API access: system account not found")
 	}
 	if _, err := cpanelcalendar.NewClient(client).ListDelegates(ctx); err != nil {
 		t.Fatalf("verify calendar delegation API access: %v", err)

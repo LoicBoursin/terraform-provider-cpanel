@@ -156,7 +156,7 @@ if [[
 fi
 
 request 'execute/Features/list_features' 'feature check'
-for feature in addondomains apitokens blockers changemx cron dynamicdns ftpaccts handlers indexmanager lists mime modsecurity mysql parkeddomains passengerapps popaccts postgres redirects sslmanager subdomains version_control webprotect zoneedit; do
+for feature in addondomains apitokens blockers boxtrapper changemx cron dynamicdns ftpaccts handlers indexmanager lists mime modsecurity mysql parkeddomains passengerapps popaccts postgres redirects sslmanager subdomains version_control webprotect zoneedit; do
   if [[ "$(jq -r --arg feature "${feature}" '.data[$feature] // 0' "${response_file}")" != "1" ]]; then
     printf 'Required cPanel feature is disabled: %s\n' "${feature}" >&2
     exit 1
@@ -442,6 +442,200 @@ email_test_suspended_count="$(
     "${response_file}"
 )"
 email_accounts="$(jq -r '.data[].email' "${response_file}")"
+
+request \
+  "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=BoxTrapper&cpanel_jsonapi_func=accountmanagelist" \
+  'BoxTrapper account inventory'
+if ! jq -e \
+  '
+    (.cpanelresult | type) == "object"
+    and (.cpanelresult | has("apiversion"))
+    and (.cpanelresult | has("data"))
+    and (.cpanelresult | has("event"))
+    and (.cpanelresult | has("func"))
+    and (.cpanelresult | has("module"))
+    and (
+      (
+        (.cpanelresult | keys)
+        - [
+            "apiversion",
+            "data",
+            "event",
+            "func",
+            "module",
+            "postevent",
+            "preevent"
+          ]
+      )
+      | length
+    ) == 0
+    and .cpanelresult.apiversion == 2
+    and .cpanelresult.func == "accountmanagelist"
+    and .cpanelresult.module == "BoxTrapper"
+    and ((.cpanelresult.event | keys) == ["result"])
+    and .cpanelresult.event.result == 1
+    and (
+      (.cpanelresult | has("preevent") | not)
+      or .cpanelresult.preevent == null
+      or (.cpanelresult.preevent | type) == "object"
+    )
+    and (
+      (.cpanelresult | has("postevent") | not)
+      or .cpanelresult.postevent == null
+      or (.cpanelresult.postevent | type) == "object"
+    )
+    and (.cpanelresult.data | type) == "array"
+    and (
+      ([.cpanelresult.data[].account] | length)
+      == ([.cpanelresult.data[].account] | unique | length)
+    )
+    and all(
+      .cpanelresult.data[];
+      ((. | keys | sort) == [
+        "account",
+        "accounturi",
+        "bg",
+        "enabled",
+        "status"
+      ])
+      and (.account | type) == "string"
+      and (.account | length) > 0
+      and (.accounturi | type) == "string"
+      and (.accounturi | length) > 0
+      and (.bg | type) == "string"
+      and (.bg | length) > 0
+      and (
+        .enabled == 0
+        or .enabled == "0"
+        or .enabled == 1
+        or .enabled == "1"
+      )
+      and (.status | type) == "string"
+      and (.status | length) > 0
+    )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'BoxTrapper account inventory is incomplete\n' >&2
+  exit 1
+fi
+boxtrapper_account_count="$(
+  jq -r '.cpanelresult.data | length' "${response_file}"
+)"
+boxtrapper_enabled_count="$(
+  jq -r \
+    '[.cpanelresult.data[] | select((.enabled | tostring) == "1")] | length' \
+    "${response_file}"
+)"
+boxtrapper_test_account_count="$(
+  jq -r \
+    '[
+      .cpanelresult.data[].account
+      | select((split("@")[0]) | startswith("tfcpanelboxtrapper"))
+    ] | length' \
+    "${response_file}"
+)"
+boxtrapper_test_enabled_count="$(
+  jq -r \
+    '[
+      .cpanelresult.data[]
+      | select((.account | split("@")[0]) | startswith("tfcpanelboxtrapper"))
+      | select((.enabled | tostring) == "1")
+    ] | length' \
+    "${response_file}"
+)"
+boxtrapper_accounts="$(
+  jq -r \
+    '.cpanelresult.data[] | [.account, (.enabled | tostring)] | @tsv' \
+    "${response_file}"
+)"
+boxtrapper_test_queued_message_count=0
+while IFS=$'\t' read -r address inventory_enabled; do
+  if [[ -z "${address}" ]]; then
+    continue
+  fi
+
+  request \
+    "execute/BoxTrapper/get_status?email=${address}" \
+    "BoxTrapper status check for ${address}"
+  if ! jq -e \
+    '
+      .data == 0
+      or .data == "0"
+      or .data == 1
+      or .data == "1"
+    ' \
+    "${response_file}" >/dev/null; then
+    printf 'BoxTrapper status is invalid for %s\n' "${address}" >&2
+    exit 1
+  fi
+  if [[ "$(jq -r '.data | tostring' "${response_file}")" != "${inventory_enabled}" ]]; then
+    printf 'BoxTrapper status disagrees with the account inventory for %s\n' \
+      "${address}" >&2
+    exit 1
+  fi
+
+  request \
+    "execute/BoxTrapper/get_configuration?email=${address}" \
+    "BoxTrapper configuration check for ${address}"
+  if ! jq -e \
+    '
+      def flag:
+        . == 0 or . == "0" or . == 1 or . == "1";
+      def positive_integer:
+        (
+          type == "number"
+          and floor == .
+          and . >= 1
+        )
+        or (
+          type == "string"
+          and test("^[1-9][0-9]*$")
+        );
+      def decimal:
+        (type == "number")
+        or (
+          type == "string"
+          and test("^-?[0-9]+([.][0-9]+)?$")
+        );
+      (.data | type) == "object"
+      and ((.data | keys | sort) == [
+        "enable_auto_whitelist",
+        "from_addresses",
+        "from_name",
+        "queue_days",
+        "spam_score",
+        "whitelist_by_association"
+      ])
+      and (.data.enable_auto_whitelist | flag)
+      and (.data.from_addresses | type) == "string"
+      and (
+        .data.from_name == null
+        or (.data.from_name | type) == "string"
+      )
+      and (.data.queue_days | positive_integer)
+      and (.data.spam_score | decimal)
+      and (.data.whitelist_by_association | flag)
+    ' \
+    "${response_file}" >/dev/null; then
+    printf 'BoxTrapper configuration is incomplete for %s\n' \
+      "${address}" >&2
+    exit 1
+  fi
+
+  if [[ "${address%%@*}" == tfcpanelboxtrapper* ]]; then
+    request \
+      "execute/BoxTrapper/list_queued_messages?email=${address}" \
+      "BoxTrapper queue check for ${address}"
+    if ! jq -e '(.data | type) == "array"' \
+      "${response_file}" >/dev/null; then
+      printf 'BoxTrapper queue inventory is invalid for %s\n' \
+        "${address}" >&2
+      exit 1
+    fi
+    account_queue_count="$(jq -r '.data | length' "${response_file}")"
+    boxtrapper_test_queued_message_count=$((boxtrapper_test_queued_message_count + account_queue_count))
+  fi
+done <<<"${boxtrapper_accounts}"
 
 request 'execute/Email/list_lists' 'Email mailing list check'
 if ! jq -e \
@@ -919,6 +1113,9 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${calendar_test_delegate_count}" != "0"
     || "${email_test_account_count}" != "0"
     || "${email_test_suspended_count}" != "0"
+    || "${boxtrapper_test_account_count}" != "0"
+    || "${boxtrapper_test_enabled_count}" != "0"
+    || "${boxtrapper_test_queued_message_count}" != "0"
     || "${email_test_filter_count}" != "0"
     || "${email_test_mailing_list_count}" != "0"
     || "${email_test_non_auto_routing_count}" != "0"
@@ -967,6 +1164,12 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     printf '  email test accounts: %s\n' "${email_test_account_count}" >&2
     printf '  suspended email test accounts: %s\n' \
       "${email_test_suspended_count}" >&2
+    printf '  test BoxTrapper accounts: %s\n' \
+      "${boxtrapper_test_account_count}" >&2
+    printf '  enabled test BoxTrapper accounts: %s\n' \
+      "${boxtrapper_test_enabled_count}" >&2
+    printf '  queued test BoxTrapper messages: %s\n' \
+      "${boxtrapper_test_queued_message_count}" >&2
     printf '  test email filters: %s\n' "${email_test_filter_count}" >&2
     printf '  test email mailing lists: %s\n' \
       "${email_test_mailing_list_count}" >&2
@@ -1064,6 +1267,12 @@ printf '  email accounts: %s (%s suspended, %s test-managed, %s test-suspended)\
   "${email_suspended_count}" \
   "${email_test_account_count}" \
   "${email_test_suspended_count}"
+printf '  BoxTrapper accounts: %s (%s enabled, %s test-managed, %s test-enabled, %s test-queued messages)\n' \
+  "${boxtrapper_account_count}" \
+  "${boxtrapper_enabled_count}" \
+  "${boxtrapper_test_account_count}" \
+  "${boxtrapper_test_enabled_count}" \
+  "${boxtrapper_test_queued_message_count}"
 printf '  email filters: %s (%s test-managed)\n' \
   "${email_filter_count}" \
   "${email_test_filter_count}"

@@ -21,10 +21,14 @@ Dynamic DNS domains, web domains, HTTP redirects, custom MIME types, email
 accounts, Apache handlers, directory indexes and privacy, Git repositories,
 Passenger applications, stored public SSL certificates, email filters,
 stored public SSL certificate signing requests, calendar delegations,
-forwarders and autoresponders, FTP accounts, MySQL or MariaDB users and
-databases and remote hosts, PostgreSQL users and databases, filesystem
-directories and UTF-8 text files, and database grants. Locale acceptance tests
-temporarily change the account display locale and restore the persisted
+forwarders and autoresponders, BoxTrapper settings, FTP accounts, MySQL or
+MariaDB users and databases and remote hosts, PostgreSQL users and databases,
+filesystem directories and UTF-8 text files, and database grants. BoxTrapper
+tests use disposable mailboxes without sending messages and restore the
+captured settings before mailbox deletion. They verify that configuration
+changes are rejected while cPanel reports a null sender name, then establish a
+non-null fixture name explicitly for the complete lifecycle. Locale acceptance
+tests temporarily change the account display locale and restore the persisted
 test-account baseline. Log settings tests temporarily change archive, pruning,
 and retention preferences and restore the same durable baseline. Use a
 dedicated cPanel test account.
@@ -135,6 +139,10 @@ that follow the test naming contract:
   `tfcpanelcsr`; cleanup re-reads the CSR inventory and signed public PKCS#10
   request immediately before deleting the exact matching ID;
 - email account local parts beginning with `tfcpanel`;
+- BoxTrapper test mailbox local parts beginning with
+  `tfcpanelboxtrapper`; cleanup verifies that the challenge queue is empty,
+  disables BoxTrapper, rechecks the queue immediately before deletion, and
+  never deletes queued messages before deleting the disposable mailbox;
 - CalDAV calendar delegations whose delegator or delegatee local part begins
   with `tfcpanelcal`; cleanup removes these relationships before deleting
   either mailbox;

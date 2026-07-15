@@ -301,6 +301,7 @@ deleted_calendar_delegates=0
 deleted_email_filters=0
 deleted_email_mailing_lists=0
 unsuspended_email_restrictions=0
+reset_boxtrapper_accounts=0
 deleted_email_forwarders=0
 deleted_email_domain_forwarders=0
 deleted_email_auto_responders=0
@@ -964,6 +965,142 @@ email_filter_accounts="$(
 )"
 
 get_request \
+  "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=BoxTrapper&cpanel_jsonapi_func=accountmanagelist" \
+  'BoxTrapper account inventory'
+if ! jq -e \
+  '
+    (.cpanelresult | type) == "object"
+    and (.cpanelresult | has("apiversion"))
+    and (.cpanelresult | has("data"))
+    and (.cpanelresult | has("event"))
+    and (.cpanelresult | has("func"))
+    and (.cpanelresult | has("module"))
+    and (
+      (
+        (.cpanelresult | keys)
+        - [
+            "apiversion",
+            "data",
+            "event",
+            "func",
+            "module",
+            "postevent",
+            "preevent"
+          ]
+      )
+      | length
+    ) == 0
+    and .cpanelresult.apiversion == 2
+    and .cpanelresult.func == "accountmanagelist"
+    and .cpanelresult.module == "BoxTrapper"
+    and ((.cpanelresult.event | keys) == ["result"])
+    and .cpanelresult.event.result == 1
+    and (
+      (.cpanelresult | has("preevent") | not)
+      or .cpanelresult.preevent == null
+      or (.cpanelresult.preevent | type) == "object"
+    )
+    and (
+      (.cpanelresult | has("postevent") | not)
+      or .cpanelresult.postevent == null
+      or (.cpanelresult.postevent | type) == "object"
+    )
+    and (.cpanelresult.data | type) == "array"
+    and (
+      ([.cpanelresult.data[].account] | length)
+      == ([.cpanelresult.data[].account] | unique | length)
+    )
+    and all(
+      .cpanelresult.data[];
+      ((. | keys | sort) == [
+        "account",
+        "accounturi",
+        "bg",
+        "enabled",
+        "status"
+      ])
+      and (.account | type) == "string"
+      and (.account | length) > 0
+      and (
+        .enabled == 0
+        or .enabled == "0"
+        or .enabled == 1
+        or .enabled == "1"
+      )
+    )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'Refusing to clean ambiguous BoxTrapper account inventory\n' >&2
+  exit 1
+fi
+boxtrapper_test_accounts="$(
+  jq -r \
+    '
+      .cpanelresult.data[]
+      | select(
+          (.account | split("@")[0])
+          | startswith("tfcpanelboxtrapper")
+        )
+      | [.account, (.enabled | tostring)]
+      | @tsv
+    ' \
+    "${response_file}"
+)"
+while IFS=$'\t' read -r address enabled; do
+  if [[ -z "${address}" ]]; then
+    continue
+  fi
+  account_candidate_found=0
+  while IFS=$'\t' read -r candidate_address _; do
+    if [[ "${candidate_address}" == "${address}" ]]; then
+      account_candidate_found=1
+      break
+    fi
+  done <<<"${email_account_candidates}"
+  if [[ "${account_candidate_found}" != "1" ]]; then
+    printf 'Refusing to alter orphaned BoxTrapper test account: %s\n' \
+      "${address}" >&2
+    exit 1
+  fi
+
+  get_request \
+    "execute/BoxTrapper/list_queued_messages?email=${address}" \
+    "BoxTrapper queue inventory for ${address}"
+  if ! jq -e '(.data | type) == "array"' \
+    "${response_file}" >/dev/null; then
+    printf 'Refusing to clean invalid BoxTrapper queue inventory for %s\n' \
+      "${address}" >&2
+    exit 1
+  fi
+  queue_count="$(jq -r '.data | length' "${response_file}")"
+  if [[ "${queue_count}" != "0" ]]; then
+    printf 'Refusing to delete BoxTrapper test account with %s queued message(s): %s\n' \
+      "${queue_count}" \
+      "${address}" >&2
+    exit 1
+  fi
+
+  if [[ "${enabled}" == "1" ]]; then
+    uapi_post \
+      'BoxTrapper' \
+      'set_status' \
+      "Disable BoxTrapper for test account ${address}" \
+      "email=${address}" \
+      'enabled=0'
+    reset_boxtrapper_accounts=$((reset_boxtrapper_accounts + 1))
+  fi
+
+  get_request \
+    "execute/BoxTrapper/get_status?email=${address}" \
+    "BoxTrapper status after reset for ${address}"
+  if [[ "$(jq -r '.data | tostring' "${response_file}")" != "0" ]]; then
+    printf 'BoxTrapper remains enabled for test account: %s\n' \
+      "${address}" >&2
+    exit 1
+  fi
+done <<<"${boxtrapper_test_accounts}"
+
+get_request \
   'execute/CPDAVD/list_delegates' \
   'Calendar delegate inventory'
 if ! jq -e \
@@ -1213,9 +1350,40 @@ while IFS=$'\t' read -r address login incoming outgoing held; do
       "email=${address}"
     unsuspended_email_restrictions=$((unsuspended_email_restrictions + 1))
   fi
+  if [[ "${address%%@*}" == tfcpanelboxtrapper* ]]; then
+    get_request \
+      "execute/BoxTrapper/list_queued_messages?email=${address}" \
+      "Final BoxTrapper queue inventory for ${address}"
+    if ! jq -e '(.data | type) == "array"' \
+      "${response_file}" >/dev/null; then
+      printf 'Refusing to delete test account with invalid final BoxTrapper queue inventory: %s\n' \
+        "${address}" >&2
+      exit 1
+    fi
+    queue_count="$(jq -r '.data | length' "${response_file}")"
+    if [[ "${queue_count}" != "0" ]]; then
+      printf 'Refusing to delete BoxTrapper test account after final queue recheck found %s message(s): %s\n' \
+        "${queue_count}" \
+        "${address}" >&2
+      exit 1
+    fi
+  fi
   uapi_post 'Email' 'delete_pop' "Delete test email account ${address}" "email=${address}"
   deleted_email_accounts=$((deleted_email_accounts + 1))
 done <<<"${email_account_candidates}"
+
+get_request \
+  "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=BoxTrapper&cpanel_jsonapi_func=accountmanagelist" \
+  'BoxTrapper account inventory after cleanup'
+if jq -e \
+  '
+    .cpanelresult.data[].account
+    | select((split("@")[0]) | startswith("tfcpanelboxtrapper"))
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'Test BoxTrapper account still exists after cleanup\n' >&2
+  exit 1
+fi
 
 get_request 'execute/Email/list_mail_domains' 'Email forwarder domain inventory'
 mail_domains="$(jq -r '.data[].domain' "${response_file}")"
@@ -1896,6 +2064,8 @@ printf '  MySQL users deleted: %d\n' "${deleted_mysql_users}"
 printf '  remote MySQL hosts deleted: %d\n' "${deleted_mysql_remote_hosts}"
 printf '  email account restrictions unsuspended: %d\n' \
   "${unsuspended_email_restrictions}"
+printf '  BoxTrapper test accounts disabled: %d\n' \
+  "${reset_boxtrapper_accounts}"
 printf '  calendar delegates deleted: %d\n' \
   "${deleted_calendar_delegates}"
 printf '  email filters deleted: %d\n' "${deleted_email_filters}"

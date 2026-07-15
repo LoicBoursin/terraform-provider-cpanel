@@ -6,9 +6,9 @@ email accounts, calendar delegations and filters, stored SSL certificates and
 certificate signing requests, Passenger applications, raw access log settings,
 ModSecurity settings, filesystem directories and UTF-8 text files, directory
 indexes and privacy, Git repositories, custom MIME types, Apache handlers,
-forwarders, autoresponders, Mailman mailing lists, FTP accounts, and MySQL,
-MariaDB, and PostgreSQL users and databases, remote MySQL hosts, plus website
-IP blocks and email routing, through the cPanel API.
+forwarders, autoresponders, BoxTrapper settings, Mailman mailing lists, FTP
+accounts, and MySQL, MariaDB, and PostgreSQL users and databases, remote MySQL
+hosts, plus website IP blocks and email routing, through the cPanel API.
 
 ## Status
 
@@ -22,6 +22,7 @@ The supported versions and API policy are documented in
 - `cpanel_addon_domain`
 - `cpanel_apache_handler`
 - `cpanel_api_token`
+- `cpanel_boxtrapper_settings`
 - `cpanel_calendar_delegate`
 - `cpanel_cron_job`
 - `cpanel_directory_index`
@@ -72,10 +73,10 @@ Additional read-only account data sources:
   DNS, domains, Redirects, Index Manager, Directory Privacy, MIME Types,
   Apache Handlers, ModSecurity, Git Version Control, Passenger Applications,
   SSL Manager with an existing RSA key, File Manager, account locales, Raw
-  Access log settings, email accounts, filters, forwarders and autoresponders,
-  email routing, CalDAV calendar delegation, Mailman mailing lists, FTP
-  accounts, MySQL or MariaDB with remote-host access, and PostgreSQL enabled,
-  plus the IP Blocker feature
+  Access log settings, email accounts, BoxTrapper, filters, forwarders and
+  autoresponders, email routing, CalDAV calendar delegation, Mailman mailing
+  lists, FTP accounts, MySQL or MariaDB with remote-host access, and PostgreSQL
+  enabled, plus the IP Blocker feature
 
 ## Configuration
 

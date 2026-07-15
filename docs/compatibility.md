@@ -35,9 +35,9 @@ Git repositories, website IP blocks, MySQL or MariaDB databases and users,
 remote MySQL hosts, PostgreSQL databases and users, imports, drift detection,
 per-domain ModSecurity status, stored SSL certificates, email account
 suspension, stored SSL certificate signing requests, default-calendar
-delegation, user-level email filters, Mailman mailing lists, and cleanup.
-Certification also covers per-domain email routing transitions and restoration
-without changing DNS MX records.
+delegation, user-level email filters, BoxTrapper settings, Mailman mailing
+lists, and cleanup. Certification also covers per-domain email routing
+transitions and restoration without changing DNS MX records.
 Certification also covers reading and changing the account display locale,
 including restoration of its pre-test value, plus Passenger application
 registration, updates, replacement, import, drift detection, remote deletion,
@@ -319,6 +319,33 @@ but never calls `hold_outgoing` or `release_outgoing`, because releasing a
 queue is an imperative delivery action. Removing the resource unsuspends the
 three managed restrictions without deleting the mailbox or releasing held
 mail.
+
+BoxTrapper account discovery uses API 2
+`BoxTrapper::accountmanagelist`. Status and configuration reads use UAPI
+`BoxTrapper::get_status` and `BoxTrapper::get_configuration`; mutations use
+`BoxTrapper::set_status` and `BoxTrapper::save_configuration`. The mailbox or
+cPanel system account must already exist.
+
+Terraform manages enabled status, automatic allowlisting, sender addresses,
+queue retention, SpamAssassin score, and association-based allowlisting. cPanel
+stores the score to one decimal place, so the provider rejects values that
+cannot be represented exactly at that precision. `from_name` is read-only:
+cPanel reports null for a new mailbox but cannot restore that null after an
+explicit name has been saved. The enabled status can still be changed while
+`from_name` is null. Before any configuration mutation, the provider requires
+a non-null observed name, sends that exact value to
+`BoxTrapper::save_configuration`, and verifies that it remains unchanged.
+Terraform refuses the mutation before the POST when the name is null.
+
+The resource captures all managed values before its first mutation and restores
+them on destroy. Complete transitions are serialized per account and apply
+configuration before status. Ambiguous failures trigger a bounded reread and
+rollback only while the observed settings still match the attempted
+transition. Terraform does not manage challenge queues, logs, allowlists,
+blocklists, templates, or messages. Acceptance cleanup checks
+`BoxTrapper::list_queued_messages`, refuses to delete a test mailbox with a
+non-empty queue, repeats that check immediately before mailbox deletion, and
+never deletes queued messages.
 
 User-level email filter operations use UAPI `Email::list_filters`,
 `Email::get_filter`, `Email::store_filter`, `Email::enable_filter`,
