@@ -125,6 +125,24 @@ state, and updating a password calls `add_user` again for the same identity.
 An imported user has no password in state until configuration sets it. Password
 changes made outside Terraform cannot be detected during refresh.
 
+Filesystem directory operations use UAPI `Variables::get_user_information`,
+`Fileman::list_files`, `Fileman::save_file_content`, and
+`Fileman::get_file_content`, plus API 2 `Fileman::mkdir` and
+`Fileman::fileop`. Managed paths are normalized relative to the account home
+and are restricted strictly below `public_html`; the provider never manages
+the account home, `public_html` itself, the cPanel-controlled
+`public_html/cgi-bin` tree, or paths containing commas because API 2 treats
+commas as path separators.
+
+Each directory created by Terraform contains a reserved
+`.terraform-cpanel-directory` marker containing a random ownership token. A
+matching copy is kept in Terraform private state. Destroy verifies both copies,
+refuses to remove a directory containing any other entry, removes the marker,
+rechecks that the directory is empty, and restores the marker if directory
+deletion fails. Import recovers ownership for a valid provider marker. An
+imported directory without a marker remains non-owned and is preserved even if
+a marker appears later.
+
 Git repository operations use UAPI `VersionControl::retrieve`,
 `VersionControl::create`, `VersionControl::update`, and
 `VersionControl::delete`. Repository roots are normalized relative to the

@@ -109,6 +109,9 @@ that follow the test naming contract:
 - Apache handler extensions beginning with `.tfcpanelhandler`;
 - directory index settings on top-level `public_html` directories beginning
   with `tfcpanel-index-`;
+- filesystem directory resources beginning with `tfcpanel-fs-dir-` below
+  `public_html`; provider-created fixtures contain only the reserved
+  `.terraform-cpanel-directory` ownership marker;
 - Directory Privacy settings on top-level `public_html` directories beginning
   with `tfcpanel-privacy-`, plus only their matching password directories
   below `.htpasswds/public_html`; Directory Privacy user tests use only these

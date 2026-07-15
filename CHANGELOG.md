@@ -57,6 +57,10 @@
   passwords, explicit password-version rotations, exact and mixed access
   settings, in-place password and privacy updates, import, drift recovery,
   exact-address deletion, and cPanel 134 acceptance coverage.
+- Filesystem directory resource and data source below `public_html`, with a
+  private Terraform ownership marker, safe import, non-destructive handling of
+  unmarked directories, refusal to delete populated directories, and cPanel
+  134 acceptance coverage.
 - MySQL and MariaDB user and database resources, matching data sources, import,
   drift recovery, privilege management, and cPanel 134 acceptance coverage.
 - Remote MySQL host resource and data source with IPv4, CIDR, wildcard, and

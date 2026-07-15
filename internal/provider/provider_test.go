@@ -35,6 +35,7 @@ import (
 	cpaneldns "terraform-provider-cpanel/internal/cpanel/dns"
 	cpaneldomain "terraform-provider-cpanel/internal/cpanel/domain"
 	cpanelmail "terraform-provider-cpanel/internal/cpanel/email"
+	cpanelfileman "terraform-provider-cpanel/internal/cpanel/fileman"
 	cpanelftp "terraform-provider-cpanel/internal/cpanel/ftp"
 	cpanelipblock "terraform-provider-cpanel/internal/cpanel/ipblock"
 	cpanellocale "terraform-provider-cpanel/internal/cpanel/locale"
@@ -296,6 +297,14 @@ func testAccApacheHandlerName(kind string) string {
 func testAccDirectoryIndexDirectory(kind string) string {
 	return fmt.Sprintf(
 		"public_html/tfcpanel-index-%s-%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
+	)
+}
+
+func testAccFilesystemDirectoryPath(kind string) string {
+	return fmt.Sprintf(
+		"public_html/tfcpanel-fs-dir-%s-%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
 	)
@@ -1347,6 +1356,198 @@ func testAccCheckDirectoryIndexesDestroyed(
 		}
 
 		return validationErr
+	}
+}
+
+func testAccCheckFilesystemDirectory(
+	directoryPath string,
+	owned bool,
+) resource.TestCheckFunc {
+	return testAccCheckFilesystemDirectoryMarker(directoryPath, owned)
+}
+
+func testAccCheckFilesystemDirectoryMarker(
+	directoryPath string,
+	markerExpected bool,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+		filemanClient := cpanelfileman.NewClient(client)
+		directory, err := filemanClient.GetDirectory(ctx, directoryPath)
+		if err != nil {
+			return err
+		}
+		if directory == nil {
+			return fmt.Errorf(
+				"filesystem directory %q was not found",
+				directoryPath,
+			)
+		}
+
+		marker, err := filemanClient.GetTextFile(
+			ctx,
+			filesystemDirectoryMarkerPath(directoryPath),
+		)
+		if err != nil {
+			return err
+		}
+		if markerExpected && marker == nil {
+			return fmt.Errorf(
+				"filesystem directory %q has no ownership marker",
+				directoryPath,
+			)
+		}
+		if !markerExpected && marker != nil {
+			return fmt.Errorf(
+				"filesystem directory %q unexpectedly has an ownership marker",
+				directoryPath,
+			)
+		}
+
+		return nil
+	}
+}
+
+func testAccWriteFilesystemDirectoryMarker(
+	t *testing.T,
+	directoryPath string,
+) {
+	t.Helper()
+
+	const token = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+
+	content, err := filesystemDirectoryMarkerContent(directoryPath, token)
+	if err != nil {
+		t.Fatalf(
+			"encode filesystem directory %q ownership marker: %v",
+			directoryPath,
+			err,
+		)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	filemanClient := cpanelfileman.NewClient(client)
+	unlock := filemanClient.LockMutations()
+	defer unlock()
+
+	if _, err := filemanClient.SaveTextFile(
+		ctx,
+		filesystemDirectoryMarkerPath(directoryPath),
+		content,
+	); err != nil {
+		t.Fatalf(
+			"write filesystem directory %q ownership marker: %v",
+			directoryPath,
+			err,
+		)
+	}
+}
+
+func testAccDeleteFilesystemDirectory(
+	t *testing.T,
+	directoryPath string,
+) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	filemanClient := cpanelfileman.NewClient(client)
+	unlock := filemanClient.LockMutations()
+	defer unlock()
+
+	entries, err := filemanClient.ListDirectory(ctx, directoryPath)
+	if err != nil {
+		t.Fatalf("list filesystem directory %q: %v", directoryPath, err)
+	}
+	for _, entry := range entries {
+		if err := filemanClient.DeletePath(ctx, entry.Path); err != nil {
+			t.Fatalf(
+				"delete filesystem entry %q: %v",
+				entry.Path,
+				err,
+			)
+		}
+	}
+	if err := filemanClient.DeletePath(ctx, directoryPath); err != nil {
+		t.Fatalf("delete filesystem directory %q: %v", directoryPath, err)
+	}
+}
+
+func testAccCreateUnmarkedFilesystemDirectory(
+	t *testing.T,
+	directoryPath string,
+) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	filemanClient := cpanelfileman.NewClient(client)
+	unlock := filemanClient.LockMutations()
+	defer unlock()
+
+	existing, err := filemanClient.GetDirectory(ctx, directoryPath)
+	if err != nil {
+		t.Fatalf("read filesystem directory %q: %v", directoryPath, err)
+	}
+	if existing != nil {
+		return
+	}
+	if _, err := filemanClient.CreateDirectory(
+		ctx,
+		directoryPath,
+	); err != nil {
+		t.Fatalf("create unmarked filesystem directory %q: %v", directoryPath, err)
+	}
+}
+
+func testAccCheckFilesystemDirectoriesDestroyed(
+	directories ...string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+		filemanClient := cpanelfileman.NewClient(client)
+		for _, directoryPath := range directories {
+			directory, err := filemanClient.GetDirectory(ctx, directoryPath)
+			if err != nil {
+				return err
+			}
+			if directory != nil {
+				return fmt.Errorf(
+					"filesystem directory %q still exists after destroy",
+					directoryPath,
+				)
+			}
+		}
+
+		return nil
 	}
 }
 
