@@ -240,6 +240,7 @@ deleted_mime_types=0
 deleted_apache_handlers=0
 deleted_passenger_applications=0
 deleted_ssl_certificates=0
+deleted_ssl_csrs=0
 deleted_git_repositories=0
 deleted_git_repository_directories=0
 deleted_git_repository_trash_entries=0
@@ -300,6 +301,143 @@ done < <(
       | select(startswith("tfcpanelpassenger"))' \
     "${response_file}"
 )
+
+get_request 'execute/SSL/list_csrs' 'stored SSL CSR inventory'
+if ! jq -e \
+  --arg prefix 'tfcpanelcsr' \
+  '
+    (.data | type == "array")
+    and all(
+      .data[];
+      (
+        (
+          ((.friendly_name? | type) == "string"
+            and (.friendly_name | startswith($prefix)))
+          or
+          ((.commonName? | type) == "string"
+            and (.commonName | startswith($prefix)))
+        )
+        | not
+      )
+      or (
+        ((.id? | type) == "string" or (.id? | type) == "number")
+        and ((.id | tostring | length) > 0)
+        and ((.friendly_name? | type) == "string")
+        and (.friendly_name | startswith($prefix))
+        and ((.commonName? | type) == "string")
+        and (.commonName | startswith($prefix))
+      )
+    )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'Refusing to clean ambiguous test SSL CSR inventory\n' >&2
+  exit 1
+fi
+ssl_csr_candidates="$(
+  jq -r \
+    --arg prefix 'tfcpanelcsr' \
+    '
+      .data[]
+      | select(
+          (.friendly_name? | type) == "string"
+          and (.friendly_name | startswith($prefix))
+          and (.commonName? | type) == "string"
+          and (.commonName | startswith($prefix))
+        )
+      | [(.id | tostring), .friendly_name, .commonName]
+      | @tsv
+    ' \
+    "${response_file}"
+)"
+while IFS=$'\t' read -r csr_id friendly_name common_name; do
+  if [[ -z "${csr_id}" ]]; then
+    continue
+  fi
+
+  get_request 'execute/SSL/list_csrs' \
+    "Re-read test SSL CSR ${friendly_name}"
+  if ! jq -e \
+    --arg id "${csr_id}" \
+    --arg friendly_name "${friendly_name}" \
+    --arg common_name "${common_name}" \
+    '
+      (.data | type == "array")
+      and (
+        [
+          .data[]
+          | select(
+              ((.id? | type) == "string" or (.id? | type) == "number")
+              and ((.id | tostring) == $id)
+            )
+        ] as $matches
+        | ($matches | length) == 1
+        and ($matches[0].friendly_name? == $friendly_name)
+        and ($matches[0].commonName? == $common_name)
+      )
+    ' \
+    "${response_file}" >/dev/null; then
+    printf 'Refusing to delete ambiguous test SSL CSR: %s\n' \
+      "${friendly_name}" >&2
+    exit 1
+  fi
+
+  encoded_csr_id="$(
+    jq -rn --arg value "${csr_id}" '$value | @uri'
+  )"
+  get_request \
+    "execute/SSL/show_csr?id=${encoded_csr_id}" \
+    "Inspect test SSL CSR ${friendly_name}"
+  if ! jq -e \
+    --arg id "${csr_id}" \
+    --arg friendly_name "${friendly_name}" \
+    --arg common_name "${common_name}" \
+    '
+      (.data | type == "object")
+      and ((.data.csr? | type) == "string")
+      and (.data.csr | startswith("-----BEGIN CERTIFICATE REQUEST-----"))
+      and ((.data.details.id | tostring) == $id)
+      and (.data.details.friendly_name == $friendly_name)
+      and (.data.details.commonName == $common_name)
+    ' \
+    "${response_file}" >/dev/null; then
+    printf 'Refusing to delete unverifiable test SSL CSR: %s\n' \
+      "${friendly_name}" >&2
+    exit 1
+  fi
+
+  uapi_post \
+    'SSL' \
+    'delete_csr' \
+    "Delete test SSL CSR ${friendly_name}" \
+    "id=${csr_id}" \
+    "friendly_name=${friendly_name}"
+  deleted_ssl_csrs=$((deleted_ssl_csrs + 1))
+done <<<"${ssl_csr_candidates}"
+
+get_request \
+  'execute/SSL/list_csrs' \
+  'stored SSL CSR inventory after cleanup'
+if ! jq -e '(.data | type) == "array"' \
+  "${response_file}" >/dev/null; then
+  printf 'Stored SSL CSR inventory after cleanup is incomplete\n' >&2
+  exit 1
+fi
+if jq -e \
+  --arg prefix 'tfcpanelcsr' \
+  '
+    .data[]
+    | select(
+        ((.friendly_name? | type) == "string"
+          and (.friendly_name | startswith($prefix)))
+        or
+        ((.commonName? | type) == "string"
+          and (.commonName | startswith($prefix)))
+      )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'Test SSL CSR still exists after cleanup\n' >&2
+  exit 1
+fi
 
 get_request 'execute/SSL/list_certs' 'stored SSL certificate inventory'
 if ! jq -e \
@@ -1250,6 +1388,7 @@ printf '  custom MIME types deleted: %d\n' "${deleted_mime_types}"
 printf '  Apache handlers deleted: %d\n' "${deleted_apache_handlers}"
 printf '  Passenger applications unregistered: %d\n' \
   "${deleted_passenger_applications}"
+printf '  stored SSL CSRs deleted: %d\n' "${deleted_ssl_csrs}"
 printf '  stored SSL certificates deleted: %d\n' \
   "${deleted_ssl_certificates}"
 printf '  Git repositories deleted: %d\n' "${deleted_git_repositories}"

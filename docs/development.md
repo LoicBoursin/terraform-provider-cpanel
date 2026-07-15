@@ -20,7 +20,8 @@ Acceptance tests create and delete real API tokens, cron jobs, DNS records,
 Dynamic DNS domains, web domains, HTTP redirects, custom MIME types, email
 accounts, Apache handlers, directory indexes and privacy, Git repositories,
 Passenger applications, stored public SSL certificates, email filters,
-calendar delegations, forwarders and autoresponders, FTP accounts, MySQL or MariaDB users and
+stored public SSL certificate signing requests, calendar delegations,
+forwarders and autoresponders, FTP accounts, MySQL or MariaDB users and
 databases and remote hosts, PostgreSQL users and databases, and database
 grants. Locale acceptance tests temporarily change the account display locale
 and restore the persisted test-account baseline. Log settings tests
@@ -40,9 +41,13 @@ The file format matches [`.env.acceptance.example`](../.env.acceptance.example):
 CPANEL_HOST=https://cpanel.example.com:2083
 CPANEL_USERNAME=account
 CPANEL_API_TOKEN=token
+CPANEL_TEST_SSL_KEY_ID=
 ```
 
 Set its permissions to `0600`. Never commit a populated credentials file.
+`CPANEL_TEST_SSL_KEY_ID` is optional. When omitted, CSR acceptance tests select
+the first usable RSA key returned by `SSL::list_keys`; when set, it must name a
+usable existing RSA key. Tests read only public key metadata.
 
 Destructive tests and cleanup also require a persistent singleton baseline.
 The scripts load it from `CPANEL_BASELINE_FILE`; when that variable is unset,
@@ -117,6 +122,9 @@ that follow the test naming contract:
   cleanup refuses to delete a matching certificate that cPanel reports as
   configured or installed, and re-reads both inventories immediately before
   each deletion;
+- stored SSL CSR friendly names and common names both beginning with
+  `tfcpanelcsr`; cleanup re-reads the CSR inventory and signed public PKCS#10
+  request immediately before deleting the exact matching ID;
 - email account local parts beginning with `tfcpanel`;
 - CalDAV calendar delegations whose delegator or delegatee local part begins
   with `tfcpanelcal`; cleanup removes these relationships before deleting

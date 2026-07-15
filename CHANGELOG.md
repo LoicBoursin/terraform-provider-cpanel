@@ -67,6 +67,11 @@
 - Raw access log settings resource and data source with server-default or
   explicit retention, import, drift recovery, restoration of the complete
   pre-management settings, and cPanel 134 acceptance coverage.
+- Stored SSL certificate signing request resource and data source with
+  generation from an existing cPanel key, RSA and ECDSA public-key
+  verification, in-place friendly-name updates, import, drift recovery,
+  lost-response recovery without mutation replay, strict PKCS#10 validation,
+  and cPanel 134 acceptance coverage.
 - Import support for cron jobs by cPanel line key.
 - Stable drift and remote-deletion handling for every resource.
 - cPanel 134 acceptance coverage for CRUD, import, drift, recreation, and

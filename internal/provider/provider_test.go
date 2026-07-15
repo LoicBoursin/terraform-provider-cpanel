@@ -42,6 +42,7 @@ import (
 	"terraform-provider-cpanel/internal/cpanel/postgresql"
 	cpanelredirect "terraform-provider-cpanel/internal/cpanel/redirect"
 	cpanelsslcertificate "terraform-provider-cpanel/internal/cpanel/sslcertificate"
+	cpanelsslcsr "terraform-provider-cpanel/internal/cpanel/sslcsr"
 	cpanelversioncontrol "terraform-provider-cpanel/internal/cpanel/versioncontrol"
 )
 
@@ -179,6 +180,9 @@ func testAccPreCheck(t *testing.T) {
 	}
 	if _, err := cpanelsslcertificate.NewClient(client).List(ctx); err != nil {
 		t.Fatalf("verify SSL certificate API access: %v", err)
+	}
+	if _, err := cpanelsslcsr.NewClient(client).List(ctx); err != nil {
+		t.Fatalf("verify SSL CSR API access: %v", err)
 	}
 }
 

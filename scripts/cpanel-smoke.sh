@@ -243,6 +243,44 @@ passenger_application_test_count="$(
     "${response_file}"
 )"
 
+request 'execute/SSL/list_csrs' 'stored SSL CSR check'
+if ! jq -e \
+  '
+    (.data | type == "array")
+    and all(
+      .data[];
+      ((.id? | type) == "string" or (.id? | type) == "number")
+      and ((.id | tostring | length) > 0)
+      and ((.friendly_name? | type) == "string")
+      and ((.commonName? | type) == "string")
+      and ((.created? | type) == "string"
+        or (.created? | type) == "number")
+      and ((.domains? | type) == "array")
+      and ((.key_algorithm? | type) == "string")
+    )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'Stored SSL CSR inventory is incomplete\n' >&2
+  exit 1
+fi
+ssl_csr_count="$(jq -r '.data | length' "${response_file}")"
+ssl_csr_test_count="$(
+  jq -r \
+    --arg prefix 'tfcpanelcsr' \
+    '
+      [.data[]
+        | select(
+            ((.friendly_name? | type) == "string"
+              and (.friendly_name | startswith($prefix)))
+            or
+            ((.commonName? | type) == "string"
+              and (.commonName | startswith($prefix)))
+          )]
+      | length
+    ' \
+    "${response_file}"
+)"
+
 request 'execute/SSL/list_certs' 'stored SSL certificate check'
 if ! jq -e \
   '
@@ -673,6 +711,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${apache_handler_test_count}" != "0"
     || "${git_repository_test_count}" != "0"
     || "${passenger_application_test_count}" != "0"
+    || "${ssl_csr_test_count}" != "0"
     || "${ssl_certificate_test_count}" != "0"
     || "${database_count}" != "0"
     || "${user_count}" != "0"
@@ -711,6 +750,8 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
       "${git_repository_test_count}" >&2
     printf '  test Passenger applications: %s\n' \
       "${passenger_application_test_count}" >&2
+    printf '  test stored SSL CSRs: %s\n' \
+      "${ssl_csr_test_count}" >&2
     printf '  test stored SSL certificates: %s\n' \
       "${ssl_certificate_test_count}" >&2
     printf '  PostgreSQL databases: %s\n' "${database_count}" >&2
@@ -786,6 +827,9 @@ printf '  Git repositories: %s (%s test-managed)\n' \
 printf '  Passenger applications: %s (%s test-managed)\n' \
   "${passenger_application_count}" \
   "${passenger_application_test_count}"
+printf '  stored SSL CSRs: %s (%s test-managed)\n' \
+  "${ssl_csr_count}" \
+  "${ssl_csr_test_count}"
 printf '  stored SSL certificates: %s (%s test-managed)\n' \
   "${ssl_certificate_count}" \
   "${ssl_certificate_test_count}"

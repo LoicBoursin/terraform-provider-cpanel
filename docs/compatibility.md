@@ -34,7 +34,8 @@ accounts, directory indexes and privacy, custom MIME types, Apache handlers,
 Git repositories, website IP blocks, MySQL or MariaDB databases and users,
 remote MySQL hosts, PostgreSQL databases and users, imports, drift detection,
 per-domain ModSecurity status, stored SSL certificates, email account
-suspension, default-calendar delegation, user-level email filters, and cleanup.
+suspension, stored SSL certificate signing requests, default-calendar
+delegation, user-level email filters, and cleanup.
 Certification also covers reading and changing the account display locale,
 including restoration of its pre-test value, plus Passenger application
 registration, updates, replacement, import, drift detection, remote deletion,
@@ -179,6 +180,45 @@ of being treated as an unconfigured or uninstalled certificate. If an upload
 fails without returning a trustworthy new certificate ID, Terraform does not
 guess ownership from a later inventory and therefore does not attempt
 destructive cleanup.
+
+Stored SSL certificate signing request operations use UAPI `SSL::list_keys`,
+`SSL::list_csrs`, `SSL::show_csr`, `SSL::generate_csr`,
+`SSL::set_csr_friendly_name`, and `SSL::delete_csr`. The resource uses an
+existing cPanel key ID and reads only its public algorithm, RSA modulus, or
+ECDSA curve and public point. It never reads, creates, uploads, changes, or
+deletes private-key material.
+
+The provider parses and verifies the signed PKCS#10 request, permits only DNS
+subject alternative names, and rejects extra extensions, attributes, subject
+values, or malformed response types. Generation succeeds only when the CSR
+public key matches the selected key's public metadata. A lost or malformed
+generation response is not retried: for up to 30 seconds, the provider polls
+the read-only post-operation inventory against its baseline and adopts only one
+newly observed CSR whose definition and public key match exactly.
+
+The reconciliation continues even when the original Terraform request is
+canceled because the generation POST may already have reached cPanel; it never
+replays that POST. cPanel exposes no mutation idempotency key, so a concurrently
+created CSR with the exact same subject, domains, friendly name, and public key
+is indistinguishable and may be adopted as an equivalent object after an
+ambiguous response. Avoid concurrent generation of identical CSRs outside
+Terraform.
+
+`SSL::list_csrs` is the source of truth for RSA and ECDSA public-key metadata.
+`SSL::show_csr` may omit optional algorithm-specific fields, but any field it
+does return must agree with the inventory. The provider then binds the
+inventory metadata directly to the signed PKCS#10 public key.
+
+If generation succeeds but Terraform cannot persist local state, the provider
+reports the verified CSR ID for import and leaves the remote object unchanged.
+It does not delete an object whose creation provenance may be ambiguous.
+
+The cPanel API does not expose conditional rename or delete operations.
+Terraform therefore re-reads and verifies the CSR ID, SHA-256 PKCS#10
+fingerprint, and expected current friendly name immediately around mutations.
+An external mutation in the narrow interval between the final read and write
+cannot be made atomic; ambiguous or conflicting observations fail without
+guessing ownership.
 
 DNS record reads and mutations use UAPI `DNS::parse_zone` and
 `DNS::mass_edit_zone`. Every mutation uses the current SOA serial and is
