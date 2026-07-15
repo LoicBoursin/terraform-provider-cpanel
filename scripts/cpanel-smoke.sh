@@ -156,7 +156,7 @@ if [[
 fi
 
 request 'execute/Features/list_features' 'feature check'
-for feature in addondomains apitokens blockers cron dynamicdns ftpaccts handlers indexmanager lists mime modsecurity mysql parkeddomains passengerapps popaccts postgres redirects sslmanager subdomains version_control webprotect zoneedit; do
+for feature in addondomains apitokens blockers changemx cron dynamicdns ftpaccts handlers indexmanager lists mime modsecurity mysql parkeddomains passengerapps popaccts postgres redirects sslmanager subdomains version_control webprotect zoneedit; do
   if [[ "$(jq -r --arg feature "${feature}" '.data[$feature] // 0' "${response_file}")" != "1" ]]; then
     printf 'Required cPanel feature is disabled: %s\n' "${feature}" >&2
     exit 1
@@ -310,11 +310,31 @@ fi
 ssl_certificate_count="$(jq -r '.data | length' "${response_file}")"
 ssl_certificate_test_count="$(
   jq -r \
-    '[.data[]
-      | select(
-          (.friendly_name? | type) == "string"
-          and (.friendly_name | startswith("tfcpanelsslcert"))
-        )] | length' \
+    '
+      [.data[]
+        | select(
+            (
+              (.friendly_name? | type) == "string"
+              and (.friendly_name | startswith("tfcpanelsslcert"))
+            )
+            or (
+              (
+                (.id? | type) == "string"
+                or (.id? | type) == "number"
+              )
+              and (.id | tostring | startswith("tfcpanel"))
+            )
+            or (
+              (.domains? | type) == "array"
+              and any(
+                .domains[];
+                (type == "string" and startswith("tfcpanel"))
+              )
+            )
+          )
+      ]
+      | length
+    ' \
     "${response_file}"
 )"
 
@@ -539,6 +559,96 @@ while IFS= read -r address; do
   email_filter_count=$((email_filter_count + account_filter_count))
   email_test_filter_count=$((email_test_filter_count + account_test_filter_count))
 done <<<"${email_accounts}"
+
+request 'execute/Email/list_mxs' 'Email routing inventory'
+if ! jq -e \
+  '
+    def flag:
+      . == 0 or . == 1 or . == "0" or . == "1";
+    def mode:
+      . == "auto"
+      or . == "local"
+      or . == "remote"
+      or . == "secondary";
+    def nonnegative_integer:
+      (
+        type == "number"
+        and floor == .
+        and . >= 0
+      )
+      or (
+        type == "string"
+        and test("^(0|[1-9][0-9]*)$")
+      );
+    def positive_integer:
+      (
+        type == "number"
+        and floor == .
+        and . >= 1
+      )
+      or (
+        type == "string"
+        and test("^[1-9][0-9]*$")
+      );
+    (.data | type) == "array"
+    and all(
+      .data[];
+      (.domain? | type) == "string"
+      and (.domain | length) > 0
+      and (.mxcheck | mode)
+      and (.detected | mode)
+      and (
+        .mx == null
+        or (
+          (.mx | type) == "string"
+          and (.mx | length) > 0
+        )
+      )
+      and (.alwaysaccept | flag)
+      and (.local | flag)
+      and (.remote | flag)
+      and (.secondary | flag)
+      and (
+        .status == 1
+        or .status == "1"
+      )
+      and (.statusmsg? | type) == "string"
+      and (.statusmsg | length) > 0
+      and (.entries? | type) == "array"
+      and all(
+        .entries[];
+        (.domain? | type) == "string"
+        and (.domain | length) > 0
+        and (.entrycount | positive_integer)
+        and (.mx? | type) == "string"
+        and (.mx | length) > 0
+        and (.priority | nonnegative_integer)
+        and (
+          .row == "odd"
+          or .row == "even"
+        )
+      )
+    )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'Email routing inventory is incomplete\n' >&2
+  exit 1
+fi
+email_routing_count="$(jq -r '.data | length' "${response_file}")"
+email_test_non_auto_routing_count="$(
+  jq -r \
+    '
+      [
+        .data[]
+        | select(
+            (.domain | startswith("tfcpanelsubemailrouting"))
+            and .mxcheck != "auto"
+          )
+      ]
+      | length
+    ' \
+    "${response_file}"
+)"
 
 request 'execute/Email/list_mail_domains' 'Email forwarder domain inventory'
 mail_domains="$(jq -r '.data[].domain' "${response_file}")"
@@ -811,6 +921,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${email_test_suspended_count}" != "0"
     || "${email_test_filter_count}" != "0"
     || "${email_test_mailing_list_count}" != "0"
+    || "${email_test_non_auto_routing_count}" != "0"
     || "${email_test_forwarder_count}" != "0"
     || "${email_test_domain_forwarder_count}" != "0"
     || "${email_test_auto_responder_count}" != "0"
@@ -859,6 +970,8 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     printf '  test email filters: %s\n' "${email_test_filter_count}" >&2
     printf '  test email mailing lists: %s\n' \
       "${email_test_mailing_list_count}" >&2
+    printf '  test non-auto email routing domains: %s\n' \
+      "${email_test_non_auto_routing_count}" >&2
     printf '  test email forwarders: %s\n' "${email_test_forwarder_count}" >&2
     printf '  test email domain forwarders: %s\n' \
       "${email_test_domain_forwarder_count}" >&2
@@ -957,6 +1070,9 @@ printf '  email filters: %s (%s test-managed)\n' \
 printf '  email mailing lists: %s (%s test-managed)\n' \
   "${email_mailing_list_count}" \
   "${email_test_mailing_list_count}"
+printf '  email routing domains: %s (%s test non-auto)\n' \
+  "${email_routing_count}" \
+  "${email_test_non_auto_routing_count}"
 printf '  email forwarders: %s (%s test-managed)\n' \
   "${email_forwarder_count}" \
   "${email_test_forwarder_count}"

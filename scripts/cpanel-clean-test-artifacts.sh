@@ -304,6 +304,7 @@ unsuspended_email_restrictions=0
 deleted_email_forwarders=0
 deleted_email_domain_forwarders=0
 deleted_email_auto_responders=0
+reset_email_routings=0
 deleted_ftp_accounts=0
 deleted_ip_blocks=0
 deleted_dns_records=0
@@ -316,6 +317,52 @@ deleted_filesystem_text_files=0
 deleted_filesystem_text_file_markers=0
 deleted_directory_privacy_password_directories=0
 deleted_cron_lines=0
+
+get_request 'execute/Email/list_mxs' 'Email routing inventory'
+test_non_auto_routing_domains="$(
+  jq -r \
+    '
+      .data[]
+      | select(
+          (.domain | startswith("tfcpanelsubemailrouting"))
+          and .mxcheck != "auto"
+        )
+      | .domain
+    ' \
+    "${response_file}"
+)"
+while IFS= read -r domain; do
+  if [[ -z "${domain}" ]]; then
+    continue
+  fi
+  uapi_post \
+    'Email' \
+    'set_always_accept' \
+    "Reset email routing for test subdomain ${domain}" \
+    "domain=${domain}" \
+    'mxcheck=auto'
+  get_request \
+    'execute/Email/list_mxs' \
+    "Verify email routing reset for ${domain}"
+  if ! jq -e \
+    --arg domain "${domain}" \
+    '
+      [
+        .data[]
+        | select(
+            .domain == $domain
+            and .mxcheck == "auto"
+          )
+      ]
+      | length == 1
+    ' \
+    "${response_file}" >/dev/null; then
+    printf 'Email routing reset failed for test subdomain %s\n' \
+      "${domain}" >&2
+    exit 1
+  fi
+  reset_email_routings=$((reset_email_routings + 1))
+done <<<"${test_non_auto_routing_domains}"
 
 get_request 'execute/Tokens/list' 'API token inventory'
 while IFS= read -r token_name; do
@@ -489,127 +536,227 @@ if jq -e \
   exit 1
 fi
 
-get_request 'execute/SSL/list_certs' 'stored SSL certificate inventory'
-if ! jq -e \
-  --arg prefix 'tfcpanelsslcert' \
-  '
-    (.data | type == "array")
-    and all(
-      .data[];
-      (
-        (.friendly_name? | type) != "string"
-        or (.friendly_name | startswith($prefix) | not)
-      )
-      or (
-        ((.id? | type) == "string" or (.id? | type) == "number")
-        and ((.id | tostring | length) > 0)
-      )
-    )
-  ' \
-  "${response_file}" >/dev/null; then
-  printf 'Stored SSL certificate inventory is incomplete\n' >&2
-  exit 1
-fi
-ssl_certificate_candidates="$(
-  jq -r \
-    '
-      .data[]
-      | select(
-          (.friendly_name? | type) == "string"
-          and (.friendly_name | startswith("tfcpanelsslcert"))
-        )
-      | [(.id | tostring), .friendly_name]
-      | @tsv
-    ' \
-    "${response_file}"
-)"
-while IFS=$'\t' read -r certificate_id friendly_name; do
-  if [[ -z "${certificate_id}" ]]; then
-    continue
-  fi
-  get_request 'execute/SSL/list_certs' \
-    "Re-read test SSL certificate ${friendly_name}"
+cleanup_test_ssl_certificates() {
+  local require_empty="${1:-0}"
+
+  get_request 'execute/SSL/list_certs' 'stored SSL certificate inventory'
   if ! jq -e \
-    --arg id "${certificate_id}" \
-    --arg friendly_name "${friendly_name}" \
+    --arg prefix 'tfcpanelsslcert' \
     '
       (.data | type == "array")
-      and (
+      and all(
+        .data[];
+        (
+          (.friendly_name? | type) != "string"
+          or (.friendly_name | startswith($prefix) | not)
+        )
+        or (
+          ((.id? | type) == "string" or (.id? | type) == "number")
+          and ((.id | tostring | length) > 0)
+        )
+      )
+    ' \
+    "${response_file}" >/dev/null; then
+    printf 'Stored SSL certificate inventory is incomplete\n' >&2
+    exit 1
+  fi
+  ssl_certificate_candidates="$(
+    jq -r \
+      '
+        .data[]
+        | select(
+            (
+              (.friendly_name? | type) == "string"
+              and (.friendly_name | startswith("tfcpanelsslcert"))
+            )
+            or (
+              (
+                (.id? | type) == "string"
+                or (.id? | type) == "number"
+              )
+              and (.id | tostring | startswith("tfcpanel"))
+            )
+            or (
+              (.domains? | type) == "array"
+              and any(
+                .domains[];
+                (type == "string" and startswith("tfcpanel"))
+              )
+            )
+          )
+        | [(.id | tostring), .friendly_name]
+        | @tsv
+      ' \
+      "${response_file}"
+  )"
+  while IFS=$'\t' read -r certificate_id friendly_name; do
+    if [[ -z "${certificate_id}" ]]; then
+      continue
+    fi
+    get_request 'execute/SSL/list_certs' \
+      "Re-read test SSL certificate ${friendly_name}"
+    if jq -e \
+      --arg id "${certificate_id}" \
+      '
         [
           .data[]
           | select(
               ((.id? | type) == "string" or (.id? | type) == "number")
               and ((.id | tostring) == $id)
             )
-        ] as $matches
-        | ($matches | length) == 1
-        and ($matches[0].friendly_name? == $friendly_name)
+        ]
+        | length == 1
         and (
-          $matches[0].domain_is_configured? == 0
-          or $matches[0].domain_is_configured? == "0"
-          or $matches[0].domain_is_configured? == false
-          or $matches[0].domain_is_configured? == "false"
+          .[0].domain_is_configured? == 1
+          or .[0].domain_is_configured? == "1"
+          or .[0].domain_is_configured? == true
+          or .[0].domain_is_configured? == "true"
         )
-      )
-    ' \
-    "${response_file}" >/dev/null; then
-    printf 'Refusing to delete ambiguous or configured test SSL certificate: %s\n' \
-      "${friendly_name}" >&2
-    exit 1
-  fi
+      ' \
+      "${response_file}" >/dev/null; then
+      continue
+    fi
+    if ! jq -e \
+      --arg id "${certificate_id}" \
+      --arg friendly_name "${friendly_name}" \
+      '
+        (.data | type == "array")
+        and (
+          [
+            .data[]
+            | select(
+                ((.id? | type) == "string" or (.id? | type) == "number")
+                and ((.id | tostring) == $id)
+              )
+          ] as $matches
+          | ($matches | length) == 1
+          and ($matches[0].friendly_name? == $friendly_name)
+          and (
+            (
+              ($matches[0].friendly_name? | type) == "string"
+              and (
+                $matches[0].friendly_name
+                | startswith("tfcpanelsslcert")
+              )
+            )
+            or (
+              (
+                ($matches[0].id? | type) == "string"
+                or ($matches[0].id? | type) == "number"
+              )
+              and (
+                $matches[0].id
+                | tostring
+                | startswith("tfcpanel")
+              )
+            )
+            or (
+              ($matches[0].domains? | type) == "array"
+              and any(
+                $matches[0].domains[];
+                (type == "string" and startswith("tfcpanel"))
+              )
+            )
+          )
+          and (
+            $matches[0].domain_is_configured? == 0
+            or $matches[0].domain_is_configured? == "0"
+            or $matches[0].domain_is_configured? == false
+            or $matches[0].domain_is_configured? == "false"
+          )
+        )
+      ' \
+      "${response_file}" >/dev/null; then
+      printf 'Refusing to delete ambiguous or configured test SSL certificate: %s\n' \
+        "${friendly_name}" >&2
+      exit 1
+    fi
 
-  get_request 'execute/SSL/installed_hosts' \
-    "Re-read installed SSL hosts before deleting ${friendly_name}"
-  if ! jq -e \
-    '
-      (.data | type == "array")
-      and all(
-        .data[];
-        (.certificate? | type) == "object"
-        and (
-          (.certificate.id? | type) == "string"
-          or (.certificate.id? | type) == "number"
+    get_request 'execute/SSL/installed_hosts' \
+      "Re-read installed SSL hosts before deleting ${friendly_name}"
+    if ! jq -e \
+      '
+        (.data | type == "array")
+        and all(
+          .data[];
+          (.certificate? | type) == "object"
+          and (
+            (.certificate.id? | type) == "string"
+            or (.certificate.id? | type) == "number"
+          )
+          and ((.certificate.id | tostring | length) > 0)
         )
-        and ((.certificate.id | tostring | length) > 0)
-      )
-    ' \
+      ' \
+      "${response_file}" >/dev/null; then
+      printf 'Installed SSL host inventory is incomplete\n' >&2
+      exit 1
+    fi
+    if jq -e \
+      --arg id "${certificate_id}" \
+      '.data[] | select((.certificate.id | tostring) == $id)' \
+      "${response_file}" >/dev/null; then
+      printf 'Refusing to delete installed test SSL certificate: %s\n' \
+        "${friendly_name}" >&2
+      exit 1
+    fi
+
+    uapi_post \
+      'SSL' \
+      'delete_cert' \
+      "Delete test SSL certificate ${friendly_name}" \
+      "id=${certificate_id}"
+    deleted_ssl_certificates=$((deleted_ssl_certificates + 1))
+  done <<<"${ssl_certificate_candidates}"
+
+  get_request \
+    'execute/SSL/list_certs' \
+    'stored SSL certificate inventory after cleanup'
+  if ! jq -e '(.data | type) == "array"' \
     "${response_file}" >/dev/null; then
-    printf 'Installed SSL host inventory is incomplete\n' >&2
+    printf 'Stored SSL certificate inventory after cleanup is incomplete\n' >&2
     exit 1
   fi
   if jq -e \
-    --arg id "${certificate_id}" \
-    '.data[] | select((.certificate.id | tostring) == $id)' \
+    --arg require_empty "${require_empty}" \
+    '
+      .data[]
+      | select(
+          (
+            (.friendly_name? | type) == "string"
+            and (.friendly_name | startswith("tfcpanelsslcert"))
+          )
+          or (
+            (
+              (.id? | type) == "string"
+              or (.id? | type) == "number"
+            )
+            and (.id | tostring | startswith("tfcpanel"))
+          )
+          or (
+            (.domains? | type) == "array"
+            and any(
+              .domains[];
+              (type == "string" and startswith("tfcpanel"))
+            )
+          )
+        )
+      | select(
+          $require_empty == "1"
+          or (
+            .domain_is_configured? == 0
+            or .domain_is_configured? == "0"
+            or .domain_is_configured? == false
+            or .domain_is_configured? == "false"
+          )
+        )
+    ' \
     "${response_file}" >/dev/null; then
-    printf 'Refusing to delete installed test SSL certificate: %s\n' \
-      "${friendly_name}" >&2
+    printf 'Test SSL certificate still exists after cleanup\n' >&2
     exit 1
   fi
+}
 
-  uapi_post \
-    'SSL' \
-    'delete_cert' \
-    "Delete test SSL certificate ${friendly_name}" \
-    "id=${certificate_id}"
-  deleted_ssl_certificates=$((deleted_ssl_certificates + 1))
-done <<<"${ssl_certificate_candidates}"
-
-get_request \
-  'execute/SSL/list_certs' \
-  'stored SSL certificate inventory after cleanup'
-if ! jq -e '(.data | type) == "array"' \
-  "${response_file}" >/dev/null; then
-  printf 'Stored SSL certificate inventory after cleanup is incomplete\n' >&2
-  exit 1
-fi
-if jq -e \
-  '.data[]
-    | .friendly_name
-    | select(startswith("tfcpanelsslcert"))' \
-  "${response_file}" >/dev/null; then
-  printf 'Test SSL certificate still exists after cleanup\n' >&2
-  exit 1
-fi
+cleanup_test_ssl_certificates 0
 
 get_request 'execute/VersionControl/retrieve' 'Git repository inventory'
 while IFS= read -r repository_root; do
@@ -1346,6 +1493,8 @@ while IFS=$'\t' read -r domain domain_key; do
   deleted_addon_domains=$((deleted_addon_domains + 1))
 done <<<"${test_addon_domains}"
 
+cleanup_test_ssl_certificates 1
+
 get_request \
   'execute/Fileman/list_files?dir=public_html&show_hidden=1&limit=1000' \
   'Test domain directory inventory'
@@ -1758,6 +1907,8 @@ printf '  email domain forwarders deleted: %d\n' \
   "${deleted_email_domain_forwarders}"
 printf '  email autoresponders deleted: %d\n' \
   "${deleted_email_auto_responders}"
+printf '  email routing domains reset: %d\n' \
+  "${reset_email_routings}"
 printf '  FTP accounts deleted: %d\n' "${deleted_ftp_accounts}"
 printf '  IP blocks deleted: %d\n' "${deleted_ip_blocks}"
 printf '  DNS records deleted: %d\n' "${deleted_dns_records}"
