@@ -23,6 +23,7 @@ import (
 	"terraform-provider-cpanel/internal/cpanel"
 	cpanelapachehandler "terraform-provider-cpanel/internal/cpanel/apachehandler"
 	cpanelapitoken "terraform-provider-cpanel/internal/cpanel/apitoken"
+	cpanelcapabilities "terraform-provider-cpanel/internal/cpanel/capabilities"
 	"terraform-provider-cpanel/internal/cpanel/cron"
 	cpanelddns "terraform-provider-cpanel/internal/cpanel/ddns"
 	cpaneldirectoryindex "terraform-provider-cpanel/internal/cpanel/directoryindex"
@@ -73,6 +74,9 @@ func testAccPreCheck(t *testing.T) {
 	}
 	if _, err := cpanelapitoken.NewClient(client).List(ctx); err != nil {
 		t.Fatalf("verify API token access: %v", err)
+	}
+	if _, err := cpanelcapabilities.NewClient(client).Get(ctx); err != nil {
+		t.Fatalf("verify account capabilities API access: %v", err)
 	}
 	if _, err := cron.NewClient(client).GetCronJobs(ctx); err != nil {
 		t.Fatalf("verify Cron API access: %v", err)

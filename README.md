@@ -49,6 +49,10 @@ The supported versions and API policy are documented in
 
 Matching data sources are available for each resource family.
 
+Additional read-only account data sources:
+
+- `cpanel_account_capabilities`
+
 ## Requirements
 
 - Terraform CLI `1.14.x` or `1.15.x`

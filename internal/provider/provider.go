@@ -13,6 +13,7 @@ import (
 	"terraform-provider-cpanel/internal/cpanel"
 	"terraform-provider-cpanel/internal/cpanel/apachehandler"
 	"terraform-provider-cpanel/internal/cpanel/apitoken"
+	"terraform-provider-cpanel/internal/cpanel/capabilities"
 	"terraform-provider-cpanel/internal/cpanel/cron"
 	"terraform-provider-cpanel/internal/cpanel/ddns"
 	"terraform-provider-cpanel/internal/cpanel/directoryindex"
@@ -63,8 +64,8 @@ func (p *cpanelProvider) Metadata(_ context.Context, _ provider.MetadataRequest,
 // Schema defines the provider-level schema for configuration data.
 func (p *cpanelProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description:         "Manage cPanel account API tokens, locale, cron jobs, DNS records, Dynamic DNS domains, web domains, Passenger applications, ModSecurity settings, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
-		MarkdownDescription: "Manage cPanel account API tokens, locale, cron jobs, DNS records, Dynamic DNS domains, web domains, Passenger applications, ModSecurity settings, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		Description:         "Inspect cPanel account capabilities and manage API tokens, locale, cron jobs, DNS records, Dynamic DNS domains, web domains, Passenger applications, ModSecurity settings, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		MarkdownDescription: "Inspect cPanel account capabilities and manage API tokens, locale, cron jobs, DNS records, Dynamic DNS domains, web domains, Passenger applications, ModSecurity settings, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
 		Attributes: map[string]schema.Attribute{
 			"username": schema.StringAttribute{
 				Optional:            true,
@@ -204,6 +205,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	// Initialize module clients
 	apacheHandlerClient := apachehandler.NewClient(client)
 	apiTokenClient := apitoken.NewClient(client)
+	capabilitiesClient := capabilities.NewClient(client)
 	cronClient := cron.NewClient(client)
 	directoryIndexClient := directoryindex.NewClient(client)
 	directoryPrivacyClient := directoryprivacy.NewClient(client)
@@ -227,6 +229,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	resp.DataSourceData = map[string]interface{}{
 		"apachehandler":    apacheHandlerClient,
 		"apitoken":         apiTokenClient,
+		"capabilities":     capabilitiesClient,
 		"cron":             cronClient,
 		"directoryindex":   directoryIndexClient,
 		"directoryprivacy": directoryPrivacyClient,
@@ -273,6 +276,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 // DataSources defines the data sources implemented in the provider.
 func (p *cpanelProvider) DataSources(_ context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
+		NewAccountCapabilitiesDataSource,
 		NewAddonDomainDataSource,
 		NewApacheHandlerDataSource,
 		NewAPITokenDataSource,

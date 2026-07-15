@@ -39,6 +39,14 @@ including restoration of its pre-test value, plus Passenger application
 registration, updates, replacement, import, drift detection, remote deletion,
 recreation, and cleanup.
 
+Account capability reads use UAPI `Features::list_features`,
+`StatsBar::get_stats`, and `Variables::get_user_information`. The
+`cpanel_account_capabilities` data source exposes the complete feature flag map,
+the cPanel version, selected account limits, and a strict allowlist of
+non-sensitive account identity fields. It deliberately omits contact e-mail
+addresses, IP addresses, UUIDs, API credentials, and other unrelated fields
+returned by cPanel.
+
 ## API policy
 
 Email account, direct and domain email forwarder, autoresponder, FTP account,
