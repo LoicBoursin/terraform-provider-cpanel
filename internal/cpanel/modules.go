@@ -13,6 +13,7 @@ const (
 	ModuleEmail            = "Email"
 	ModuleFileman          = "Fileman"
 	ModuleFtp              = "Ftp"
+	ModuleLocale           = "Locale"
 	ModuleMysql            = "Mysql"
 	ModuleMysqlFE          = "MysqlFE"
 	ModuleMime             = "Mime"

@@ -22,6 +22,7 @@ import (
 	cpanelmail "terraform-provider-cpanel/internal/cpanel/email"
 	"terraform-provider-cpanel/internal/cpanel/ftp"
 	"terraform-provider-cpanel/internal/cpanel/ipblock"
+	cpanellocale "terraform-provider-cpanel/internal/cpanel/locale"
 	"terraform-provider-cpanel/internal/cpanel/mimetype"
 	"terraform-provider-cpanel/internal/cpanel/modsecurity"
 	"terraform-provider-cpanel/internal/cpanel/mysql"
@@ -61,8 +62,8 @@ func (p *cpanelProvider) Metadata(_ context.Context, _ provider.MetadataRequest,
 // Schema defines the provider-level schema for configuration data.
 func (p *cpanelProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description:         "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, ModSecurity settings, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
-		MarkdownDescription: "Manage cPanel account API tokens, cron jobs, DNS records, Dynamic DNS domains, web domains, ModSecurity settings, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		Description:         "Manage cPanel account API tokens, locale, cron jobs, DNS records, Dynamic DNS domains, web domains, ModSecurity settings, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		MarkdownDescription: "Manage cPanel account API tokens, locale, cron jobs, DNS records, Dynamic DNS domains, web domains, ModSecurity settings, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
 		Attributes: map[string]schema.Attribute{
 			"username": schema.StringAttribute{
 				Optional:            true,
@@ -211,6 +212,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	emailClient := cpanelmail.NewClient(client)
 	ftpClient := ftp.NewClient(client)
 	ipBlockClient := ipblock.NewClient(client)
+	localeClient := cpanellocale.NewClient(client)
 	mimeTypeClient := mimetype.NewClient(client)
 	modSecurityClient := modsecurity.NewClient(client)
 	mySQLClient := mysql.NewClient(client)
@@ -232,6 +234,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		"email":            emailClient,
 		"ftp":              ftpClient,
 		"ipblock":          ipBlockClient,
+		"locale":           localeClient,
 		"mimetype":         mimeTypeClient,
 		"modsecurity":      modSecurityClient,
 		"mysql":            mySQLClient,
@@ -251,6 +254,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		"email":            emailClient,
 		"ftp":              ftpClient,
 		"ipblock":          ipBlockClient,
+		"locale":           localeClient,
 		"mimetype":         mimeTypeClient,
 		"modsecurity":      modSecurityClient,
 		"mysql":            mySQLClient,
@@ -283,6 +287,7 @@ func (p *cpanelProvider) DataSources(_ context.Context) []func() datasource.Data
 		NewFTPAccountDataSource,
 		NewGitRepositoryDataSource,
 		NewIPBlockDataSource,
+		NewLocaleDataSource,
 		NewMIMETypeDataSource,
 		NewModSecurityDomainDataSource,
 		NewMySQLDatabaseDataSource,
@@ -316,6 +321,7 @@ func (p *cpanelProvider) Resources(_ context.Context) []func() resource.Resource
 		NewFTPAccountResource,
 		NewGitRepositoryResource,
 		NewIPBlockResource,
+		NewLocaleResource,
 		NewMIMETypeResource,
 		NewModSecurityDomainResource,
 		NewMySQLDatabaseResource,

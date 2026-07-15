@@ -14,6 +14,30 @@ if [[ -f "${env_file}" ]]; then
 fi
 
 "${script_directory}/cpanel-smoke.sh"
+
+if [[ -z "${CPANEL_EXPECTED_LOCALE:-}" ]]; then
+  locale_response="$(
+    curl \
+      --silent \
+      --show-error \
+      --fail \
+      --max-time 90 \
+      --header \
+      "Authorization: cpanel ${CPANEL_USERNAME}:${CPANEL_API_TOKEN}" \
+      "${CPANEL_HOST%/}/execute/Locale/get_attributes"
+  )"
+  CPANEL_EXPECTED_LOCALE="$(
+    jq -r \
+      'select(.status == 1) | .data.locale // empty' \
+      <<<"${locale_response}"
+  )"
+  if [[ -z "${CPANEL_EXPECTED_LOCALE}" ]]; then
+    printf 'Unable to capture the initial cPanel locale\n' >&2
+    exit 1
+  fi
+  export CPANEL_EXPECTED_LOCALE
+fi
+
 "${script_directory}/cpanel-clean-test-artifacts.sh"
 CPANEL_REQUIRE_EMPTY=1 "${script_directory}/cpanel-smoke.sh"
 

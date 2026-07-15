@@ -53,6 +53,9 @@
 - ModSecurity domain resource and data source with dependency metadata,
   in-place enable or disable updates, import, drift recovery, safe reset on
   removal, and cPanel 134 acceptance coverage.
+- Account locale resource and data source with import, drift recovery,
+  restoration of the pre-management locale, and cPanel 134 acceptance
+  coverage.
 - Import support for cron jobs by cPanel line key.
 - Stable drift and remote-deletion handling for every resource.
 - cPanel 134 acceptance coverage for CRUD, import, drift, recreation, and

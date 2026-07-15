@@ -21,7 +21,9 @@ Dynamic DNS domains, web domains, HTTP redirects, custom MIME types, email
 accounts, Apache handlers, directory indexes and privacy, Git repositories,
 forwarders and autoresponders, FTP accounts, MySQL or MariaDB users and
 databases and remote hosts, PostgreSQL users and databases, and database
-grants. Use a dedicated cPanel test account.
+grants. Locale acceptance tests temporarily change the account display locale
+and restore the value captured before the test. Use a dedicated cPanel test
+account.
 
 The scripts load credentials from the file specified by `CPANEL_ENV_FILE`. When
 that variable is unset, they use:
@@ -102,6 +104,10 @@ that follow the test naming contract:
 - web subdomains beginning with `tfcpanelsub`;
 - disabled ModSecurity domains beginning with
   `tfcpanelsubmodsecurity`; cleanup re-enables them before subdomain removal;
+- the account locale is not prefix-addressable, so each locale acceptance test
+  captures and restores its original value with an independent Go test cleanup;
+  the acceptance wrapper also requires the final locale to match its initial
+  snapshot;
 - top-level test directories in `public_html` beginning with `tfcpanel-`;
 - cron commands containing `# terraform-provider-cpanel-`;
 - the empty `MAILTO` and default `SHELL=/bin/bash` lines that cPanel creates

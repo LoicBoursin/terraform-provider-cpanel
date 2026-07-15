@@ -34,6 +34,8 @@ accounts, directory indexes and privacy, custom MIME types, Apache handlers,
 Git repositories, website IP blocks, MySQL or MariaDB databases and users,
 remote MySQL hosts, PostgreSQL databases and users, imports, drift detection,
 per-domain ModSecurity status, email account suspension, and cleanup.
+Certification also covers reading and changing the account display locale,
+including restoration of its pre-test value.
 
 ## API policy
 
@@ -204,6 +206,13 @@ account-wide enable or disable functions. cPanel can report related domains
 that a change also affects; Terraform exposes both those dependencies and the
 complete affected-domain set. Removing the resource restores the enabled
 state without deleting the domain.
+
+Account locale reads use UAPI `Locale::get_attributes` and
+`Locale::list_locales`. Mutations use `Locale::set_locale` over POST and are
+verified against a fresh read. Terraform stores the locale observed when it
+first takes ownership and restores that value when the resource is removed.
+Import uses the singleton identifier `account`; destroying an unchanged import
+therefore leaves the account locale unchanged.
 
 Cron operations currently use cPanel API 2 because cPanel does not provide UAPI
 equivalents for the required cron functions. API 2 is deprecated, so each

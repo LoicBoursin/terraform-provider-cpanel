@@ -73,6 +73,38 @@ cpanel_version="$(
   jq -r '.data[] | select(.name == "cpanelversion") | .value' "${response_file}"
 )"
 
+request 'execute/Locale/get_attributes' 'cPanel locale check'
+account_locale="$(jq -r '.data.locale // empty' "${response_file}")"
+account_locale_direction="$(jq -r '.data.direction // empty' "${response_file}")"
+account_locale_encoding="$(jq -r '.data.encoding // empty' "${response_file}")"
+if [[
+  -z "${account_locale}"
+  || -z "${account_locale_direction}"
+  || -z "${account_locale_encoding}"
+ ]]; then
+  printf 'cPanel returned incomplete locale attributes\n' >&2
+  exit 1
+fi
+
+request 'execute/Locale/list_locales' 'cPanel locale inventory'
+locale_count="$(jq -r '.data | length' "${response_file}")"
+if ! jq -e --arg locale "${account_locale}" \
+  '.data[] | select(.locale == $locale)' \
+  "${response_file}" >/dev/null; then
+  printf 'Current cPanel locale is absent from the locale inventory: %s\n' \
+    "${account_locale}" >&2
+  exit 1
+fi
+if [[
+  -n "${CPANEL_EXPECTED_LOCALE:-}"
+  && "${account_locale}" != "${CPANEL_EXPECTED_LOCALE}"
+ ]]; then
+  printf 'cPanel locale is %s; expected restored locale %s\n' \
+    "${account_locale}" \
+    "${CPANEL_EXPECTED_LOCALE}" >&2
+  exit 1
+fi
+
 request 'execute/Features/list_features' 'feature check'
 for feature in addondomains apitokens blockers cron dynamicdns ftpaccts handlers indexmanager mime modsecurity mysql parkeddomains popaccts postgres redirects subdomains version_control webprotect zoneedit; do
   if [[ "$(jq -r --arg feature "${feature}" '.data[$feature] // 0' "${response_file}")" != "1" ]]; then
@@ -526,6 +558,11 @@ printf 'cPanel smoke test passed\n'
 printf '  account: %s\n' "${CPANEL_USERNAME}"
 printf '  host: %s\n' "${host}"
 printf '  version: %s\n' "${cpanel_version}"
+printf '  locale: %s (%s, %s; %s available)\n' \
+  "${account_locale}" \
+  "${account_locale_direction}" \
+  "${account_locale_encoding}" \
+  "${locale_count}"
 printf '  API tokens: %s (%s test-managed)\n' \
   "${api_token_count}" \
   "${api_test_token_count}"

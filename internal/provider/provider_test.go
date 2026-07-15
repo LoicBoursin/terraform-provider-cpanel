@@ -32,6 +32,7 @@ import (
 	cpanelmail "terraform-provider-cpanel/internal/cpanel/email"
 	cpanelftp "terraform-provider-cpanel/internal/cpanel/ftp"
 	cpanelipblock "terraform-provider-cpanel/internal/cpanel/ipblock"
+	cpanellocale "terraform-provider-cpanel/internal/cpanel/locale"
 	cpanelmimetype "terraform-provider-cpanel/internal/cpanel/mimetype"
 	"terraform-provider-cpanel/internal/cpanel/mysql"
 	"terraform-provider-cpanel/internal/cpanel/postgresql"
@@ -146,6 +147,9 @@ func testAccPreCheck(t *testing.T) {
 	}
 	if _, err := cpanelipblock.NewClient(client).ListAddresses(ctx); err != nil {
 		t.Fatalf("verify IP blocker API access: %v", err)
+	}
+	if _, err := cpanellocale.NewClient(client).GetCurrent(ctx); err != nil {
+		t.Fatalf("verify Locale API access: %v", err)
 	}
 	if _, err := cpanelmimetype.NewClient(client).ListUser(ctx); err != nil {
 		t.Fatalf("verify MIME type API access: %v", err)
