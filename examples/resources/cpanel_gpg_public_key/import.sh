@@ -1,0 +1,1 @@
+terraform import cpanel_gpg_public_key.example 0123456789ABCDEF

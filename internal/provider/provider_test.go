@@ -38,6 +38,7 @@ import (
 	cpanelmail "terraform-provider-cpanel/internal/cpanel/email"
 	cpanelfileman "terraform-provider-cpanel/internal/cpanel/fileman"
 	cpanelftp "terraform-provider-cpanel/internal/cpanel/ftp"
+	cpanelgpg "terraform-provider-cpanel/internal/cpanel/gpg"
 	cpanelipblock "terraform-provider-cpanel/internal/cpanel/ipblock"
 	cpanellocale "terraform-provider-cpanel/internal/cpanel/locale"
 	cpanellogmanager "terraform-provider-cpanel/internal/cpanel/logmanager"
@@ -192,6 +193,9 @@ func testAccPreCheck(t *testing.T) {
 	}
 	if _, err := cpanelftp.NewClient(client).ListAccounts(ctx); err != nil {
 		t.Fatalf("verify FTP API access: %v", err)
+	}
+	if _, _, err := cpanelgpg.NewClient(client).Inventory(ctx); err != nil {
+		t.Fatalf("verify GPG API access: %v", err)
 	}
 	if _, err := cpanelipblock.NewClient(client).ListAddresses(ctx); err != nil {
 		t.Fatalf("verify IP blocker API access: %v", err)

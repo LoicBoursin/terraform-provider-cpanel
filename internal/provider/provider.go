@@ -25,6 +25,7 @@ import (
 	cpanelmail "terraform-provider-cpanel/internal/cpanel/email"
 	"terraform-provider-cpanel/internal/cpanel/fileman"
 	"terraform-provider-cpanel/internal/cpanel/ftp"
+	"terraform-provider-cpanel/internal/cpanel/gpg"
 	"terraform-provider-cpanel/internal/cpanel/ipblock"
 	cpanellocale "terraform-provider-cpanel/internal/cpanel/locale"
 	cpanellogmanager "terraform-provider-cpanel/internal/cpanel/logmanager"
@@ -70,8 +71,8 @@ func (p *cpanelProvider) Metadata(_ context.Context, _ provider.MetadataRequest,
 // Schema defines the provider-level schema for configuration data.
 func (p *cpanelProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description:         "Inspect cPanel account capabilities and manage API tokens, locale, raw access log settings, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates and certificate signing requests, Passenger applications, ModSecurity settings, HTTP redirects, filesystem directories and text files, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, BoxTrapper settings, calendar delegations, filters, forwarders, autoresponders, Mailman mailing lists, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
-		MarkdownDescription: "Inspect cPanel account capabilities and manage API tokens, locale, raw access log settings, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates and certificate signing requests, Passenger applications, ModSecurity settings, HTTP redirects, filesystem directories and text files, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, BoxTrapper settings, calendar delegations, filters, forwarders, autoresponders, Mailman mailing lists, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		Description:         "Inspect cPanel account capabilities and manage API tokens, locale, raw access log settings, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates and certificate signing requests, public-only OpenPGP keys, Passenger applications, ModSecurity settings, HTTP redirects, filesystem directories and text files, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, BoxTrapper settings, calendar delegations, filters, forwarders, autoresponders, Mailman mailing lists, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		MarkdownDescription: "Inspect cPanel account capabilities and manage API tokens, locale, raw access log settings, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates and certificate signing requests, public-only OpenPGP keys, Passenger applications, ModSecurity settings, HTTP redirects, filesystem directories and text files, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, BoxTrapper settings, calendar delegations, filters, forwarders, autoresponders, Mailman mailing lists, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
 		Attributes: map[string]schema.Attribute{
 			"username": schema.StringAttribute{
 				Optional:            true,
@@ -223,6 +224,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	emailClient := cpanelmail.NewClient(client)
 	filemanClient := fileman.NewClient(client)
 	ftpClient := ftp.NewClient(client)
+	gpgClient := gpg.NewClient(client)
 	ipBlockClient := ipblock.NewClient(client)
 	localeClient := cpanellocale.NewClient(client)
 	logManagerClient := cpanellogmanager.NewClient(client)
@@ -253,6 +255,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		"email":            emailClient,
 		"fileman":          filemanClient,
 		"ftp":              ftpClient,
+		"gpg":              gpgClient,
 		"ipblock":          ipBlockClient,
 		"locale":           localeClient,
 		"logmanager":       logManagerClient,
@@ -280,6 +283,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		"email":            emailClient,
 		"fileman":          filemanClient,
 		"ftp":              ftpClient,
+		"gpg":              gpgClient,
 		"ipblock":          ipBlockClient,
 		"locale":           localeClient,
 		"logmanager":       logManagerClient,
@@ -324,6 +328,7 @@ func (p *cpanelProvider) DataSources(_ context.Context) []func() datasource.Data
 		NewFilesystemDirectoryDataSource,
 		NewFilesystemTextFileDataSource,
 		NewFTPAccountDataSource,
+		NewGPGPublicKeyDataSource,
 		NewGitRepositoryDataSource,
 		NewIPBlockDataSource,
 		NewLocaleDataSource,
@@ -369,6 +374,7 @@ func (p *cpanelProvider) Resources(_ context.Context) []func() resource.Resource
 		NewFilesystemDirectoryResource,
 		NewFilesystemTextFileResource,
 		NewFTPAccountResource,
+		NewGPGPublicKeyResource,
 		NewGitRepositoryResource,
 		NewIPBlockResource,
 		NewLocaleResource,

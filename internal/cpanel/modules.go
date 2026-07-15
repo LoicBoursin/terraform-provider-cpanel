@@ -17,6 +17,7 @@ const (
 	ModuleFeatures         = "Features"
 	ModuleFileman          = "Fileman"
 	ModuleFtp              = "Ftp"
+	ModuleGPG              = "GPG"
 	ModuleLocale           = "Locale"
 	ModuleLogManager       = "LogManager"
 	ModuleMysql            = "Mysql"

@@ -21,17 +21,22 @@ Dynamic DNS domains, web domains, HTTP redirects, custom MIME types, email
 accounts, Apache handlers, directory indexes and privacy, Git repositories,
 Passenger applications, stored public SSL certificates, email filters,
 stored public SSL certificate signing requests, calendar delegations,
-forwarders and autoresponders, BoxTrapper settings, FTP accounts, MySQL or
-MariaDB users and databases and remote hosts, PostgreSQL users and databases,
-filesystem directories and UTF-8 text files, and database grants. BoxTrapper
-tests use disposable mailboxes without sending messages and restore the
-captured settings before mailbox deletion. They verify that configuration
-changes are rejected while cPanel reports a null sender name, then establish a
-non-null fixture name explicitly for the complete lifecycle. Locale acceptance
-tests temporarily change the account display locale and restore the persisted
-test-account baseline. Log settings tests temporarily change archive, pruning,
-and retention preferences and restore the same durable baseline. Use a
-dedicated cPanel test account.
+public-only OpenPGP keys, forwarders and autoresponders, BoxTrapper settings,
+FTP accounts, MySQL or MariaDB users and databases and remote hosts,
+PostgreSQL users and databases, filesystem directories and UTF-8 text files,
+and database grants. GPG acceptance tests generate public-only RSA fixtures
+locally, verify that the cPanel secret-key inventory never changes, and preserve
+remote public keys when Terraform destroys the resource. Dedicated-account
+cleanup refuses pair deletion unless the account explicitly opts in and its
+persisted baseline declares zero secret keys. BoxTrapper tests use disposable
+mailboxes without sending messages and restore the captured settings before
+mailbox deletion. They verify that configuration changes are rejected while
+cPanel reports a null sender name, then establish a non-null fixture name
+explicitly for the complete lifecycle. Locale acceptance tests temporarily
+change the account display locale and restore the persisted test-account
+baseline. Log settings tests temporarily change archive, pruning, and retention
+preferences and restore the same durable baseline. Use a dedicated cPanel test
+account.
 
 The scripts load credentials from the file specified by `CPANEL_ENV_FILE`. When
 that variable is unset, they use:
@@ -65,12 +70,20 @@ CPANEL_EXPECTED_LOCALE=en
 CPANEL_EXPECTED_LOG_ARCHIVE=1
 CPANEL_EXPECTED_LOG_PRUNE=1
 CPANEL_EXPECTED_LOG_RETENTION=-1
+CPANEL_EXPECTED_GPG_PUBLIC_COUNT=0
+CPANEL_EXPECTED_GPG_SECRET_COUNT=0
+CPANEL_ALLOW_GPG_KEYPAIR_DELETE=0
 ```
 
 `CPANEL_EXPECTED_LOG_RETENTION=-1` means the server default. Keep this file at
 `0600` and set it from the known clean account configuration, not from a test
 run. The persisted values let a later run recover the account even when an
 earlier Terraform or shell process was interrupted after mutation.
+
+`CPANEL_ALLOW_GPG_KEYPAIR_DELETE` must remain `0` unless this is a dedicated
+disposable acceptance account whose expected secret-key count is explicitly
+`0`. Set it to `1` only to run the destructive GPG acceptance lifecycle and
+cleanup. cPanel exposes no public-only deletion function.
 
 Run the non-destructive API and capability checks with:
 
@@ -138,6 +151,13 @@ that follow the test naming contract:
 - stored SSL CSR friendly names and common names both beginning with
   `tfcpanelcsr`; cleanup re-reads the CSR inventory and signed public PKCS#10
   request immediately before deleting the exact matching ID;
+- GPG public-key user IDs beginning with
+  `Terraform cPanel acceptance <tfcpanelgpg-`; cleanup re-reads both public and
+  secret inventories, requires the complete secret inventory to remain empty,
+  verifies two byte-stable public exports, and requires the explicit
+  `CPANEL_ALLOW_GPG_KEYPAIR_DELETE=1` opt-in before calling cPanel's only
+  deletion function, `GPG::delete_keypair`, once. Ambiguous responses are
+  reconciled by read-only inventories without replaying the POST;
 - email account local parts beginning with `tfcpanel`;
 - BoxTrapper test mailbox local parts beginning with
   `tfcpanelboxtrapper`; cleanup verifies that the challenge queue is empty,

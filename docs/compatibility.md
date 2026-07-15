@@ -36,8 +36,8 @@ remote MySQL hosts, PostgreSQL databases and users, imports, drift detection,
 per-domain ModSecurity status, stored SSL certificates, email account
 suspension, stored SSL certificate signing requests, default-calendar
 delegation, user-level email filters, BoxTrapper settings, Mailman mailing
-lists, and cleanup. Certification also covers per-domain email routing
-transitions and restoration without changing DNS MX records.
+lists, public OpenPGP keys, and cleanup. Certification also covers per-domain
+email routing transitions and restoration without changing DNS MX records.
 Certification also covers reading and changing the account display locale,
 including restoration of its pre-test value, plus Passenger application
 registration, updates, replacement, import, drift detection, remote deletion,
@@ -268,6 +268,47 @@ fingerprint, and expected current friendly name immediately around mutations.
 An external mutation in the narrow interval between the final read and write
 cannot be made atomic; ambiguous or conflicting observations fail without
 guessing ownership.
+
+Public OpenPGP key operations use UAPI `GPG::list_public_keys`,
+`GPG::list_secret_keys`, `GPG::import_key`, and `GPG::export_public_key`. The
+resource accepts exactly one armored RSA version 4 public key with a 2048,
+3072, or 4096-bit primary key. It accepts non-semantic ASCII armor headers and
+rejects private-key packets, unknown or non-transferable packet tags, multiple
+raw primary-key packets, unsupported algorithms or versions, weak keys,
+oversized input, and keys without an identity before any cPanel mutation.
+
+The provider never imports, exports, reads, manages, or deletes private-key
+material. It reads secret-key metadata before creation, import, and refresh,
+and refuses resource management whenever a matching secret ID appears. Stable
+identity combines the complete uppercase 40-character primary fingerprint and
+the lowercase SHA-256 of the canonical set of decoded public packets. Harmless
+armor and packet ordering differences are ignored, while added, removed, or
+changed identities, subkeys, certifications, or other public packets are
+detected instead of adopted.
+
+cPanel exposes only `GPG::delete_keypair`; there is no public-only deletion
+operation. The Terraform resource deliberately never calls that function.
+Destroy and replacement remove the old object from Terraform state while
+preserving its remote public key. If Terraform cannot save state after a
+successful import, the diagnostic reports the exact key ID for a subsequent
+import instead of risking pair deletion.
+
+Import is refused when the public key already existed before the requested
+creation, and a successful import must return the expected key ID,
+fingerprint, complete public packet digest, and no matching secret key.
+Deterministic API errors are never treated as success. Any post-import
+transport, response-decoding, delayed-visibility, or transient read failure is
+reconciled for a bounded period through a cancellation-independent read-only
+context; the import mutation is never replayed.
+
+Acceptance cleanup can call `GPG::delete_keypair` only on the dedicated test
+account, with `CPANEL_ALLOW_GPG_KEYPAIR_DELETE=1`, an expected secret-key count
+of zero, an empty live secret inventory, an exact reserved user-ID prefix, and
+two matching public exports. It sends the deletion POST once and reconciles an
+ambiguous response through read-only inventories. Because cPanel offers no
+conditional operation, a secret key imported concurrently after the final read
+remains an unavoidable server-side race; production resource deletion is
+disabled for that reason.
 
 DNS record reads and mutations use UAPI `DNS::parse_zone` and
 `DNS::mass_edit_zone`. Every mutation uses the current SOA serial and is

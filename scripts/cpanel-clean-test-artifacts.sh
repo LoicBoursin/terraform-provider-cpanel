@@ -288,6 +288,7 @@ deleted_apache_handlers=0
 deleted_passenger_applications=0
 deleted_ssl_certificates=0
 deleted_ssl_csrs=0
+deleted_gpg_public_keys=0
 deleted_git_repositories=0
 deleted_git_repository_directories=0
 deleted_git_repository_trash_entries=0
@@ -757,7 +758,388 @@ cleanup_test_ssl_certificates() {
   fi
 }
 
+validate_gpg_public_inventory() {
+  jq -e \
+    '
+      (.data | type == "array")
+      and all(
+        .data[];
+        (.algorithm? | type) == "string"
+        and (
+          (.bits? | type) == "string"
+          or (.bits? | type) == "number"
+        )
+        and ((.bits | tostring) | test("^[1-9][0-9]*$"))
+        and (
+          (.created? | type) == "string"
+          or (.created? | type) == "number"
+        )
+        and ((.created | tostring) | test("^[0-9]+$"))
+        and (.id? | type) == "string"
+        and (.id | test("^[0-9A-Fa-f]{16}$"))
+        and .type? == "pub"
+        and (.user_id? | type) == "string"
+        and ((.user_id | length) > 0)
+      )
+    ' \
+    "${response_file}" >/dev/null
+}
+
+validate_gpg_secret_inventory() {
+  jq -e \
+    '
+      (.data | type == "array")
+      and all(
+        .data[];
+        (.algorithm? | type) == "string"
+        and (
+          (.bits? | type) == "string"
+          or (.bits? | type) == "number"
+        )
+        and ((.bits | tostring) | test("^[1-9][0-9]*$"))
+        and (
+          (.created? | type) == "string"
+          or (.created? | type) == "number"
+        )
+        and ((.created | tostring) | test("^[0-9]+$"))
+        and (.id? | type) == "string"
+        and (.id | test("^([0-9A-Fa-f]{8}|[0-9A-Fa-f]{16})$"))
+        and .type? == "sec"
+        and (.user_id? | type) == "string"
+        and ((.user_id | length) > 0)
+      )
+    ' \
+    "${response_file}" >/dev/null
+}
+
+gpg_secret_inventory_matches_public_id() {
+  local public_id="$1"
+
+  jq -e \
+    --arg public_id "${public_id}" \
+    '
+      ($public_id | ascii_upcase) as $normalized_public_id
+      |
+      any(
+        .data[];
+        (.id | ascii_upcase) as $secret_id
+        | (
+            (
+              ($secret_id | length) == 8
+              or ($secret_id | length) == 16
+            )
+            and ($normalized_public_id | endswith($secret_id))
+          )
+      )
+    ' \
+    "${response_file}" >/dev/null
+}
+
+delete_test_gpg_keypair_once() {
+  local key_id="$1"
+  local curl_status
+  local http_code
+  local status
+  local curl_arguments=(
+    --silent
+    --show-error
+    --max-time 90
+    --request POST
+    --output "${response_file}"
+    --write-out '%{http_code}'
+    --header "${authorization}"
+    --header 'Content-Type: application/x-www-form-urlencoded'
+    --data-urlencode "key_id=${key_id}"
+  )
+
+  if http_code="$(
+    curl \
+      "${curl_arguments[@]}" \
+      "${host}/execute/GPG/delete_keypair"
+  )"; then
+    curl_status=0
+  else
+    curl_status=$?
+  fi
+  if [[ "${curl_status}" != "0" || "${http_code}" != "200" ]]; then
+    return 1
+  fi
+  if ! jq -e '.' "${response_file}" >/dev/null 2>&1; then
+    return 1
+  fi
+
+  status="$(jq -r '.status // empty' "${response_file}")"
+  if [[ "${status}" == "1" ]]; then
+    return 0
+  fi
+  if [[ "${status}" == "0" ]]; then
+    printf 'Delete test GPG key pair %s failed: %s\n' \
+      "${key_id}" \
+      "$(jq -c '{errors, messages}' "${response_file}")" >&2
+    return 2
+  fi
+
+  return 1
+}
+
+cleanup_test_gpg_public_keys() {
+  local delete_ambiguous
+  local delete_status
+  local export_hash
+  local key_id
+  local second_export_hash
+  local user_id
+
+  get_request 'execute/GPG/list_public_keys' 'GPG public-key inventory'
+  if ! validate_gpg_public_inventory; then
+    printf 'GPG public-key inventory is incomplete\n' >&2
+    exit 1
+  fi
+  gpg_public_candidates="$(
+    jq -r \
+      '
+        .data[]
+        | select(
+            .user_id
+            | startswith(
+                "Terraform cPanel acceptance <tfcpanelgpg-"
+              )
+          )
+        | [.id, .user_id]
+        | @tsv
+      ' \
+      "${response_file}"
+  )"
+  if [[ -n "${gpg_public_candidates}" ]]; then
+    if [[ "${CPANEL_ALLOW_GPG_KEYPAIR_DELETE:-0}" != "1" ]]; then
+      printf '%s\n' \
+        'Refusing GPG cleanup: set CPANEL_ALLOW_GPG_KEYPAIR_DELETE=1 only for a dedicated disposable test account.' >&2
+      exit 1
+    fi
+    if [[ "${CPANEL_EXPECTED_GPG_SECRET_COUNT:-}" != "0" ]]; then
+      printf '%s\n' \
+        'Refusing GPG cleanup: CPANEL_EXPECTED_GPG_SECRET_COUNT must explicitly be 0.' >&2
+      exit 1
+    fi
+  fi
+
+  while IFS=$'\t' read -r key_id user_id; do
+    if [[ -z "${key_id}" || -z "${user_id}" ]]; then
+      continue
+    fi
+    key_id="$(
+      printf '%s' "${key_id}" | tr '[:lower:]' '[:upper:]'
+    )"
+    if [[ ! "${key_id}" =~ ^[0-9A-F]{16}$ ]]; then
+      printf 'Refusing to delete invalid test GPG public-key ID: %s\n' \
+        "${key_id}" >&2
+      exit 1
+    fi
+
+    get_request 'execute/GPG/list_secret_keys' \
+      "Re-read GPG secret inventory before deleting ${key_id}"
+    if ! validate_gpg_secret_inventory; then
+      printf 'GPG secret-key inventory is incomplete\n' >&2
+      exit 1
+    fi
+    if gpg_secret_inventory_matches_public_id "${key_id}"; then
+      printf 'Refusing to delete GPG public key with matching secret key: %s\n' \
+        "${key_id}" >&2
+      exit 1
+    fi
+
+    get_request 'execute/GPG/list_public_keys' \
+      "Re-read test GPG public key ${key_id}"
+    if ! validate_gpg_public_inventory; then
+      printf 'GPG public-key inventory is incomplete\n' >&2
+      exit 1
+    fi
+    if ! jq -e \
+      --arg id "${key_id}" \
+      --arg user_id "${user_id}" \
+      '
+        [
+          .data[]
+          | select((.id | ascii_upcase) == $id)
+        ]
+        | length == 1
+        and .[0].user_id == $user_id
+        and (
+          .[0].user_id
+          | startswith(
+              "Terraform cPanel acceptance <tfcpanelgpg-"
+            )
+        )
+      ' \
+      "${response_file}" >/dev/null; then
+      printf 'Refusing to delete ambiguous test GPG public key: %s\n' \
+        "${key_id}" >&2
+      exit 1
+    fi
+
+    get_request \
+      "execute/GPG/export_public_key?key_id=${key_id}" \
+      "Export test GPG public key ${key_id}"
+    if ! jq -e \
+      '
+        (.data | type) == "object"
+        and (.data.key_data? | type) == "string"
+        and (.data.key_data | startswith(
+          "-----BEGIN PGP PUBLIC KEY BLOCK-----"
+        ))
+        and (.data.key_data | contains(
+          "-----END PGP PUBLIC KEY BLOCK-----"
+        ))
+        and (
+          .data.key_data
+          | contains("PGP PRIVATE KEY BLOCK")
+          | not
+        )
+      ' \
+      "${response_file}" >/dev/null; then
+      printf 'GPG public-key export is invalid: %s\n' "${key_id}" >&2
+      exit 1
+    fi
+    export_hash="$(jq -j '.data.key_data' "${response_file}" | sha256_stream)"
+
+    get_request 'execute/GPG/list_public_keys' \
+      "Final GPG public inventory before deleting ${key_id}"
+    if ! validate_gpg_public_inventory ||
+      ! jq -e \
+        --arg id "${key_id}" \
+        --arg user_id "${user_id}" \
+        '
+          [
+            .data[]
+            | select(
+                (.id | ascii_upcase) == $id
+                and .user_id == $user_id
+              )
+          ]
+          | length == 1
+        ' \
+        "${response_file}" >/dev/null; then
+      printf 'Test GPG public key changed before deletion: %s\n' \
+        "${key_id}" >&2
+      exit 1
+    fi
+    get_request \
+      "execute/GPG/export_public_key?key_id=${key_id}" \
+      "Re-export test GPG public key ${key_id}"
+    second_export_hash="$(
+      jq -j '.data.key_data // empty' "${response_file}" | sha256_stream
+    )"
+    if [[
+      -z "${second_export_hash}"
+      || "${second_export_hash}" != "${export_hash}"
+     ]]; then
+      printf 'Test GPG public-key export changed before deletion: %s\n' \
+        "${key_id}" >&2
+      exit 1
+    fi
+
+    get_request 'execute/GPG/list_secret_keys' \
+      "Final GPG secret inventory before deleting ${key_id}"
+    if ! validate_gpg_secret_inventory; then
+      printf 'GPG secret-key inventory is incomplete\n' >&2
+      exit 1
+    fi
+    if [[ "$(jq -r '.data | length' "${response_file}")" != "0" ]]; then
+      printf 'Refusing GPG pair deletion while any secret key exists: %s\n' \
+        "${key_id}" >&2
+      exit 1
+    fi
+
+    delete_ambiguous=0
+    if delete_test_gpg_keypair_once "${key_id}"; then
+      delete_status=0
+    else
+      delete_status=$?
+      if [[ "${delete_status}" == "2" ]]; then
+        exit 1
+      fi
+      delete_ambiguous=1
+    fi
+
+    get_request 'execute/GPG/list_public_keys' \
+      "Verify deletion of test GPG public key ${key_id}"
+    if ! validate_gpg_public_inventory; then
+      printf 'GPG public-key inventory is incomplete\n' >&2
+      exit 1
+    fi
+    if jq -e \
+      --arg id "${key_id}" \
+      '.data[] | select((.id | ascii_upcase) == $id)' \
+      "${response_file}" >/dev/null; then
+      if [[ "${delete_ambiguous}" == "1" ]]; then
+        printf 'Ambiguous GPG pair deletion could not be reconciled: %s\n' \
+          "${key_id}" >&2
+      else
+        printf 'Test GPG public key still exists after deletion: %s\n' \
+          "${key_id}" >&2
+      fi
+      exit 1
+    fi
+    get_request 'execute/GPG/list_secret_keys' \
+      "Verify secret inventory after deleting ${key_id}"
+    if ! validate_gpg_secret_inventory ||
+      [[ "$(jq -r '.data | length' "${response_file}")" != "0" ]]; then
+      printf 'GPG secret inventory changed during pair deletion: %s\n' \
+        "${key_id}" >&2
+      exit 1
+    fi
+    if [[ "${delete_ambiguous}" == "1" ]]; then
+      printf 'Recovered ambiguous GPG pair deletion by read-only inventory: %s\n' \
+        "${key_id}"
+    fi
+    deleted_gpg_public_keys=$((deleted_gpg_public_keys + 1))
+  done <<<"${gpg_public_candidates}"
+
+  get_request 'execute/GPG/list_public_keys' \
+    'GPG public-key inventory after cleanup'
+  if ! validate_gpg_public_inventory; then
+    printf 'GPG public-key inventory is incomplete\n' >&2
+    exit 1
+  fi
+  if jq -e \
+    '
+      .data[]
+      | select(
+          .user_id
+          | startswith(
+              "Terraform cPanel acceptance <tfcpanelgpg-"
+            )
+        )
+    ' \
+    "${response_file}" >/dev/null; then
+    printf 'Test GPG public key still exists after cleanup\n' >&2
+    exit 1
+  fi
+
+  get_request 'execute/GPG/list_secret_keys' \
+    'GPG secret-key inventory after cleanup'
+  if ! validate_gpg_secret_inventory; then
+    printf 'GPG secret-key inventory is incomplete\n' >&2
+    exit 1
+  fi
+  if jq -e \
+    '
+      .data[]
+      | select(
+          .user_id
+          | startswith(
+              "Terraform cPanel acceptance <tfcpanelgpg-"
+            )
+        )
+    ' \
+    "${response_file}" >/dev/null; then
+    printf 'Test GPG secret key exists; cleanup refuses private material\n' >&2
+    exit 1
+  fi
+}
+
 cleanup_test_ssl_certificates 0
+cleanup_test_gpg_public_keys
 
 get_request 'execute/VersionControl/retrieve' 'Git repository inventory'
 while IFS= read -r repository_root; do
@@ -2052,6 +2434,7 @@ printf '  Passenger applications unregistered: %d\n' \
 printf '  stored SSL CSRs deleted: %d\n' "${deleted_ssl_csrs}"
 printf '  stored SSL certificates deleted: %d\n' \
   "${deleted_ssl_certificates}"
+printf '  GPG public keys deleted: %d\n' "${deleted_gpg_public_keys}"
 printf '  Git repositories deleted: %d\n' "${deleted_git_repositories}"
 printf '  Git repository directories deleted: %d\n' \
   "${deleted_git_repository_directories}"

@@ -156,7 +156,7 @@ if [[
 fi
 
 request 'execute/Features/list_features' 'feature check'
-for feature in addondomains apitokens blockers boxtrapper changemx cron dynamicdns ftpaccts handlers indexmanager lists mime modsecurity mysql parkeddomains passengerapps popaccts postgres redirects sslmanager subdomains version_control webprotect zoneedit; do
+for feature in addondomains apitokens blockers boxtrapper changemx cron dynamicdns ftpaccts handlers indexmanager lists mime modsecurity mysql parkeddomains passengerapps pgp popaccts postgres redirects sslmanager subdomains version_control webprotect zoneedit; do
   if [[ "$(jq -r --arg feature "${feature}" '.data[$feature] // 0' "${response_file}")" != "1" ]]; then
     printf 'Required cPanel feature is disabled: %s\n' "${feature}" >&2
     exit 1
@@ -337,6 +337,138 @@ ssl_certificate_test_count="$(
     ' \
     "${response_file}"
 )"
+
+request 'execute/GPG/list_public_keys' 'GPG public-key inventory'
+if ! jq -e \
+  '
+    (.data | type == "array")
+    and all(
+      .data[];
+      (.algorithm? | type) == "string"
+      and (
+        (.bits? | type) == "string"
+        or (.bits? | type) == "number"
+      )
+      and ((.bits | tostring) | test("^[1-9][0-9]*$"))
+      and (
+        (.created? | type) == "string"
+        or (.created? | type) == "number"
+      )
+      and ((.created | tostring) | test("^[0-9]+$"))
+      and (
+        .expires? == null
+        or (
+          (
+            (.expires? | type) == "string"
+            or (.expires? | type) == "number"
+          )
+          and (
+            (.expires | tostring) == ""
+            or ((.expires | tostring) | test("^[0-9]+$"))
+          )
+        )
+      )
+      and (.id? | type) == "string"
+      and (.id | test("^[0-9A-Fa-f]{16}$"))
+      and .type? == "pub"
+      and (.user_id? | type) == "string"
+      and ((.user_id | length) > 0)
+    )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'GPG public-key inventory is incomplete\n' >&2
+  exit 1
+fi
+gpg_public_key_count="$(jq -r '.data | length' "${response_file}")"
+gpg_public_test_key_count="$(
+  jq -r \
+    '
+      [.data[]
+        | select(
+            .user_id
+            | startswith(
+                "Terraform cPanel acceptance <tfcpanelgpg-"
+              )
+          )]
+      | length
+    ' \
+    "${response_file}"
+)"
+
+request 'execute/GPG/list_secret_keys' 'GPG secret-key inventory'
+if ! jq -e \
+  '
+    (.data | type == "array")
+    and all(
+      .data[];
+      (.algorithm? | type) == "string"
+      and (
+        (.bits? | type) == "string"
+        or (.bits? | type) == "number"
+      )
+      and ((.bits | tostring) | test("^[1-9][0-9]*$"))
+      and (
+        (.created? | type) == "string"
+        or (.created? | type) == "number"
+      )
+      and ((.created | tostring) | test("^[0-9]+$"))
+      and (
+        .expires? == null
+        or (
+          (
+            (.expires? | type) == "string"
+            or (.expires? | type) == "number"
+          )
+          and (
+            (.expires | tostring) == ""
+            or ((.expires | tostring) | test("^[0-9]+$"))
+          )
+        )
+      )
+      and (.id? | type) == "string"
+      and (.id | test("^([0-9A-Fa-f]{8}|[0-9A-Fa-f]{16})$"))
+      and .type? == "sec"
+      and (.user_id? | type) == "string"
+      and ((.user_id | length) > 0)
+    )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'GPG secret-key inventory is incomplete\n' >&2
+  exit 1
+fi
+gpg_secret_key_count="$(jq -r '.data | length' "${response_file}")"
+gpg_secret_test_key_count="$(
+  jq -r \
+    '
+      [.data[]
+        | select(
+            .user_id
+            | startswith(
+                "Terraform cPanel acceptance <tfcpanelgpg-"
+              )
+          )]
+      | length
+    ' \
+    "${response_file}"
+)"
+if [[
+  -n "${CPANEL_EXPECTED_GPG_PUBLIC_COUNT:-}"
+  && "${gpg_public_key_count}" != "${CPANEL_EXPECTED_GPG_PUBLIC_COUNT}"
+ ]]; then
+  printf 'GPG public-key count is %s; expected restored count %s\n' \
+    "${gpg_public_key_count}" \
+    "${CPANEL_EXPECTED_GPG_PUBLIC_COUNT}" >&2
+  exit 1
+fi
+if [[
+  -n "${CPANEL_EXPECTED_GPG_SECRET_COUNT:-}"
+  && "${gpg_secret_key_count}" != "${CPANEL_EXPECTED_GPG_SECRET_COUNT}"
+ ]]; then
+  printf 'GPG secret-key count is %s; expected restored count %s\n' \
+    "${gpg_secret_key_count}" \
+    "${CPANEL_EXPECTED_GPG_SECRET_COUNT}" >&2
+  exit 1
+fi
 
 request 'execute/Postgresql/list_databases' 'PostgreSQL database check'
 database_count="$(jq -r '.data | length' "${response_file}")"
@@ -1105,6 +1237,8 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${passenger_application_test_count}" != "0"
     || "${ssl_csr_test_count}" != "0"
     || "${ssl_certificate_test_count}" != "0"
+    || "${gpg_public_test_key_count}" != "0"
+    || "${gpg_secret_test_key_count}" != "0"
     || "${database_count}" != "0"
     || "${user_count}" != "0"
     || "${mysql_test_database_count}" != "0"
@@ -1153,6 +1287,10 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
       "${ssl_csr_test_count}" >&2
     printf '  test stored SSL certificates: %s\n' \
       "${ssl_certificate_test_count}" >&2
+    printf '  test GPG public keys: %s\n' \
+      "${gpg_public_test_key_count}" >&2
+    printf '  test GPG secret keys: %s\n' \
+      "${gpg_secret_test_key_count}" >&2
     printf '  PostgreSQL databases: %s\n' "${database_count}" >&2
     printf '  PostgreSQL users: %s\n' "${user_count}" >&2
     printf '  MySQL test databases: %s\n' "${mysql_test_database_count}" >&2
@@ -1246,6 +1384,12 @@ printf '  stored SSL CSRs: %s (%s test-managed)\n' \
 printf '  stored SSL certificates: %s (%s test-managed)\n' \
   "${ssl_certificate_count}" \
   "${ssl_certificate_test_count}"
+printf '  GPG public keys: %s (%s test-managed)\n' \
+  "${gpg_public_key_count}" \
+  "${gpg_public_test_key_count}"
+printf '  GPG secret keys: %s (%s test-managed)\n' \
+  "${gpg_secret_key_count}" \
+  "${gpg_secret_test_key_count}"
 printf '  public_html directory index: %s\n' "${public_html_index_type}"
 printf '  public_html directory protected: %s\n' "${public_html_protected}"
 printf '  PostgreSQL databases: %s\n' "${database_count}"
