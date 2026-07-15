@@ -49,6 +49,7 @@ type rawEntry struct {
 type api2Response struct {
 	CpanelResult struct {
 		APIVersion int             `json:"apiversion"`
+		Error      json.RawMessage `json:"error"`
 		Function   string          `json:"func"`
 		Module     string          `json:"module"`
 		Data       json.RawMessage `json:"data"`

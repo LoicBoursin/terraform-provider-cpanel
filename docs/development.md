@@ -22,11 +22,12 @@ accounts, Apache handlers, directory indexes and privacy, Git repositories,
 Passenger applications, stored public SSL certificates, email filters,
 stored public SSL certificate signing requests, calendar delegations,
 forwarders and autoresponders, FTP accounts, MySQL or MariaDB users and
-databases and remote hosts, PostgreSQL users and databases, and database
-grants. Locale acceptance tests temporarily change the account display locale
-and restore the persisted test-account baseline. Log settings tests
-temporarily change archive, pruning, and retention preferences and restore the
-same durable baseline. Use a dedicated cPanel test account.
+databases and remote hosts, PostgreSQL users and databases, filesystem
+directories and UTF-8 text files, and database grants. Locale acceptance tests
+temporarily change the account display locale and restore the persisted
+test-account baseline. Log settings tests temporarily change archive, pruning,
+and retention preferences and restore the same durable baseline. Use a
+dedicated cPanel test account.
 
 The scripts load credentials from the file specified by `CPANEL_ENV_FILE`. When
 that variable is unset, they use:
@@ -112,6 +113,11 @@ that follow the test naming contract:
 - filesystem directory resources beginning with `tfcpanel-fs-dir-` below
   `public_html`; provider-created fixtures contain only the reserved
   `.terraform-cpanel-directory` ownership marker;
+- filesystem text file resources beginning with `tfcpanel-fs-file-` below
+  `public_html`; cleanup deletes a target only when its canonical hidden
+  `.terraform-cpanel-text-file-*` sidecar names the exact path and its stored
+  size and SHA-256 digest still match, and safely removes valid orphaned test
+  sidecars left after an interrupted delete;
 - Directory Privacy settings on top-level `public_html` directories beginning
   with `tfcpanel-privacy-`, plus only their matching password directories
   below `.htpasswds/public_html`; Directory Privacy user tests use only these

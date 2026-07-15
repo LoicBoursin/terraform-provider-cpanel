@@ -310,6 +310,14 @@ func testAccFilesystemDirectoryPath(kind string) string {
 	)
 }
 
+func testAccFilesystemTextFilePath(kind string) string {
+	return fmt.Sprintf(
+		"public_html/tfcpanel-fs-file-%s-%s.txt",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
+	)
+}
+
 func testAccDirectoryPrivacyDirectory(kind string) string {
 	return fmt.Sprintf(
 		"public_html/tfcpanel-privacy-%s-%s",
@@ -1544,6 +1552,418 @@ func testAccCheckFilesystemDirectoriesDestroyed(
 					"filesystem directory %q still exists after destroy",
 					directoryPath,
 				)
+			}
+		}
+
+		return nil
+	}
+}
+
+func testAccCheckFilesystemTextFileResourceState(
+	filePath string,
+	content string,
+	owned bool,
+	contentMatchesOwnershipMarker bool,
+) resource.TestCheckFunc {
+	const resourceName = "cpanel_filesystem_text_file.test"
+
+	return resource.ComposeAggregateTestCheckFunc(
+		resource.TestCheckResourceAttr(resourceName, "path", filePath),
+		resource.TestCheckResourceAttr(resourceName, "content", content),
+		resource.TestCheckResourceAttr(resourceName, "permissions", "0644"),
+		resource.TestCheckResourceAttr(
+			resourceName,
+			"size_bytes",
+			fmt.Sprintf("%d", len([]byte(content))),
+		),
+		resource.TestCheckResourceAttr(
+			resourceName,
+			"content_sha256",
+			filesystemTextFileContentSHA256(content),
+		),
+		resource.TestCheckResourceAttr(
+			resourceName,
+			"owned",
+			fmt.Sprintf("%t", owned),
+		),
+		resource.TestCheckResourceAttr(
+			resourceName,
+			"content_matches_ownership_marker",
+			fmt.Sprintf("%t", contentMatchesOwnershipMarker),
+		),
+		resource.TestCheckResourceAttrSet(resourceName, "absolute_path"),
+	)
+}
+
+func testAccCheckFilesystemTextFile(
+	filePath string,
+	content string,
+	markerExpected bool,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+		filemanClient := cpanelfileman.NewClient(client)
+		textFile, err := filemanClient.GetTextFile(ctx, filePath)
+		if err != nil {
+			return err
+		}
+		if textFile == nil {
+			return fmt.Errorf("filesystem text file %q was not found", filePath)
+		}
+		if textFile.Entry.Path != filePath {
+			return fmt.Errorf(
+				"filesystem text file returned path %q; want %q",
+				textFile.Entry.Path,
+				filePath,
+			)
+		}
+		if textFile.Entry.Permissions != "0644" {
+			return fmt.Errorf(
+				"filesystem text file %q returned permissions %q; want 0644",
+				filePath,
+				textFile.Entry.Permissions,
+			)
+		}
+		if textFile.Content != content {
+			return fmt.Errorf(
+				"filesystem text file %q returned unexpected content",
+				filePath,
+			)
+		}
+		if textFile.Entry.SizeBytes != int64(len([]byte(content))) {
+			return fmt.Errorf(
+				"filesystem text file %q returned size %d; want %d",
+				filePath,
+				textFile.Entry.SizeBytes,
+				len([]byte(content)),
+			)
+		}
+
+		markerFile, err := filemanClient.GetTextFile(
+			ctx,
+			filesystemTextFileMarkerPath(filePath),
+		)
+		if err != nil {
+			return err
+		}
+		if markerExpected && markerFile == nil {
+			return fmt.Errorf(
+				"filesystem text file %q has no ownership marker",
+				filePath,
+			)
+		}
+		if !markerExpected && markerFile != nil {
+			return fmt.Errorf(
+				"filesystem text file %q unexpectedly has an ownership marker",
+				filePath,
+			)
+		}
+		if markerFile == nil {
+			return nil
+		}
+
+		marker, err := parseFilesystemTextFileMarker(
+			markerFile.Content,
+			filePath,
+		)
+		if err != nil {
+			return err
+		}
+		if !filesystemTextFileMarkerMatches(*textFile, marker) {
+			return fmt.Errorf(
+				"filesystem text file %q does not match its ownership marker",
+				filePath,
+			)
+		}
+
+		return nil
+	}
+}
+
+func testAccWriteFilesystemTextFile(
+	t *testing.T,
+	filePath string,
+	content string,
+) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	filemanClient := cpanelfileman.NewClient(client)
+	unlock := filemanClient.LockMutations()
+	defer unlock()
+
+	entry, err := filemanClient.GetEntry(ctx, filePath)
+	if err != nil {
+		t.Fatalf("read filesystem text file %q: %v", filePath, err)
+	}
+	if entry == nil {
+		if _, err := filemanClient.CreateEmptyTextFile(
+			ctx,
+			filePath,
+		); err != nil {
+			t.Fatalf("create filesystem text file %q: %v", filePath, err)
+		}
+	}
+
+	saved, err := filemanClient.SaveTextFile(ctx, filePath, content)
+	if err != nil {
+		t.Fatalf("write filesystem text file %q: %v", filePath, err)
+	}
+	if saved == nil || saved.Content != content {
+		t.Fatalf(
+			"filesystem text file %q did not retain the expected content",
+			filePath,
+		)
+	}
+}
+
+func testAccCreateUnmarkedFilesystemTextFile(
+	t *testing.T,
+	filePath string,
+	content string,
+) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	filemanClient := cpanelfileman.NewClient(client)
+	unlock := filemanClient.LockMutations()
+	defer unlock()
+
+	for _, artifactPath := range []string{
+		filePath,
+		filesystemTextFileMarkerPath(filePath),
+	} {
+		entry, err := filemanClient.GetEntry(ctx, artifactPath)
+		if err != nil {
+			t.Fatalf("read filesystem path %q: %v", artifactPath, err)
+		}
+		if entry != nil {
+			t.Fatalf("filesystem path %q already exists", artifactPath)
+		}
+	}
+	if _, err := filemanClient.CreateEmptyTextFile(ctx, filePath); err != nil {
+		t.Fatalf("create unmarked filesystem text file %q: %v", filePath, err)
+	}
+	if _, err := filemanClient.SaveTextFile(
+		ctx,
+		filePath,
+		content,
+	); err != nil {
+		t.Fatalf("write unmarked filesystem text file %q: %v", filePath, err)
+	}
+}
+
+func testAccWriteFilesystemTextFileMarker(
+	t *testing.T,
+	filePath string,
+	content string,
+) {
+	t.Helper()
+
+	const token = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+
+	marker, err := newFilesystemTextFileMarker(filePath, token, content)
+	if err != nil {
+		t.Fatalf(
+			"build filesystem text file %q ownership marker: %v",
+			filePath,
+			err,
+		)
+	}
+	markerContent, err := filesystemTextFileMarkerContent(marker)
+	if err != nil {
+		t.Fatalf(
+			"encode filesystem text file %q ownership marker: %v",
+			filePath,
+			err,
+		)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	filemanClient := cpanelfileman.NewClient(client)
+	unlock := filemanClient.LockMutations()
+	defer unlock()
+
+	markerPath := filesystemTextFileMarkerPath(filePath)
+	entry, err := filemanClient.GetEntry(ctx, markerPath)
+	if err != nil {
+		t.Fatalf("read filesystem text file marker %q: %v", markerPath, err)
+	}
+	if entry == nil {
+		if _, err := filemanClient.CreateEmptyTextFile(
+			ctx,
+			markerPath,
+		); err != nil {
+			t.Fatalf(
+				"create filesystem text file marker %q: %v",
+				markerPath,
+				err,
+			)
+		}
+	}
+	if _, err := filemanClient.SaveTextFile(
+		ctx,
+		markerPath,
+		markerContent,
+	); err != nil {
+		t.Fatalf("write filesystem text file marker %q: %v", markerPath, err)
+	}
+}
+
+func testAccWriteFilesystemTextFileStaleMarker(
+	t *testing.T,
+	filePath string,
+	markerContentFor string,
+) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	filemanClient := cpanelfileman.NewClient(client)
+	unlock := filemanClient.LockMutations()
+	defer unlock()
+
+	markerPath := filesystemTextFileMarkerPath(filePath)
+	markerFile, err := filemanClient.GetTextFile(ctx, markerPath)
+	if err != nil {
+		t.Fatalf("read filesystem text file marker %q: %v", markerPath, err)
+	}
+	if markerFile == nil {
+		t.Fatalf("filesystem text file marker %q does not exist", markerPath)
+	}
+	currentMarker, err := parseFilesystemTextFileMarker(
+		markerFile.Content,
+		filePath,
+	)
+	if err != nil {
+		t.Fatalf("parse filesystem text file marker %q: %v", markerPath, err)
+	}
+	staleMarker, err := newFilesystemTextFileMarker(
+		filePath,
+		currentMarker.Token,
+		markerContentFor,
+	)
+	if err != nil {
+		t.Fatalf("build stale filesystem text file marker %q: %v", markerPath, err)
+	}
+	staleMarkerContent, err := filesystemTextFileMarkerContent(staleMarker)
+	if err != nil {
+		t.Fatalf("encode stale filesystem text file marker %q: %v", markerPath, err)
+	}
+	if _, err := filemanClient.SaveTextFile(
+		ctx,
+		markerPath,
+		staleMarkerContent,
+	); err != nil {
+		t.Fatalf("write stale filesystem text file marker %q: %v", markerPath, err)
+	}
+}
+
+func testAccDeleteFilesystemTextFileTarget(
+	t *testing.T,
+	filePath string,
+) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	filemanClient := cpanelfileman.NewClient(client)
+	unlock := filemanClient.LockMutations()
+	defer unlock()
+
+	if err := filemanClient.DeletePath(ctx, filePath); err != nil {
+		t.Fatalf("delete filesystem text file %q: %v", filePath, err)
+	}
+}
+
+func testAccDeleteFilesystemTextFileArtifacts(
+	t *testing.T,
+	filePath string,
+) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := testAccClient()
+	if err != nil {
+		t.Fatalf("create cPanel client: %v", err)
+	}
+	filemanClient := cpanelfileman.NewClient(client)
+	unlock := filemanClient.LockMutations()
+	defer unlock()
+
+	for _, artifactPath := range []string{
+		filesystemTextFileMarkerPath(filePath),
+		filePath,
+	} {
+		if err := filemanClient.DeletePath(ctx, artifactPath); err != nil {
+			t.Fatalf("delete filesystem path %q: %v", artifactPath, err)
+		}
+	}
+}
+
+func testAccCheckFilesystemTextFilesDestroyed(
+	filePaths ...string,
+) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := testAccClient()
+		if err != nil {
+			return err
+		}
+		filemanClient := cpanelfileman.NewClient(client)
+		for _, filePath := range filePaths {
+			for _, artifactPath := range []string{
+				filePath,
+				filesystemTextFileMarkerPath(filePath),
+			} {
+				entry, err := filemanClient.GetEntry(ctx, artifactPath)
+				if err != nil {
+					return err
+				}
+				if entry != nil {
+					return fmt.Errorf(
+						"filesystem path %q still exists after destroy",
+						artifactPath,
+					)
+				}
 			}
 		}
 

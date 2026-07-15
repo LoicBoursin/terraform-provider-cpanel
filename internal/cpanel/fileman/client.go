@@ -201,6 +201,123 @@ func (c *Client) CreateDirectory(
 	return created, nil
 }
 
+func (c *Client) CreateEmptyTextFile(
+	ctx context.Context,
+	managedPath string,
+) (*TextFile, error) {
+	if err := ValidateManagedPath(managedPath); err != nil {
+		return nil, err
+	}
+
+	existing, err := c.GetEntry(ctx, managedPath)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return nil, fmt.Errorf("path %q already exists", managedPath)
+	}
+
+	parentPath := path.Dir(managedPath)
+	parent, err := c.getDirectory(
+		ctx,
+		parentPath,
+		parentPath == managedRoot,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if parent == nil {
+		return nil, fmt.Errorf("parent directory %q does not exist", parentPath)
+	}
+
+	name := path.Base(managedPath)
+	response := api2Response{}
+	if err := c.ExecuteAPI2Operation(
+		ctx,
+		http.MethodPost,
+		cpanel.ModuleFileman,
+		operationMakeFile,
+		map[string]string{
+			"name":        name,
+			"path":        parent.Entry.AbsolutePath,
+			"permissions": "0644",
+		},
+		&response,
+	); err != nil {
+		return nil, err
+	}
+
+	items, err := api2Items(response, operationMakeFile)
+	if err != nil {
+		return nil, err
+	}
+	if err := api2TopLevelError(response, operationMakeFile); err != nil {
+		return nil, err
+	}
+	if len(items) != 1 {
+		return nil, fmt.Errorf(
+			"fileman mkfile returned %d item results; expected 1",
+			len(items),
+		)
+	}
+	if message, failed, err := api2ItemFailure(items[0]); err != nil {
+		return nil, fmt.Errorf("decode Fileman::mkfile item result: %w", err)
+	} else if failed {
+		return nil, fmt.Errorf("fileman mkfile failed: %s", message)
+	}
+	if err := validateMkfileItem(
+		items[0],
+		name,
+		parent.Entry.AbsolutePath,
+	); err != nil {
+		return nil, err
+	}
+
+	created, err := c.GetTextFile(ctx, managedPath)
+	if err != nil {
+		return nil, fmt.Errorf("verify created text file %q: %w", managedPath, err)
+	}
+	if created == nil {
+		return nil, fmt.Errorf(
+			"text file %q was not found after Fileman::mkfile",
+			managedPath,
+		)
+	}
+
+	expectedAbsolutePath := path.Join(parent.Entry.AbsolutePath, name)
+	if created.Entry.Path != managedPath ||
+		created.Entry.AbsolutePath != expectedAbsolutePath ||
+		created.Entry.Type != EntryTypeFile {
+		return nil, fmt.Errorf(
+			"text file %q returned unexpected identity after Fileman::mkfile",
+			managedPath,
+		)
+	}
+	if created.Entry.Permissions != "0644" {
+		return nil, fmt.Errorf(
+			"text file %q returned permissions %q; expected %q",
+			managedPath,
+			created.Entry.Permissions,
+			"0644",
+		)
+	}
+	if created.Content != "" {
+		return nil, fmt.Errorf(
+			"text file %q was not empty after Fileman::mkfile",
+			managedPath,
+		)
+	}
+	if created.Entry.SizeBytes != 0 {
+		return nil, fmt.Errorf(
+			"text file %q returned size %d; expected 0",
+			managedPath,
+			created.Entry.SizeBytes,
+		)
+	}
+
+	return created, nil
+}
+
 func (c *Client) GetTextFile(
 	ctx context.Context,
 	managedPath string,
@@ -724,6 +841,30 @@ func api2Items(
 	return items, nil
 }
 
+func api2TopLevelError(
+	response api2Response,
+	function string,
+) error {
+	message, err := optionalString(response.CpanelResult.Error, "error")
+	if err != nil {
+		return fmt.Errorf(
+			"decode Fileman::%s top-level error: %w",
+			function,
+			err,
+		)
+	}
+	if message == "" {
+		return nil
+	}
+
+	return &cpanel.APIError{
+		API:      "API 2",
+		Module:   cpanel.ModuleFileman,
+		Function: function,
+		Messages: []string{message},
+	}
+}
+
 func api2ItemFailure(
 	item map[string]json.RawMessage,
 ) (string, bool, error) {
@@ -810,6 +951,74 @@ func validateMkdirItem(
 			"fileman mkdir returned permissions %q; expected %q",
 			permissions,
 			"0755",
+		)
+	}
+
+	return nil
+}
+
+func validateMkfileItem(
+	item map[string]json.RawMessage,
+	expectedName string,
+	expectedPath string,
+) error {
+	if len(item) != 3 {
+		return fmt.Errorf(
+			"fileman mkfile returned %d item fields; expected exactly 3",
+			len(item),
+		)
+	}
+	for field := range item {
+		switch field {
+		case "name", "path", "permissions":
+		default:
+			return fmt.Errorf(
+				"fileman mkfile returned unexpected item field %q",
+				field,
+			)
+		}
+	}
+
+	name, err := requiredString(item["name"], "name", false)
+	if err != nil {
+		return fmt.Errorf("decode Fileman::mkfile item name: %w", err)
+	}
+	if name != expectedName {
+		return fmt.Errorf(
+			"fileman mkfile returned name %q; expected %q",
+			name,
+			expectedName,
+		)
+	}
+
+	parentPath, err := requiredString(item["path"], "path", false)
+	if err != nil {
+		return fmt.Errorf("decode Fileman::mkfile item path: %w", err)
+	}
+	if parentPath != expectedPath {
+		return fmt.Errorf(
+			"fileman mkfile returned path %q; expected %q",
+			parentPath,
+			expectedPath,
+		)
+	}
+
+	permissions, err := requiredString(
+		item["permissions"],
+		"permissions",
+		false,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"decode Fileman::mkfile item permissions: %w",
+			err,
+		)
+	}
+	if permissions != "0644" {
+		return fmt.Errorf(
+			"fileman mkfile returned permissions %q; expected %q",
+			permissions,
+			"0644",
 		)
 	}
 

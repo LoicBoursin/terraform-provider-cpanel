@@ -143,6 +143,35 @@ deletion fails. Import recovers ownership for a valid provider marker. An
 imported directory without a marker remains non-owned and is preserved even if
 a marker appears later.
 
+Filesystem text file operations use UAPI `Fileman::list_files`,
+`Fileman::get_file_content`, and `Fileman::save_file_content`, plus API 2
+`Fileman::mkfile` and `Fileman::fileop`. Paths follow the same normalization
+and `public_html` restrictions as filesystem directories. Content must be
+valid UTF-8 without null bytes and cannot exceed 1 MiB. Terraform treats the
+content as sensitive state and verifies the exact returned byte size after
+every read.
+
+Each file created by Terraform has a hidden sibling named from the SHA-256
+digest of its managed path. The canonical JSON sidecar contains a random
+ownership token, the managed path, the exact content size, and its SHA-256
+digest; the token is also kept in Terraform private state. Updates recheck both
+the target and sidecar before writing. Destroy rechecks the private token,
+sidecar, target identity, size, and digest, then deletes the target before the
+sidecar. Terraform refuses deletion when content or ownership has changed.
+Import recovers a valid matching provider marker. An imported unmarked file
+remains non-owned permanently and is preserved even if a marker appears later.
+The same remote path must be managed by only one Terraform state; importing it
+into multiple independent states is unsupported, as for any single remote
+object.
+
+cPanel exposes no conditional Fileman write or delete operation. The provider
+serializes its own mutations and re-reads the exact target and sidecar
+immediately before each write or deletion, but an external mutation in the
+narrow interval after the final read cannot be made atomic. Avoid concurrent
+File Manager or API changes to a Terraform-managed path. On the certified
+cPanel 134 environment, API 2 `Fileman::fileop` with `op=unlink` is verified
+against ordinary files; link entries are not accepted as managed text files.
+
 Git repository operations use UAPI `VersionControl::retrieve`,
 `VersionControl::create`, `VersionControl::update`, and
 `VersionControl::delete`. Repository roots are normalized relative to the

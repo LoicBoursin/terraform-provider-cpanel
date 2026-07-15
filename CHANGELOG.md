@@ -61,6 +61,11 @@
   private Terraform ownership marker, safe import, non-destructive handling of
   unmarked directories, refusal to delete populated directories, and cPanel
   134 acceptance coverage.
+- Filesystem UTF-8 text file resource and data source below `public_html`, with
+  sensitive content, a 1 MiB limit, a private ownership token and path-specific
+  sidecar containing the exact size and SHA-256 digest, non-destructive import
+  of unmarked files, drift repair, refusal to delete changed content, and
+  cPanel 134 acceptance coverage.
 - MySQL and MariaDB user and database resources, matching data sources, import,
   drift recovery, privilege management, and cPanel 134 acceptance coverage.
 - Remote MySQL host resource and data source with IPv4, CIDR, wildcard, and

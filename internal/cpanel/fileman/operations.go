@@ -6,5 +6,6 @@ const (
 	operationGetUserInformation = "get_user_information"
 	operationListFiles          = "list_files"
 	operationMakeDirectory      = "mkdir"
+	operationMakeFile           = "mkfile"
 	operationSaveFileContent    = "save_file_content"
 )

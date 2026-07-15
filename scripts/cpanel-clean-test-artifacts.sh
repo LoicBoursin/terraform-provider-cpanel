@@ -25,6 +25,15 @@ for command in curl jq; do
   fi
 done
 
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256_utility='sha256sum'
+elif command -v shasum >/dev/null 2>&1; then
+  sha256_utility='shasum'
+else
+  printf 'Missing required command: sha256sum or shasum\n' >&2
+  exit 1
+fi
+
 host="${CPANEL_HOST%/}"
 authorization="Authorization: cpanel ${CPANEL_USERNAME}:${CPANEL_API_TOKEN}"
 response_file="$(mktemp)"
@@ -148,6 +157,44 @@ api2_post() {
   fi
 }
 
+sha256_stream() {
+  local output
+
+  if [[ "${sha256_utility}" == "sha256sum" ]]; then
+    output="$(sha256sum)"
+  else
+    output="$(shasum -a 256)"
+  fi
+
+  printf '%s\n' "${output%% *}"
+}
+
+delete_test_filesystem_path() {
+  local managed_path="$1"
+  local label="$2"
+
+  api2_post \
+    'Fileman' \
+    'fileop' \
+    "${label}" \
+    'op=unlink' \
+    "sourcefiles=${managed_path}" \
+    'doubledecode=0'
+  if ! jq -e \
+    '
+      (.cpanelresult.data | type) == "array"
+      and (.cpanelresult.data | length) == 1
+      and ((.cpanelresult.data[0].result | tostring) == "1")
+      and (.cpanelresult.data[0].dest == null)
+    ' \
+    "${response_file}" >/dev/null; then
+    printf '%s failed: %s\n' \
+      "${label}" \
+      "$(jq -c '.cpanelresult.data' "${response_file}")" >&2
+    exit 1
+  fi
+}
+
 purge_test_git_directory() {
   local directory="$1"
   local name="${directory##*/}"
@@ -265,6 +312,8 @@ deleted_domain_aliases=0
 enabled_modsecurity_domains=0
 deleted_subdomains=0
 deleted_domain_directories=0
+deleted_filesystem_text_files=0
+deleted_filesystem_text_file_markers=0
 deleted_directory_privacy_password_directories=0
 deleted_cron_lines=0
 
@@ -1300,6 +1349,220 @@ done <<<"${test_addon_domains}"
 get_request \
   'execute/Fileman/list_files?dir=public_html&show_hidden=1&limit=1000' \
   'Test domain directory inventory'
+test_filesystem_text_files="$(
+  jq -r \
+    '.data[]
+      | select(.type == "file")
+      | .file
+      | select(startswith("tfcpanel-fs-file-"))' \
+    "${response_file}"
+)"
+filesystem_text_file_marker_names="$(
+  jq -r \
+    '.data[]
+      | select(.type == "file")
+      | .file
+      | select(startswith(".terraform-cpanel-text-file-"))' \
+    "${response_file}"
+)"
+while IFS= read -r file_name; do
+  if [[ -z "${file_name}" ]]; then
+    continue
+  fi
+
+  managed_path="public_html/${file_name}"
+  marker_digest="$(printf '%s' "${managed_path}" | sha256_stream)"
+  marker_name=".terraform-cpanel-text-file-${marker_digest}"
+  marker_found=0
+  while IFS= read -r candidate_marker; do
+    if [[ "${candidate_marker}" == "${marker_name}" ]]; then
+      marker_found=1
+      break
+    fi
+  done <<<"${filesystem_text_file_marker_names}"
+  if [[ "${marker_found}" != "1" ]]; then
+    printf 'Refusing to delete unowned test filesystem text file: %s\n' \
+      "${managed_path}" >&2
+    exit 1
+  fi
+
+  get_request \
+    "execute/Fileman/get_file_content?dir=public_html&file=${marker_name}&from_charset=UTF-8&to_charset=UTF-8&update_html_document_encoding=0" \
+    "Read ownership marker for test filesystem text file ${managed_path}"
+  if ! jq -e \
+    --arg managed_path "${managed_path}" \
+    '
+      (.data.content | type) == "string"
+      and (.data.content | utf8bytelength) <= 4096
+      and (
+        .data.content as $raw
+        | (try ($raw | fromjson) catch null) as $marker
+        | ($marker | type) == "object"
+        and ($marker | keys | sort) == (
+          [
+            "content_sha256",
+            "kind",
+            "path",
+            "provider",
+            "size_bytes",
+            "token",
+            "version"
+          ] | sort
+        )
+        and $marker.provider == "terraform-provider-cpanel"
+        and $marker.version == 1
+        and $marker.kind == "text_file"
+        and $marker.path == $managed_path
+        and ($marker.token | type) == "string"
+        and ($marker.token | test("^[0-9a-f]{64}$"))
+        and ($marker.content_sha256 | type) == "string"
+        and ($marker.content_sha256 | test("^[0-9a-f]{64}$"))
+        and ($marker.size_bytes | type) == "number"
+        and ($marker.size_bytes | floor) == $marker.size_bytes
+        and $marker.size_bytes >= 0
+        and $marker.size_bytes <= 1048576
+        and $raw == ({
+          provider: $marker.provider,
+          version: $marker.version,
+          kind: $marker.kind,
+          path: $marker.path,
+          token: $marker.token,
+          content_sha256: $marker.content_sha256,
+          size_bytes: $marker.size_bytes
+        } | tojson)
+      )
+    ' \
+    "${response_file}" >/dev/null; then
+    printf 'Refusing to delete %s because marker %s is invalid\n' \
+      "${managed_path}" \
+      "${marker_name}" >&2
+    exit 1
+  fi
+  marker_content="$(jq -r '.data.content' "${response_file}")"
+  marker_content_sha256="$(
+    jq -r '.data.content | fromjson | .content_sha256' "${response_file}"
+  )"
+  marker_size_bytes="$(
+    jq -r '.data.content | fromjson | .size_bytes' "${response_file}"
+  )"
+
+  get_request \
+    "execute/Fileman/get_file_content?dir=public_html&file=${file_name}&from_charset=UTF-8&to_charset=UTF-8&update_html_document_encoding=0" \
+    "Read test filesystem text file ${managed_path}"
+  actual_content_sha256="$(jq -j '.data.content' "${response_file}" | sha256_stream)"
+  actual_size_bytes="$(jq -r '.data.content | utf8bytelength' "${response_file}")"
+  if [[
+    "${actual_content_sha256}" != "${marker_content_sha256}"
+    || "${actual_size_bytes}" != "${marker_size_bytes}"
+  ]]; then
+    printf 'Refusing to delete drifted test filesystem text file: %s\n' \
+      "${managed_path}" >&2
+    exit 1
+  fi
+
+  get_request \
+    "execute/Fileman/get_file_content?dir=public_html&file=${marker_name}&from_charset=UTF-8&to_charset=UTF-8&update_html_document_encoding=0" \
+    "Recheck ownership marker for test filesystem text file ${managed_path}"
+  if [[ "$(jq -r '.data.content' "${response_file}")" != "${marker_content}" ]]; then
+    printf 'Refusing to delete %s because marker %s changed\n' \
+      "${managed_path}" \
+      "${marker_name}" >&2
+    exit 1
+  fi
+
+  get_request \
+    "execute/Fileman/get_file_content?dir=public_html&file=${file_name}&from_charset=UTF-8&to_charset=UTF-8&update_html_document_encoding=0" \
+    "Recheck test filesystem text file ${managed_path}"
+  actual_content_sha256="$(jq -j '.data.content' "${response_file}" | sha256_stream)"
+  actual_size_bytes="$(jq -r '.data.content | utf8bytelength' "${response_file}")"
+  if [[
+    "${actual_content_sha256}" != "${marker_content_sha256}"
+    || "${actual_size_bytes}" != "${marker_size_bytes}"
+  ]]; then
+    printf 'Refusing to delete test filesystem text file changed during cleanup: %s\n' \
+      "${managed_path}" >&2
+    exit 1
+  fi
+
+  delete_test_filesystem_path \
+    "${managed_path}" \
+    "Delete test filesystem text file ${managed_path}"
+  deleted_filesystem_text_files=$((deleted_filesystem_text_files + 1))
+  delete_test_filesystem_path \
+    "public_html/${marker_name}" \
+    "Delete ownership marker for test filesystem text file ${managed_path}"
+  deleted_filesystem_text_file_markers=$((deleted_filesystem_text_file_markers + 1))
+done <<<"${test_filesystem_text_files}"
+
+get_request \
+  'execute/Fileman/list_files?dir=public_html&show_hidden=1&limit=1000' \
+  'Orphaned filesystem text file marker inventory'
+orphaned_filesystem_text_file_markers="$(
+  jq -r \
+    '.data[]
+      | select(.type == "file")
+      | .file
+      | select(startswith(".terraform-cpanel-text-file-"))' \
+    "${response_file}"
+)"
+remaining_filesystem_entry_names="$(jq -r '.data[].file' "${response_file}")"
+while IFS= read -r marker_name; do
+  if [[ -z "${marker_name}" ]]; then
+    continue
+  fi
+
+  get_request \
+    "execute/Fileman/get_file_content?dir=public_html&file=${marker_name}&from_charset=UTF-8&to_charset=UTF-8&update_html_document_encoding=0" \
+    "Read orphaned filesystem text file marker ${marker_name}"
+  if ! jq -e \
+    '
+      (.data.content | type) == "string"
+      and (
+        try (.data.content | fromjson) catch null
+        | type == "object"
+        and .provider == "terraform-provider-cpanel"
+        and .version == 1
+        and .kind == "text_file"
+        and (.path | type) == "string"
+        and (.path | startswith("public_html/tfcpanel-fs-file-"))
+      )
+    ' \
+    "${response_file}" >/dev/null; then
+    continue
+  fi
+
+  orphaned_path="$(jq -r '.data.content | fromjson | .path' "${response_file}")"
+  expected_marker_digest="$(printf '%s' "${orphaned_path}" | sha256_stream)"
+  if [[ "${marker_name}" != ".terraform-cpanel-text-file-${expected_marker_digest}" ]]; then
+    printf 'Refusing to delete mismatched filesystem text file marker: %s\n' \
+      "${marker_name}" >&2
+    exit 1
+  fi
+
+  orphaned_file_name="${orphaned_path##*/}"
+  orphaned_target_found=0
+  while IFS= read -r candidate_name; do
+    if [[ "${candidate_name}" == "${orphaned_file_name}" ]]; then
+      orphaned_target_found=1
+      break
+    fi
+  done <<<"${remaining_filesystem_entry_names}"
+  if [[ "${orphaned_target_found}" == "1" ]]; then
+    printf 'Refusing to delete marker %s while target %s still exists\n' \
+      "${marker_name}" \
+      "${orphaned_path}" >&2
+    exit 1
+  fi
+
+  delete_test_filesystem_path \
+    "public_html/${marker_name}" \
+    "Delete orphaned test filesystem text file marker ${marker_name}"
+  deleted_filesystem_text_file_markers=$((deleted_filesystem_text_file_markers + 1))
+done <<<"${orphaned_filesystem_text_file_markers}"
+
+get_request \
+  'execute/Fileman/list_files?dir=public_html&show_hidden=1&limit=1000' \
+  'Test domain directory inventory after filesystem text file cleanup'
 test_domain_directories="$(
   jq -r \
     '.data[]
@@ -1504,6 +1767,10 @@ printf '  test ModSecurity domains enabled: %d\n' \
   "${enabled_modsecurity_domains}"
 printf '  subdomains deleted: %d\n' "${deleted_subdomains}"
 printf '  test domain directories deleted: %d\n' "${deleted_domain_directories}"
+printf '  filesystem text files deleted: %d\n' \
+  "${deleted_filesystem_text_files}"
+printf '  filesystem text file markers deleted: %d\n' \
+  "${deleted_filesystem_text_file_markers}"
 printf '  Directory Privacy test password directories deleted: %d\n' \
   "${deleted_directory_privacy_password_directories}"
 printf '  cron lines deleted: %d\n' "${deleted_cron_lines}"

@@ -699,6 +699,22 @@ domain_test_directory_count="$(
       | select(startswith("tfcpanel-"))] | length' \
     "${response_file}"
 )"
+filesystem_text_file_test_count="$(
+  jq -r \
+    '[.data[]
+      | select(.type == "file")
+      | .file
+      | select(startswith("tfcpanel-fs-file-"))] | length' \
+    "${response_file}"
+)"
+filesystem_text_file_marker_count="$(
+  jq -r \
+    '[.data[]
+      | select(.type == "file")
+      | .file
+      | select(startswith(".terraform-cpanel-text-file-"))] | length' \
+    "${response_file}"
+)"
 
 directory_privacy_test_directory_count=0
 request \
@@ -806,6 +822,8 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${subdomain_test_count}" != "0"
     || "${modsecurity_test_disabled_count}" != "0"
     || "${domain_test_directory_count}" != "0"
+    || "${filesystem_text_file_test_count}" != "0"
+    || "${filesystem_text_file_marker_count}" != "0"
     || "${git_repository_test_directory_count}" != "0"
     || "${git_repository_test_trash_count}" != "0"
     || "${directory_privacy_test_directory_count}" != "0"
@@ -855,6 +873,10 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     printf '  disabled test ModSecurity domains: %s\n' \
       "${modsecurity_test_disabled_count}" >&2
     printf '  test domain directories: %s\n' "${domain_test_directory_count}" >&2
+    printf '  test filesystem text files: %s\n' \
+      "${filesystem_text_file_test_count}" >&2
+    printf '  filesystem text file markers: %s\n' \
+      "${filesystem_text_file_marker_count}" >&2
     printf '  test Git repository directories: %s\n' \
       "${git_repository_test_directory_count}" >&2
     printf '  test Git trash entries: %s\n' \
@@ -967,6 +989,10 @@ printf '  ModSecurity domains: %s (%s disabled, %s test-disabled)\n' \
   "${modsecurity_disabled_count}" \
   "${modsecurity_test_disabled_count}"
 printf '  test domain directories: %s\n' "${domain_test_directory_count}"
+printf '  test filesystem text files: %s\n' \
+  "${filesystem_text_file_test_count}"
+printf '  filesystem text file markers: %s\n' \
+  "${filesystem_text_file_marker_count}"
 printf '  test Git repository directories: %s\n' \
   "${git_repository_test_directory_count}"
 printf '  test Git trash entries: %s\n' \
