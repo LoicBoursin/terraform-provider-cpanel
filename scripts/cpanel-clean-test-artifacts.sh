@@ -239,6 +239,7 @@ deleted_redirects=0
 deleted_mime_types=0
 deleted_apache_handlers=0
 deleted_passenger_applications=0
+deleted_ssl_certificates=0
 deleted_git_repositories=0
 deleted_git_repository_directories=0
 deleted_git_repository_trash_entries=0
@@ -297,6 +298,128 @@ done < <(
       | select(startswith("tfcpanelpassenger"))' \
     "${response_file}"
 )
+
+get_request 'execute/SSL/list_certs' 'stored SSL certificate inventory'
+if ! jq -e \
+  --arg prefix 'tfcpanelsslcert' \
+  '
+    (.data | type == "array")
+    and all(
+      .data[];
+      (
+        (.friendly_name? | type) != "string"
+        or (.friendly_name | startswith($prefix) | not)
+      )
+      or (
+        ((.id? | type) == "string" or (.id? | type) == "number")
+        and ((.id | tostring | length) > 0)
+      )
+    )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'Stored SSL certificate inventory is incomplete\n' >&2
+  exit 1
+fi
+ssl_certificate_candidates="$(
+  jq -r \
+    '
+      .data[]
+      | select(
+          (.friendly_name? | type) == "string"
+          and (.friendly_name | startswith("tfcpanelsslcert"))
+        )
+      | [(.id | tostring), .friendly_name]
+      | @tsv
+    ' \
+    "${response_file}"
+)"
+while IFS=$'\t' read -r certificate_id friendly_name; do
+  if [[ -z "${certificate_id}" ]]; then
+    continue
+  fi
+  get_request 'execute/SSL/list_certs' \
+    "Re-read test SSL certificate ${friendly_name}"
+  if ! jq -e \
+    --arg id "${certificate_id}" \
+    --arg friendly_name "${friendly_name}" \
+    '
+      (.data | type == "array")
+      and (
+        [
+          .data[]
+          | select(
+              ((.id? | type) == "string" or (.id? | type) == "number")
+              and ((.id | tostring) == $id)
+            )
+        ] as $matches
+        | ($matches | length) == 1
+        and ($matches[0].friendly_name? == $friendly_name)
+        and (
+          $matches[0].domain_is_configured? == 0
+          or $matches[0].domain_is_configured? == "0"
+          or $matches[0].domain_is_configured? == false
+          or $matches[0].domain_is_configured? == "false"
+        )
+      )
+    ' \
+    "${response_file}" >/dev/null; then
+    printf 'Refusing to delete ambiguous or configured test SSL certificate: %s\n' \
+      "${friendly_name}" >&2
+    exit 1
+  fi
+
+  get_request 'execute/SSL/installed_hosts' \
+    "Re-read installed SSL hosts before deleting ${friendly_name}"
+  if ! jq -e \
+    '
+      (.data | type == "array")
+      and all(
+        .data[];
+        (.certificate? | type) == "object"
+        and (
+          (.certificate.id? | type) == "string"
+          or (.certificate.id? | type) == "number"
+        )
+        and ((.certificate.id | tostring | length) > 0)
+      )
+    ' \
+    "${response_file}" >/dev/null; then
+    printf 'Installed SSL host inventory is incomplete\n' >&2
+    exit 1
+  fi
+  if jq -e \
+    --arg id "${certificate_id}" \
+    '.data[] | select((.certificate.id | tostring) == $id)' \
+    "${response_file}" >/dev/null; then
+    printf 'Refusing to delete installed test SSL certificate: %s\n' \
+      "${friendly_name}" >&2
+    exit 1
+  fi
+
+  uapi_post \
+    'SSL' \
+    'delete_cert' \
+    "Delete test SSL certificate ${friendly_name}" \
+    "id=${certificate_id}"
+  deleted_ssl_certificates=$((deleted_ssl_certificates + 1))
+done <<<"${ssl_certificate_candidates}"
+
+get_request \
+  'execute/SSL/list_certs' \
+  'stored SSL certificate inventory after cleanup'
+if ! jq -e '(.data | type) == "array"' \
+  "${response_file}" >/dev/null; then
+  printf 'Stored SSL certificate inventory after cleanup is incomplete\n' >&2
+  exit 1
+fi
+if jq -e \
+  '.data[]
+    | .friendly_name
+    | select(startswith("tfcpanelsslcert"))' \
+  "${response_file}" >/dev/null; then
+  printf 'Test SSL certificate still exists after cleanup\n' >&2
+  exit 1
+fi
 
 get_request 'execute/VersionControl/retrieve' 'Git repository inventory'
 while IFS= read -r repository_root; do
@@ -981,6 +1104,8 @@ printf '  custom MIME types deleted: %d\n' "${deleted_mime_types}"
 printf '  Apache handlers deleted: %d\n' "${deleted_apache_handlers}"
 printf '  Passenger applications unregistered: %d\n' \
   "${deleted_passenger_applications}"
+printf '  stored SSL certificates deleted: %d\n' \
+  "${deleted_ssl_certificates}"
 printf '  Git repositories deleted: %d\n' "${deleted_git_repositories}"
 printf '  Git repository directories deleted: %d\n' \
   "${deleted_git_repository_directories}"

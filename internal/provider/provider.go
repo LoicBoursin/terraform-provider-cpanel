@@ -30,6 +30,7 @@ import (
 	"terraform-provider-cpanel/internal/cpanel/passenger"
 	"terraform-provider-cpanel/internal/cpanel/postgresql"
 	cpanelredirect "terraform-provider-cpanel/internal/cpanel/redirect"
+	"terraform-provider-cpanel/internal/cpanel/sslcertificate"
 	"terraform-provider-cpanel/internal/cpanel/versioncontrol"
 )
 
@@ -64,8 +65,8 @@ func (p *cpanelProvider) Metadata(_ context.Context, _ provider.MetadataRequest,
 // Schema defines the provider-level schema for configuration data.
 func (p *cpanelProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description:         "Inspect cPanel account capabilities and manage API tokens, locale, cron jobs, DNS records, Dynamic DNS domains, web domains, Passenger applications, ModSecurity settings, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
-		MarkdownDescription: "Inspect cPanel account capabilities and manage API tokens, locale, cron jobs, DNS records, Dynamic DNS domains, web domains, Passenger applications, ModSecurity settings, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		Description:         "Inspect cPanel account capabilities and manage API tokens, locale, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates, Passenger applications, ModSecurity settings, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		MarkdownDescription: "Inspect cPanel account capabilities and manage API tokens, locale, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates, Passenger applications, ModSecurity settings, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
 		Attributes: map[string]schema.Attribute{
 			"username": schema.StringAttribute{
 				Optional:            true,
@@ -222,6 +223,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	passengerClient := passenger.NewClient(client)
 	postgreSQLClient := postgresql.NewClient(client)
 	redirectClient := cpanelredirect.NewClient(client)
+	sslCertificateClient := sslcertificate.NewClient(client)
 	versionControlClient := versioncontrol.NewClient(client)
 
 	// Make the module clients available during DataSource and Resource
@@ -246,6 +248,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		"passenger":        passengerClient,
 		"postgresql":       postgreSQLClient,
 		"redirect":         redirectClient,
+		"sslcertificate":   sslCertificateClient,
 		"versioncontrol":   versionControlClient,
 	}
 	resp.ResourceData = map[string]interface{}{
@@ -267,6 +270,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		"passenger":        passengerClient,
 		"postgresql":       postgreSQLClient,
 		"redirect":         redirectClient,
+		"sslcertificate":   sslCertificateClient,
 		"versioncontrol":   versionControlClient,
 	}
 
@@ -305,6 +309,7 @@ func (p *cpanelProvider) DataSources(_ context.Context) []func() datasource.Data
 		NewPostgreSQLDatabaseDataSource,
 		NewPostgreSQLUserDataSource,
 		NewRedirectDataSource,
+		NewSSLCertificateDataSource,
 		NewSubdomainDataSource,
 	}
 }
@@ -340,6 +345,7 @@ func (p *cpanelProvider) Resources(_ context.Context) []func() resource.Resource
 		NewPostgreSQLDatabaseResource,
 		NewPostgreSQLUserResource,
 		NewRedirectResource,
+		NewSSLCertificateResource,
 		NewSubdomainResource,
 	}
 }

@@ -19,11 +19,11 @@ The CI and release configuration currently pins:
 Acceptance tests create and delete real API tokens, cron jobs, DNS records,
 Dynamic DNS domains, web domains, HTTP redirects, custom MIME types, email
 accounts, Apache handlers, directory indexes and privacy, Git repositories,
-Passenger applications, forwarders and autoresponders, FTP accounts, MySQL or
-MariaDB users and databases and remote hosts, PostgreSQL users and databases,
-and database grants. Locale acceptance tests temporarily change the account
-display locale and restore the value captured before the test. Use a dedicated
-cPanel test account.
+Passenger applications, stored public SSL certificates, forwarders and
+autoresponders, FTP accounts, MySQL or MariaDB users and databases and remote
+hosts, PostgreSQL users and databases, and database grants. Locale acceptance
+tests temporarily change the account display locale and restore the value
+captured before the test. Use a dedicated cPanel test account.
 
 The scripts load credentials from the file specified by `CPANEL_ENV_FILE`. When
 that variable is unset, they use:
@@ -64,7 +64,7 @@ The acceptance entry point performs the smoke test first. It refuses to run
 when any credential is missing or when the server does not expose API Tokens,
 Cron, DNS Zone Editor, Dynamic DNS, domains, Redirects, MIME Types, email and
 FTP accounts, Directory Privacy, Git Version Control, MySQL or MariaDB, and
-PostgreSQL, plus ModSecurity and Passenger Applications.
+PostgreSQL, plus ModSecurity, Passenger Applications, and SSL Manager.
 
 Before and after the suite, the acceptance entry point removes only resources
 that follow the test naming contract:
@@ -90,6 +90,10 @@ that follow the test naming contract:
   or cPanel trash;
 - Passenger applications beginning with `tfcpanelpassenger`; cleanup
   unregisters them before removing their matching Git fixture directories;
+- stored SSL certificate friendly names beginning with `tfcpanelsslcert`;
+  cleanup refuses to delete a matching certificate that cPanel reports as
+  configured or installed, and re-reads both inventories immediately before
+  each deletion;
 - email account local parts beginning with `tfcpanel`;
 - login, incoming-mail, and outgoing-mail restrictions on those test email
   accounts; cleanup refuses to delete a test mailbox with held outgoing mail;

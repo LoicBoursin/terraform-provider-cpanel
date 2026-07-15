@@ -33,7 +33,8 @@ subdomains, HTTP redirects, email accounts, forwarders and autoresponders, FTP
 accounts, directory indexes and privacy, custom MIME types, Apache handlers,
 Git repositories, website IP blocks, MySQL or MariaDB databases and users,
 remote MySQL hosts, PostgreSQL databases and users, imports, drift detection,
-per-domain ModSecurity status, email account suspension, and cleanup.
+per-domain ModSecurity status, stored SSL certificates, email account
+suspension, and cleanup.
 Certification also covers reading and changing the account display locale,
 including restoration of its pre-test value, plus Passenger application
 registration, updates, replacement, import, drift detection, remote deletion,
@@ -157,6 +158,27 @@ variable values are sensitive in Terraform state. cPanel cannot edit
 `base_uri`, so changing it replaces the registration. Destroy unregisters the
 application without deleting its directory or executing dependency commands;
 the provider deliberately never calls `PassengerApps::ensure_deps`.
+
+Stored SSL certificate operations use UAPI `SSL::list_certs`,
+`SSL::show_cert`, `SSL::upload_cert`, `SSL::set_cert_friendly_name`,
+`SSL::delete_cert`, and `SSL::installed_hosts`. The resource accepts and
+uploads only one public X.509 certificate. It never accepts, reads, sends, or
+stores a private key.
+
+The resource manages only certificates that cPanel reports as neither
+configured for a domain nor installed on an SSL virtual host. Import, update,
+and destroy fail safely if either condition is true. Changing the friendly
+name updates the existing certificate; changing the X.509 certificate replaces
+the resource. Equivalent PEM formatting is treated as the same certificate,
+and cPanel may reuse its deterministic certificate ID after remote deletion
+and recreation.
+
+Safety decisions require explicit certificate and installed-host inventory
+fields. Missing, `null`, or malformed status data fails the operation instead
+of being treated as an unconfigured or uninstalled certificate. If an upload
+fails without returning a trustworthy new certificate ID, Terraform does not
+guess ownership from a later inventory and therefore does not attempt
+destructive cleanup.
 
 DNS record reads and mutations use UAPI `DNS::parse_zone` and
 `DNS::mass_edit_zone`. Every mutation uses the current SOA serial and is

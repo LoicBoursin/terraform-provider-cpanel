@@ -106,7 +106,7 @@ if [[
 fi
 
 request 'execute/Features/list_features' 'feature check'
-for feature in addondomains apitokens blockers cron dynamicdns ftpaccts handlers indexmanager mime modsecurity mysql parkeddomains passengerapps popaccts postgres redirects subdomains version_control webprotect zoneedit; do
+for feature in addondomains apitokens blockers cron dynamicdns ftpaccts handlers indexmanager mime modsecurity mysql parkeddomains passengerapps popaccts postgres redirects sslmanager subdomains version_control webprotect zoneedit; do
   if [[ "$(jq -r --arg feature "${feature}" '.data[$feature] // 0' "${response_file}")" != "1" ]]; then
     printf 'Required cPanel feature is disabled: %s\n' "${feature}" >&2
     exit 1
@@ -190,6 +190,43 @@ passenger_application_test_count="$(
       | to_entries[]
       | .key
       | select(startswith("tfcpanelpassenger"))] | length' \
+    "${response_file}"
+)"
+
+request 'execute/SSL/list_certs' 'stored SSL certificate check'
+if ! jq -e \
+  '
+    (.data | type == "array")
+    and all(
+      .data[];
+      (
+        ((.id? | type) == "string" or (.id? | type) == "number")
+        and ((.id | tostring | length) > 0)
+        and (
+          .domain_is_configured? == 0
+          or .domain_is_configured? == "0"
+          or .domain_is_configured? == false
+          or .domain_is_configured? == "false"
+          or .domain_is_configured? == 1
+          or .domain_is_configured? == "1"
+          or .domain_is_configured? == true
+          or .domain_is_configured? == "true"
+        )
+      )
+    )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'Stored SSL certificate inventory is incomplete\n' >&2
+  exit 1
+fi
+ssl_certificate_count="$(jq -r '.data | length' "${response_file}")"
+ssl_certificate_test_count="$(
+  jq -r \
+    '[.data[]
+      | select(
+          (.friendly_name? | type) == "string"
+          and (.friendly_name | startswith("tfcpanelsslcert"))
+        )] | length' \
     "${response_file}"
 )"
 
@@ -498,6 +535,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${apache_handler_test_count}" != "0"
     || "${git_repository_test_count}" != "0"
     || "${passenger_application_test_count}" != "0"
+    || "${ssl_certificate_test_count}" != "0"
     || "${database_count}" != "0"
     || "${user_count}" != "0"
     || "${mysql_test_database_count}" != "0"
@@ -533,6 +571,8 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
       "${git_repository_test_count}" >&2
     printf '  test Passenger applications: %s\n' \
       "${passenger_application_test_count}" >&2
+    printf '  test stored SSL certificates: %s\n' \
+      "${ssl_certificate_test_count}" >&2
     printf '  PostgreSQL databases: %s\n' "${database_count}" >&2
     printf '  PostgreSQL users: %s\n' "${user_count}" >&2
     printf '  MySQL test databases: %s\n' "${mysql_test_database_count}" >&2
@@ -598,6 +638,9 @@ printf '  Git repositories: %s (%s test-managed)\n' \
 printf '  Passenger applications: %s (%s test-managed)\n' \
   "${passenger_application_count}" \
   "${passenger_application_test_count}"
+printf '  stored SSL certificates: %s (%s test-managed)\n' \
+  "${ssl_certificate_count}" \
+  "${ssl_certificate_test_count}"
 printf '  public_html directory index: %s\n' "${public_html_index_type}"
 printf '  public_html directory protected: %s\n' "${public_html_protected}"
 printf '  PostgreSQL databases: %s\n' "${database_count}"
