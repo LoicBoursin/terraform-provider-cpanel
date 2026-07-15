@@ -13,6 +13,27 @@ import (
 
 var featureNamePattern = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
+var userInformationFields = []string{
+	"user",
+	"home",
+	"domain",
+	"plan",
+	"theme",
+	"shell",
+	"maximum_addon_domains",
+	"maximum_databases",
+	"maximum_defer_fail_percentage",
+	"maximum_email_account_disk_quota",
+	"maximum_emails_per_hour",
+	"maximum_ftp_accounts",
+	"maximum_mail_accounts",
+	"maximum_mailing_lists",
+	"maximum_parked_domains",
+	"maximum_passenger_apps",
+	"maximum_subdomains",
+	"max_team_users",
+}
+
 type Client struct {
 	*cpanel.Client
 }
@@ -136,13 +157,18 @@ func (c *Client) getVersion(ctx context.Context) (string, error) {
 func (c *Client) getUserInformation(
 	ctx context.Context,
 ) (*apiUserInformation, error) {
+	parameters := make(map[string]string, len(userInformationFields))
+	for index, field := range userInformationFields {
+		parameters[fmt.Sprintf("name-%d", index)] = field
+	}
+
 	response := userInformationResponse{}
 	if err := c.ExecuteUAPIOperation(
 		ctx,
 		http.MethodGet,
 		cpanel.ModuleVariables,
 		operationGetUserInformation,
-		map[string]string{},
+		parameters,
 		&response,
 	); err != nil {
 		return nil, err

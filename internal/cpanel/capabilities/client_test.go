@@ -2,8 +2,11 @@ package capabilities
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"reflect"
 	"testing"
 
 	"terraform-provider-cpanel/internal/cpanel"
@@ -38,6 +41,40 @@ func TestClientGetsAccountCapabilities(t *testing.T) {
 				}},
 			})
 		case "/execute/Variables/get_user_information":
+			expectedFields := []string{
+				"user",
+				"home",
+				"domain",
+				"plan",
+				"theme",
+				"shell",
+				"maximum_addon_domains",
+				"maximum_databases",
+				"maximum_defer_fail_percentage",
+				"maximum_email_account_disk_quota",
+				"maximum_emails_per_hour",
+				"maximum_ftp_accounts",
+				"maximum_mail_accounts",
+				"maximum_mailing_lists",
+				"maximum_parked_domains",
+				"maximum_passenger_apps",
+				"maximum_subdomains",
+				"max_team_users",
+			}
+			expectedQuery := make(url.Values, len(expectedFields))
+			for index, field := range expectedFields {
+				expectedQuery.Set(
+					fmt.Sprintf("name-%d", index),
+					field,
+				)
+			}
+			if !reflect.DeepEqual(request.URL.Query(), expectedQuery) {
+				t.Errorf(
+					"query = %v; expected %v",
+					request.URL.Query(),
+					expectedQuery,
+				)
+			}
 			writeCapabilitiesJSON(t, response, map[string]any{
 				"status": 1,
 				"data": map[string]any{
@@ -59,8 +96,6 @@ func TestClientGetsAccountCapabilities(t *testing.T) {
 					"maximum_passenger_apps":           "4",
 					"maximum_subdomains":               "unlimited",
 					"max_team_users":                   "0",
-					"contact_email":                    "ignored@example.test",
-					"uuid":                             "ignored",
 				},
 			})
 		default:
