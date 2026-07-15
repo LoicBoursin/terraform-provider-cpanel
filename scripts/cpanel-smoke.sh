@@ -291,6 +291,52 @@ email_test_suspended_count="$(
       | select(.has_suspended == 1)] | length' \
     "${response_file}"
 )"
+email_accounts="$(jq -r '.data[].email' "${response_file}")"
+email_filter_count=0
+email_test_filter_count=0
+while IFS= read -r address; do
+  if [[ -z "${address}" ]]; then
+    continue
+  fi
+
+  request \
+    "execute/Email/list_filters?account=${address}" \
+    "Email filter check for ${address}"
+  if ! jq -e \
+    '
+      (.data | type == "array")
+      and all(
+        .data[];
+        (.filtername? | type) == "string"
+        and (.rules? | type) == "array"
+        and (.actions? | type) == "array"
+        and (
+          .enabled? == 0
+          or .enabled? == "0"
+          or .enabled? == false
+          or .enabled? == "false"
+          or .enabled? == 1
+          or .enabled? == "1"
+          or .enabled? == true
+          or .enabled? == "true"
+        )
+      )
+    ' \
+    "${response_file}" >/dev/null; then
+    printf 'Email filter inventory is incomplete for %s\n' \
+      "${address}" >&2
+    exit 1
+  fi
+  account_filter_count="$(jq -r '.data | length' "${response_file}")"
+  account_test_filter_count="$(
+    jq -r \
+      '[.data[].filtername
+        | select(startswith("tfcpanelfilter"))] | length' \
+      "${response_file}"
+  )"
+  email_filter_count=$((email_filter_count + account_filter_count))
+  email_test_filter_count=$((email_test_filter_count + account_test_filter_count))
+done <<<"${email_accounts}"
 
 request 'execute/Email/list_mail_domains' 'Email forwarder domain inventory'
 mail_domains="$(jq -r '.data[].domain' "${response_file}")"
@@ -543,6 +589,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${mysql_test_remote_host_count}" != "0"
     || "${email_test_account_count}" != "0"
     || "${email_test_suspended_count}" != "0"
+    || "${email_test_filter_count}" != "0"
     || "${email_test_forwarder_count}" != "0"
     || "${email_test_domain_forwarder_count}" != "0"
     || "${email_test_auto_responder_count}" != "0"
@@ -582,6 +629,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     printf '  email test accounts: %s\n' "${email_test_account_count}" >&2
     printf '  suspended email test accounts: %s\n' \
       "${email_test_suspended_count}" >&2
+    printf '  test email filters: %s\n' "${email_test_filter_count}" >&2
     printf '  test email forwarders: %s\n' "${email_test_forwarder_count}" >&2
     printf '  test email domain forwarders: %s\n' \
       "${email_test_domain_forwarder_count}" >&2
@@ -659,6 +707,9 @@ printf '  email accounts: %s (%s suspended, %s test-managed, %s test-suspended)\
   "${email_suspended_count}" \
   "${email_test_account_count}" \
   "${email_test_suspended_count}"
+printf '  email filters: %s (%s test-managed)\n' \
+  "${email_filter_count}" \
+  "${email_test_filter_count}"
 printf '  email forwarders: %s (%s test-managed)\n' \
   "${email_forwarder_count}" \
   "${email_test_forwarder_count}"

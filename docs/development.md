@@ -19,11 +19,12 @@ The CI and release configuration currently pins:
 Acceptance tests create and delete real API tokens, cron jobs, DNS records,
 Dynamic DNS domains, web domains, HTTP redirects, custom MIME types, email
 accounts, Apache handlers, directory indexes and privacy, Git repositories,
-Passenger applications, stored public SSL certificates, forwarders and
-autoresponders, FTP accounts, MySQL or MariaDB users and databases and remote
-hosts, PostgreSQL users and databases, and database grants. Locale acceptance
-tests temporarily change the account display locale and restore the value
-captured before the test. Use a dedicated cPanel test account.
+Passenger applications, stored public SSL certificates, email filters,
+forwarders and autoresponders, FTP accounts, MySQL or MariaDB users and
+databases and remote hosts, PostgreSQL users and databases, and database
+grants. Locale acceptance tests temporarily change the account display locale
+and restore the value captured before the test. Use a dedicated cPanel test
+account.
 
 The scripts load credentials from the file specified by `CPANEL_ENV_FILE`. When
 that variable is unset, they use:
@@ -97,6 +98,9 @@ that follow the test naming contract:
 - email account local parts beginning with `tfcpanel`;
 - login, incoming-mail, and outgoing-mail restrictions on those test email
   accounts; cleanup refuses to delete a test mailbox with held outgoing mail;
+- user-level email filter names beginning with `tfcpanelfilter`, only on test
+  mailboxes whose local parts begin with `tfcpanelfilter`; cleanup deletes
+  these filters before deleting their mailboxes;
 - email forwarder source local parts beginning with `tfcpanelfwd`;
 - email domain forwarder destinations beginning with `tfcpaneldomainfwd`;
 - email autoresponder local parts beginning with `tfcpanelauto`;

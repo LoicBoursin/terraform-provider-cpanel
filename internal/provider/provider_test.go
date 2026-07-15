@@ -368,6 +368,29 @@ func testAccEmailAutoResponderAddress(t *testing.T, kind string) string {
 	)
 }
 
+func testAccEmailFilterAddress(t *testing.T, kind string) string {
+	t.Helper()
+
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("TF_ACC must be set for acceptance tests")
+	}
+
+	return fmt.Sprintf(
+		"tfcpanelfilter%s%s@%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
+		testAccMainDomain(t),
+	)
+}
+
+func testAccEmailFilterName(kind string) string {
+	return fmt.Sprintf(
+		"tfcpanelfilter%s%s",
+		strings.ToLower(kind),
+		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
+	)
+}
+
 func testAccFTPUsername(t *testing.T, kind string) string {
 	t.Helper()
 

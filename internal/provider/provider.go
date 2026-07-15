@@ -65,8 +65,8 @@ func (p *cpanelProvider) Metadata(_ context.Context, _ provider.MetadataRequest,
 // Schema defines the provider-level schema for configuration data.
 func (p *cpanelProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description:         "Inspect cPanel account capabilities and manage API tokens, locale, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates, Passenger applications, ModSecurity settings, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
-		MarkdownDescription: "Inspect cPanel account capabilities and manage API tokens, locale, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates, Passenger applications, ModSecurity settings, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		Description:         "Inspect cPanel account capabilities and manage API tokens, locale, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates, Passenger applications, ModSecurity settings, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, filters, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		MarkdownDescription: "Inspect cPanel account capabilities and manage API tokens, locale, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates, Passenger applications, ModSecurity settings, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, filters, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
 		Attributes: map[string]schema.Attribute{
 			"username": schema.StringAttribute{
 				Optional:            true,
@@ -295,6 +295,7 @@ func (p *cpanelProvider) DataSources(_ context.Context) []func() datasource.Data
 		NewEmailAccountSuspensionDataSource,
 		NewEmailAutoResponderDataSource,
 		NewEmailDomainForwarderDataSource,
+		NewEmailFilterDataSource,
 		NewEmailForwarderDataSource,
 		NewFTPAccountDataSource,
 		NewGitRepositoryDataSource,
@@ -331,6 +332,7 @@ func (p *cpanelProvider) Resources(_ context.Context) []func() resource.Resource
 		NewEmailAccountSuspensionResource,
 		NewEmailAutoResponderResource,
 		NewEmailDomainForwarderResource,
+		NewEmailFilterResource,
 		NewEmailForwarderResource,
 		NewFTPAccountResource,
 		NewGitRepositoryResource,

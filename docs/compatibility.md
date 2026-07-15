@@ -34,7 +34,7 @@ accounts, directory indexes and privacy, custom MIME types, Apache handlers,
 Git repositories, website IP blocks, MySQL or MariaDB databases and users,
 remote MySQL hosts, PostgreSQL databases and users, imports, drift detection,
 per-domain ModSecurity status, stored SSL certificates, email account
-suspension, and cleanup.
+suspension, user-level email filters, and cleanup.
 Certification also covers reading and changing the account display locale,
 including restoration of its pre-test value, plus Passenger application
 registration, updates, replacement, import, drift detection, remote deletion,
@@ -205,6 +205,27 @@ queue is an imperative delivery action. Removing the resource unsuspends the
 three managed restrictions without deleting the mailbox or releasing held
 mail.
 
+User-level email filter operations use UAPI `Email::list_filters`,
+`Email::get_filter`, `Email::store_filter`, `Email::enable_filter`,
+`Email::disable_filter`, and `Email::delete_filter`. The mailbox must already
+exist. Account-level filters are intentionally outside the resource because
+omitting the `account` parameter changes cPanel's ownership scope.
+
+The resource preserves rule and action order, supports cPanel's string and
+numeric match operators, and limits actions to `deliver`, `fail`, and
+`finish`. It rejects `save` and `pipe`, which can write files or execute
+commands. The read-only data source can still observe those external actions
+without taking ownership. cPanel expands `save` destinations in
+`list_filters` but returns logical mailbox-relative paths in `get_filter`; the
+provider canonicalizes that known difference while continuing to verify both
+inventories.
+
+Each complete filter read or mutation sequence is serialized per mailbox.
+Creating a resource refuses an existing filter instead of taking ownership
+implicitly, and rollback deletion requires the complete definition and
+enabled state to match the attempted state. Import identifiers use
+`account|name`.
+
 The email forwarder resource manages one direct source-to-destination email
 address pair. cPanel permits multiple destinations for the same source address,
 so both addresses form the resource identity. Domain-level forwarders, failure
@@ -276,7 +297,9 @@ certified environment.
 ## Concurrency
 
 The provider serializes all cPanel requests through its shared client. Users do
-not need to disable Terraform parallelism.
+not need to disable Terraform parallelism. Email filters additionally lock the
+complete read, mutate, verify, and rollback sequence per mailbox so parallel
+filter resources cannot overwrite one another between individual API calls.
 
 Each HTTP request has a 90-second timeout and honors Terraform context
 cancellation. The certified environment can take more than 30 seconds to

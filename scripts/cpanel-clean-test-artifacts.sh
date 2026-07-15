@@ -249,6 +249,7 @@ deleted_mysql_databases=0
 deleted_mysql_users=0
 deleted_mysql_remote_hosts=0
 deleted_email_accounts=0
+deleted_email_filters=0
 unsuspended_email_restrictions=0
 deleted_email_forwarders=0
 deleted_email_domain_forwarders=0
@@ -606,6 +607,88 @@ done < <(
 get_request \
   'execute/Email/list_pops_with_disk?skip_main=1&no_disk=1&get_restrictions=1' \
   'Email account inventory'
+email_account_candidates="$(
+  jq -r \
+    '.data[]
+      | select(.email | startswith("tfcpanel"))
+      | [
+          .email,
+          (.suspended_login // 0),
+          (.suspended_incoming // 0),
+          (.suspended_outgoing // 0),
+          (.hold_outgoing // 0)
+        ]
+      | @tsv' \
+    "${response_file}"
+)"
+email_filter_accounts="$(
+  jq -r \
+    '.data[].email | select(startswith("tfcpanelfilter"))' \
+    "${response_file}"
+)"
+while IFS= read -r address; do
+  if [[ -z "${address}" ]]; then
+    continue
+  fi
+
+  get_request \
+    "execute/Email/list_filters?account=${address}" \
+    "Email filter inventory for ${address}"
+  if ! jq -e \
+    '
+      (.data | type == "array")
+      and all(
+        .data[];
+        (.filtername? | type) == "string"
+        and (.rules? | type) == "array"
+        and (.actions? | type) == "array"
+        and (
+          .enabled? == 0
+          or .enabled? == "0"
+          or .enabled? == false
+          or .enabled? == "false"
+          or .enabled? == 1
+          or .enabled? == "1"
+          or .enabled? == true
+          or .enabled? == "true"
+        )
+      )
+    ' \
+    "${response_file}" >/dev/null; then
+    printf 'Email filter inventory is incomplete for %s\n' \
+      "${address}" >&2
+    exit 1
+  fi
+
+  test_filter_names="$(
+    jq -r \
+      '.data[].filtername | select(startswith("tfcpanelfilter"))' \
+      "${response_file}"
+  )"
+  while IFS= read -r filter_name; do
+    if [[ -z "${filter_name}" ]]; then
+      continue
+    fi
+    uapi_post \
+      'Email' \
+      'delete_filter' \
+      "Delete test email filter ${filter_name} for ${address}" \
+      "account=${address}" \
+      "filtername=${filter_name}"
+    deleted_email_filters=$((deleted_email_filters + 1))
+  done <<<"${test_filter_names}"
+
+  get_request \
+    "execute/Email/list_filters?account=${address}" \
+    "Email filter inventory after cleanup for ${address}"
+  if jq -e \
+    '.data[].filtername | select(startswith("tfcpanelfilter"))' \
+    "${response_file}" >/dev/null; then
+    printf 'Test email filter still exists for %s\n' "${address}" >&2
+    exit 1
+  fi
+done <<<"${email_filter_accounts}"
+
 while IFS=$'\t' read -r address login incoming outgoing held; do
   if [[ -z "${address}" ]]; then
     continue
@@ -641,20 +724,7 @@ while IFS=$'\t' read -r address login incoming outgoing held; do
   fi
   uapi_post 'Email' 'delete_pop' "Delete test email account ${address}" "email=${address}"
   deleted_email_accounts=$((deleted_email_accounts + 1))
-done < <(
-  jq -r \
-    '.data[]
-      | select(.email | startswith("tfcpanel"))
-      | [
-          .email,
-          (.suspended_login // 0),
-          (.suspended_incoming // 0),
-          (.suspended_outgoing // 0),
-          (.hold_outgoing // 0)
-        ]
-      | @tsv' \
-    "${response_file}"
-)
+done <<<"${email_account_candidates}"
 
 get_request 'execute/Email/list_mail_domains' 'Email forwarder domain inventory'
 mail_domains="$(jq -r '.data[].domain' "${response_file}")"
@@ -1118,6 +1188,7 @@ printf '  MySQL users deleted: %d\n' "${deleted_mysql_users}"
 printf '  remote MySQL hosts deleted: %d\n' "${deleted_mysql_remote_hosts}"
 printf '  email account restrictions unsuspended: %d\n' \
   "${unsuspended_email_restrictions}"
+printf '  email filters deleted: %d\n' "${deleted_email_filters}"
 printf '  email accounts deleted: %d\n' "${deleted_email_accounts}"
 printf '  email forwarders deleted: %d\n' "${deleted_email_forwarders}"
 printf '  email domain forwarders deleted: %d\n' \
