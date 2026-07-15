@@ -45,7 +45,7 @@ func (d *cronJobDataSource) Configure(_ context.Context, req datasource.Configur
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Unexpected Cron Client Type",
-			fmt.Sprintf("Expected *postgresql.Client, got: %T. Please report this issue to the provider developers.", providerData["postgresql"]),
+			fmt.Sprintf("Expected *cron.Client, got: %T. Please report this issue to the provider developers.", providerData["cron"]),
 		)
 		return
 	}
@@ -99,7 +99,7 @@ func (d *cronJobDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 				MarkdownDescription: "The month of the year to run the cron job. Expressions such as */3 are allowed.",
 				Validators:          cronMonthValidators(),
 			},
-			"linekey": schema.Int64Attribute{
+			"linekey": schema.StringAttribute{
 				Computed:            true,
 				Description:         "The matching cPanel cron line key.",
 				MarkdownDescription: "The matching cPanel cron line key.",

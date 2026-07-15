@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+
+	"terraform-provider-cpanel/internal/cpanel"
 )
 
 var (
 	ErrCronJobNotFound        = errors.New("cron job not found")
 	ErrCronJobChanged         = errors.New("cron job changed")
 	ErrCronJobCreateAmbiguous = errors.New("cron job creation is ambiguous")
+	ErrCronJobUpdateAmbiguous = errors.New("cron job update is ambiguous")
 )
 
 func (c *Client) CreateCronJob(
@@ -125,6 +128,7 @@ func (c *Client) UpdateCronJob(
 	c.mutationMu.Lock()
 	defer c.mutationMu.Unlock()
 
+	var before *CronJobDataSourceModel
 	if input.Expected != nil {
 		cronJobs, err := c.GetCronJobs(ctx)
 		if err != nil {
@@ -133,6 +137,7 @@ func (c *Client) UpdateCronJob(
 				err,
 			)
 		}
+		before = cronJobs
 		current := cronJobByLineKey(cronJobs, input.LineKey)
 		if current == nil {
 			return nil, fmt.Errorf(
@@ -151,7 +156,7 @@ func (c *Client) UpdateCronJob(
 	}
 
 	cronJob := CronJobCreateDataSourceModel{}
-	err := c.executeMutation(ctx, OperationEditLine, map[string]string{
+	mutationErr := c.executeMutation(ctx, OperationEditLine, map[string]string{
 		"linekey": input.LineKey,
 		"weekday": input.Weekday,
 		"command": input.Command,
@@ -161,11 +166,112 @@ func (c *Client) UpdateCronJob(
 		"month":   input.Month,
 	}, &cronJob)
 
-	if err != nil {
-		return nil, err
+	if mutationErr == nil &&
+		len(cronJob.CpanelResult.Data) == 1 &&
+		cronJob.CpanelResult.Data[0].Status == 1 &&
+		cronJob.CpanelResult.Data[0].LineKey != "" {
+		return &cronJob, nil
+	}
+	if mutationErr != nil && cronMutationErrorIsDeterministic(mutationErr) {
+		return nil, mutationErr
 	}
 
-	return &cronJob, nil
+	after, readErr := c.GetCronJobs(ctx)
+	if readErr != nil {
+		if mutationErr != nil {
+			return nil, fmt.Errorf(
+				"update cron job: %w; reconcile update: %v",
+				mutationErr,
+				readErr,
+			)
+		}
+
+		return &cronJob, fmt.Errorf(
+			"reconcile cron job update: %w",
+			readErr,
+		)
+	}
+
+	current := cronJobByLineKey(after, input.LineKey)
+	if current != nil &&
+		current.CronJobDetailsModel == input.CronJobDetailsModel {
+		return reconciledCronMutation(current.LineKey), nil
+	}
+
+	if before == nil {
+		if mutationErr != nil {
+			return nil, errors.Join(
+				mutationErr,
+				errors.New("cannot safely reconcile the cron update without a pre-update inventory"),
+			)
+		}
+
+		return &cronJob, errors.New(
+			"cannot safely reconcile the cron update without a pre-update inventory",
+		)
+	}
+
+	beforeLineKeys := make(map[CronLineKey]struct{})
+	for _, existing := range before.CpanelResult.Data {
+		if existing.Type == "command" {
+			beforeLineKeys[existing.LineKey] = struct{}{}
+		}
+	}
+	candidates := make([]CronJobDataSourceDataModel, 0, 1)
+	for _, existing := range after.CpanelResult.Data {
+		if existing.Type != "command" ||
+			existing.CronJobDetailsModel != input.CronJobDetailsModel {
+			continue
+		}
+		if _, existed := beforeLineKeys[existing.LineKey]; !existed {
+			candidates = append(candidates, existing)
+		}
+	}
+	if len(candidates) == 1 {
+		return reconciledCronMutation(candidates[0].LineKey), nil
+	}
+	if len(candidates) > 1 {
+		return nil, fmt.Errorf(
+			"%w: found %d newly updated matching entries",
+			ErrCronJobUpdateAmbiguous,
+			len(candidates),
+		)
+	}
+	if mutationErr != nil {
+		return nil, mutationErr
+	}
+
+	return &cronJob, errors.New(
+		"cPanel returned an incomplete cron update response and the requested state was not found",
+	)
+}
+
+func reconciledCronMutation(lineKey CronLineKey) *CronJobCreateDataSourceModel {
+	return &CronJobCreateDataSourceModel{
+		CpanelResult: CronJobCreateCpanelResultModel{
+			Data: []CronJobCreateDataSourceDataModel{{
+				LineKey: lineKey,
+				CronJobCommonDataSourceDataModel: CronJobCommonDataSourceDataModel{
+					StatusMsg: "reconciled",
+					Status:    1,
+					Result:    1,
+				},
+			}},
+		},
+	}
+}
+
+func cronMutationErrorIsDeterministic(err error) bool {
+	var apiError *cpanel.APIError
+	if errors.As(err, &apiError) {
+		return true
+	}
+
+	var httpError *cpanel.HTTPError
+
+	return errors.As(err, &httpError) &&
+		httpError.StatusCode >= 400 &&
+		httpError.StatusCode < 500
 }
 
 func (c *Client) GetCronJobs(ctx context.Context) (*CronJobDataSourceModel, error) {

@@ -1,11 +1,37 @@
 package provider
 
 import (
+	"context"
 	"fmt"
+	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
+
+func TestCronJobDataSourceRejectsInvalidClientType(t *testing.T) {
+	t.Parallel()
+
+	dataSource := &cronJobDataSource{}
+	response := &datasource.ConfigureResponse{}
+	dataSource.Configure(
+		context.Background(),
+		datasource.ConfigureRequest{
+			ProviderData: map[string]interface{}{"cron": "invalid"},
+		},
+		response,
+	)
+
+	if !response.Diagnostics.HasError() {
+		t.Fatal("Configure() returned no error")
+	}
+	detail := response.Diagnostics.Errors()[0].Detail()
+	if !strings.Contains(detail, "Expected *cron.Client") ||
+		!strings.Contains(detail, "got: string") {
+		t.Fatalf("Configure() diagnostic detail = %q", detail)
+	}
+}
 
 func TestAccCronJobDataSource(t *testing.T) {
 	command := testAccCronCommand("data-source")
