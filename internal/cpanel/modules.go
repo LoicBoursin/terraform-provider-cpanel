@@ -3,6 +3,8 @@ package cpanel
 const (
 	ModuleAddonDomain      = "AddonDomain"
 	ModuleBlockIP          = "BlockIP"
+	ModuleCCS              = "CCS"
+	ModuleCPDAVD           = "CPDAVD"
 	ModuleCron             = "Cron"
 	ModuleDenyIP           = "DenyIp"
 	ModuleDirectoryIndexes = "DirectoryIndexes"

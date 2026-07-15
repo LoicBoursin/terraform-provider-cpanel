@@ -13,6 +13,7 @@ import (
 	"terraform-provider-cpanel/internal/cpanel"
 	"terraform-provider-cpanel/internal/cpanel/apachehandler"
 	"terraform-provider-cpanel/internal/cpanel/apitoken"
+	cpanelcalendar "terraform-provider-cpanel/internal/cpanel/calendar"
 	"terraform-provider-cpanel/internal/cpanel/capabilities"
 	"terraform-provider-cpanel/internal/cpanel/cron"
 	"terraform-provider-cpanel/internal/cpanel/ddns"
@@ -65,8 +66,8 @@ func (p *cpanelProvider) Metadata(_ context.Context, _ provider.MetadataRequest,
 // Schema defines the provider-level schema for configuration data.
 func (p *cpanelProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description:         "Inspect cPanel account capabilities and manage API tokens, locale, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates, Passenger applications, ModSecurity settings, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, filters, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
-		MarkdownDescription: "Inspect cPanel account capabilities and manage API tokens, locale, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates, Passenger applications, ModSecurity settings, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, filters, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		Description:         "Inspect cPanel account capabilities and manage API tokens, locale, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates, Passenger applications, ModSecurity settings, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, calendar delegations, filters, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		MarkdownDescription: "Inspect cPanel account capabilities and manage API tokens, locale, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates, Passenger applications, ModSecurity settings, HTTP redirects, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, calendar delegations, filters, forwarders, autoresponders, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
 		Attributes: map[string]schema.Attribute{
 			"username": schema.StringAttribute{
 				Optional:            true,
@@ -206,6 +207,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	// Initialize module clients
 	apacheHandlerClient := apachehandler.NewClient(client)
 	apiTokenClient := apitoken.NewClient(client)
+	calendarClient := cpanelcalendar.NewClient(client)
 	capabilitiesClient := capabilities.NewClient(client)
 	cronClient := cron.NewClient(client)
 	directoryIndexClient := directoryindex.NewClient(client)
@@ -231,6 +233,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	resp.DataSourceData = map[string]interface{}{
 		"apachehandler":    apacheHandlerClient,
 		"apitoken":         apiTokenClient,
+		"calendar":         calendarClient,
 		"capabilities":     capabilitiesClient,
 		"cron":             cronClient,
 		"directoryindex":   directoryIndexClient,
@@ -254,6 +257,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	resp.ResourceData = map[string]interface{}{
 		"apachehandler":    apacheHandlerClient,
 		"apitoken":         apiTokenClient,
+		"calendar":         calendarClient,
 		"cron":             cronClient,
 		"directoryindex":   directoryIndexClient,
 		"directoryprivacy": directoryPrivacyClient,
@@ -284,6 +288,7 @@ func (p *cpanelProvider) DataSources(_ context.Context) []func() datasource.Data
 		NewAddonDomainDataSource,
 		NewApacheHandlerDataSource,
 		NewAPITokenDataSource,
+		NewCalendarDelegateDataSource,
 		NewCronJobDataSource,
 		NewDirectoryIndexDataSource,
 		NewDirectoryPrivacyDataSource,
@@ -321,6 +326,7 @@ func (p *cpanelProvider) Resources(_ context.Context) []func() resource.Resource
 		NewAddonDomainResource,
 		NewApacheHandlerResource,
 		NewAPITokenResource,
+		NewCalendarDelegateResource,
 		NewCronJobResource,
 		NewDirectoryIndexResource,
 		NewDirectoryPrivacyResource,

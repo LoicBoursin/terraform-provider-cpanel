@@ -20,7 +20,7 @@ Acceptance tests create and delete real API tokens, cron jobs, DNS records,
 Dynamic DNS domains, web domains, HTTP redirects, custom MIME types, email
 accounts, Apache handlers, directory indexes and privacy, Git repositories,
 Passenger applications, stored public SSL certificates, email filters,
-forwarders and autoresponders, FTP accounts, MySQL or MariaDB users and
+calendar delegations, forwarders and autoresponders, FTP accounts, MySQL or MariaDB users and
 databases and remote hosts, PostgreSQL users and databases, and database
 grants. Locale acceptance tests temporarily change the account display locale
 and restore the value captured before the test. Use a dedicated cPanel test
@@ -96,6 +96,9 @@ that follow the test naming contract:
   configured or installed, and re-reads both inventories immediately before
   each deletion;
 - email account local parts beginning with `tfcpanel`;
+- CalDAV calendar delegations whose delegator or delegatee local part begins
+  with `tfcpanelcal`; cleanup removes these relationships before deleting
+  either mailbox;
 - login, incoming-mail, and outgoing-mail restrictions on those test email
   accounts; cleanup refuses to delete a test mailbox with held outgoing mail;
 - user-level email filter names beginning with `tfcpanelfilter`, only on test

@@ -34,7 +34,7 @@ accounts, directory indexes and privacy, custom MIME types, Apache handlers,
 Git repositories, website IP blocks, MySQL or MariaDB databases and users,
 remote MySQL hosts, PostgreSQL databases and users, imports, drift detection,
 per-domain ModSecurity status, stored SSL certificates, email account
-suspension, user-level email filters, and cleanup.
+suspension, default-calendar delegation, user-level email filters, and cleanup.
 Certification also covers reading and changing the account display locale,
 including restoration of its pre-test value, plus Passenger application
 registration, updates, replacement, import, drift detection, remote deletion,
@@ -193,6 +193,32 @@ the `SVCB` capability function.
 The email account resource deliberately uses the email-service API instead of
 creating a cPanel subaccount. It manages only the mailbox and cannot
 accidentally enable or delete FTP and WebDisk services that share a username.
+
+Calendar delegation reads use `CPDAVD::list_users` and
+`CPDAVD::list_delegates` on the certified cPanel 134 environment. cPanel 120
+and later use `CPDAVD`; older releases can expose the legacy `CCS` module.
+The client probes `CPDAVD` first and falls back to `CCS` only when cPanel
+explicitly reports that `CPDAVD` is unavailable. It never retries an ambiguous
+write through another module. The `CPDAVD` path is acceptance-tested on cPanel
+134; the legacy `CCS` response and mutation formats are covered by unit tests
+but are not acceptance-certified.
+
+The resource manages only the default collection identifier `calendar`.
+Create and update require both complete mailbox addresses to expose that
+CalDAV collection. Terraform refuses an existing relationship unless it is
+imported explicitly, verifies every access change, and removes only the exact
+delegator, calendar, and delegatee identity it owns. Import identifiers use
+`delegator|calendar|delegatee`.
+
+The provider serializes mutations for the same delegation identity within one
+process and performs exact state reads around create, update, deletion, and
+rollback. cPanel does not expose conditional delegation mutations, so an
+out-of-band change in the narrow interval between a read and its following
+write cannot be made atomic. In particular, after an ambiguous transport
+failure, an identical relationship created concurrently outside Terraform may
+be indistinguishable from the attempted creation. Deterministic cPanel API and
+HTTP errors are never treated as successful creation and never authorize a
+create rollback.
 
 Email account suspension reads use `Email::list_pops_with_disk` with
 `get_restrictions=1`. On the certified cPanel 134 environment,

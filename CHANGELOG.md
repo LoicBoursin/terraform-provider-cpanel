@@ -45,6 +45,10 @@
 - Email account suspension resource and data source with independently managed
   login, incoming-mail, and outgoing-mail restrictions, import, drift
   recovery, safe reset on removal, and cPanel 134 acceptance coverage.
+- Calendar delegate resource and data source for the default cPanel CalDAV
+  calendar, with read-only or read/write access, composite import, drift
+  recovery, strict ownership checks, current CPDAVD support, unit-tested legacy
+  CCS compatibility, and cPanel 134 CPDAVD acceptance coverage.
 - User-level email filter resource and data source with ordered rules and
   actions, enable or disable updates, rename, import, drift recovery,
   mailbox-scoped mutation serialization, safe-action enforcement, read-only

@@ -249,6 +249,7 @@ deleted_mysql_databases=0
 deleted_mysql_users=0
 deleted_mysql_remote_hosts=0
 deleted_email_accounts=0
+deleted_calendar_delegates=0
 deleted_email_filters=0
 unsuspended_email_restrictions=0
 deleted_email_forwarders=0
@@ -626,6 +627,81 @@ email_filter_accounts="$(
     '.data[].email | select(startswith("tfcpanelfilter"))' \
     "${response_file}"
 )"
+
+get_request \
+  'execute/CPDAVD/list_delegates' \
+  'Calendar delegate inventory'
+if ! jq -e \
+  '
+    (.data | type == "array")
+    and all(
+      .data[];
+      (.delegator? | type) == "string"
+      and (.delegatee? | type) == "string"
+      and (.calendar? | type) == "string"
+      and (
+        .readonly? == 0
+        or .readonly? == "0"
+        or .readonly? == false
+        or .readonly? == "false"
+        or .readonly? == 1
+        or .readonly? == "1"
+        or .readonly? == true
+        or .readonly? == "true"
+      )
+    )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'Calendar delegate inventory is incomplete\n' >&2
+  exit 1
+fi
+calendar_delegate_candidates="$(
+  jq -r \
+    '
+      .data[]
+      | select(
+          (.delegator | split("@")[0] | startswith("tfcpanelcal"))
+          or (.delegatee | split("@")[0] | startswith("tfcpanelcal"))
+        )
+      | [.delegator, .calendar, .delegatee]
+      | @tsv
+    ' \
+    "${response_file}"
+)"
+while IFS=$'\t' read -r delegator calendar delegatee; do
+  if [[
+    -z "${delegator}"
+    || -z "${calendar}"
+    || -z "${delegatee}"
+  ]]; then
+    continue
+  fi
+  uapi_post \
+    'CPDAVD' \
+    'remove_delegate' \
+    "Delete test calendar delegate ${delegator} to ${delegatee}" \
+    "delegator=${delegator}" \
+    "calendar=${calendar}" \
+    "delegatee=${delegatee}"
+  deleted_calendar_delegates=$((deleted_calendar_delegates + 1))
+done <<<"${calendar_delegate_candidates}"
+
+get_request \
+  'execute/CPDAVD/list_delegates' \
+  'Calendar delegate inventory after cleanup'
+if jq -e \
+  '
+    .data[]
+    | select(
+        (.delegator | split("@")[0] | startswith("tfcpanelcal"))
+        or (.delegatee | split("@")[0] | startswith("tfcpanelcal"))
+      )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'Test calendar delegate still exists\n' >&2
+  exit 1
+fi
+
 while IFS= read -r address; do
   if [[ -z "${address}" ]]; then
     continue
@@ -1188,6 +1264,8 @@ printf '  MySQL users deleted: %d\n' "${deleted_mysql_users}"
 printf '  remote MySQL hosts deleted: %d\n' "${deleted_mysql_remote_hosts}"
 printf '  email account restrictions unsuspended: %d\n' \
   "${unsuspended_email_restrictions}"
+printf '  calendar delegates deleted: %d\n' \
+  "${deleted_calendar_delegates}"
 printf '  email filters deleted: %d\n' "${deleted_email_filters}"
 printf '  email accounts deleted: %d\n' "${deleted_email_accounts}"
 printf '  email forwarders deleted: %d\n' "${deleted_email_forwarders}"

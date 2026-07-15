@@ -272,6 +272,48 @@ mysql_test_remote_host_count="$(
     "${response_file}"
 )"
 
+request 'execute/CPDAVD/list_delegates' 'Calendar delegate check'
+if ! jq -e \
+  '
+    (.data | type == "array")
+    and all(
+      .data[];
+      (.delegator? | type) == "string"
+      and (.delegatee? | type) == "string"
+      and (.calendar? | type) == "string"
+      and (.calname? | type) == "string"
+      and (
+        .readonly? == 0
+        or .readonly? == "0"
+        or .readonly? == false
+        or .readonly? == "false"
+        or .readonly? == 1
+        or .readonly? == "1"
+        or .readonly? == true
+        or .readonly? == "true"
+      )
+    )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'Calendar delegate inventory is incomplete\n' >&2
+  exit 1
+fi
+calendar_delegate_count="$(jq -r '.data | length' "${response_file}")"
+calendar_test_delegate_count="$(
+  jq -r \
+    '
+      [
+        .data[]
+        | select(
+            (.delegator | split("@")[0] | startswith("tfcpanelcal"))
+            or (.delegatee | split("@")[0] | startswith("tfcpanelcal"))
+          )
+      ]
+      | length
+    ' \
+    "${response_file}"
+)"
+
 request \
   'execute/Email/list_pops_with_disk?skip_main=1&no_disk=1&get_restrictions=1' \
   'Email account check'
@@ -587,6 +629,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${mysql_test_database_count}" != "0"
     || "${mysql_test_user_count}" != "0"
     || "${mysql_test_remote_host_count}" != "0"
+    || "${calendar_test_delegate_count}" != "0"
     || "${email_test_account_count}" != "0"
     || "${email_test_suspended_count}" != "0"
     || "${email_test_filter_count}" != "0"
@@ -626,6 +669,8 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     printf '  MySQL test users: %s\n' "${mysql_test_user_count}" >&2
     printf '  test remote MySQL hosts: %s\n' \
       "${mysql_test_remote_host_count}" >&2
+    printf '  test calendar delegates: %s\n' \
+      "${calendar_test_delegate_count}" >&2
     printf '  email test accounts: %s\n' "${email_test_account_count}" >&2
     printf '  suspended email test accounts: %s\n' \
       "${email_test_suspended_count}" >&2
@@ -702,6 +747,9 @@ printf '  MySQL users: %s (%s test-managed)\n' \
 printf '  remote MySQL hosts: %s (%s test-managed)\n' \
   "${mysql_remote_host_count}" \
   "${mysql_test_remote_host_count}"
+printf '  calendar delegates: %s (%s test-managed)\n' \
+  "${calendar_delegate_count}" \
+  "${calendar_test_delegate_count}"
 printf '  email accounts: %s (%s suspended, %s test-managed, %s test-suspended)\n' \
   "${email_account_count}" \
   "${email_suspended_count}" \
