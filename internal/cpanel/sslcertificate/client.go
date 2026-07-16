@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 
 	"terraform-provider-cpanel/internal/cpanel"
 )
@@ -16,6 +17,7 @@ const (
 	operationUploadCertificate  = "upload_cert"
 	operationRenameCertificate  = "set_cert_friendly_name"
 	operationDeleteCertificate  = "delete_cert"
+	operationGetInstalledHost   = "installed_host"
 	operationListInstalledHosts = "installed_hosts"
 )
 
@@ -72,6 +74,124 @@ func (c *Client) List(ctx context.Context) ([]Certificate, error) {
 	})
 
 	return certificates, nil
+}
+
+// ListInstalledHosts returns safe installed-host metadata in stable order.
+func (c *Client) ListInstalledHosts(
+	ctx context.Context,
+) ([]InstalledHost, error) {
+	hosts, err := c.listInstalledHosts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	dedicatedHost, err := c.getDedicatedInstalledHost(ctx)
+	if err != nil {
+		return nil, err
+	}
+	dedicatedPair := installedHostPairIdentity(*dedicatedHost)
+	pairFound := false
+	for _, host := range hosts {
+		if installedHostPairIdentity(host) == dedicatedPair {
+			pairFound = true
+			break
+		}
+	}
+	if !pairFound {
+		hosts = append(hosts, *dedicatedHost)
+	}
+	sortInstalledHosts(hosts)
+
+	return hosts, nil
+}
+
+func (c *Client) listInstalledHosts(
+	ctx context.Context,
+) ([]InstalledHost, error) {
+	response := installedHostsResponse{}
+	if err := c.ExecuteUAPIOperation(
+		ctx,
+		http.MethodGet,
+		moduleSSL,
+		operationListInstalledHosts,
+		map[string]string{},
+		&response,
+	); err != nil {
+		return nil, err
+	}
+
+	apiHosts, err := parseRequiredArray[apiInstalledHost](
+		response.Data,
+		"installed SSL host inventory data",
+	)
+	if err != nil {
+		return nil, err
+	}
+	hosts := make([]InstalledHost, 0, len(apiHosts))
+	seen := make(map[string]struct{}, len(apiHosts))
+	for index, apiHost := range apiHosts {
+		host, err := installedHostFromAPI(apiHost, index)
+		if err != nil {
+			return nil, err
+		}
+		identity := installedHostIdentity(host)
+		if _, exists := seen[identity]; exists {
+			return nil, fmt.Errorf(
+				"cPanel returned duplicate installed SSL host identity %q with certificate %q",
+				host.ServerName,
+				host.Certificate.ID,
+			)
+		}
+		seen[identity] = struct{}{}
+		hosts = append(hosts, host)
+	}
+	sortInstalledHosts(hosts)
+
+	return hosts, nil
+}
+
+func (c *Client) getDedicatedInstalledHost(
+	ctx context.Context,
+) (*InstalledHost, error) {
+	response := dedicatedInstalledHostResponse{}
+	if err := c.ExecuteUAPIOperation(
+		ctx,
+		http.MethodGet,
+		moduleSSL,
+		operationGetInstalledHost,
+		map[string]string{},
+		&response,
+	); err != nil {
+		return nil, err
+	}
+	apiHost, err := parseRequiredObject[apiDedicatedInstalledHost](
+		response.Data,
+		"dedicated-IP SSL host data",
+	)
+	if err != nil {
+		return nil, err
+	}
+	host, err := dedicatedInstalledHostFromAPI(apiHost)
+	if err != nil {
+		return nil, err
+	}
+
+	return &host, nil
+}
+
+func installedHostPairIdentity(host InstalledHost) string {
+	return host.ServerName + "\x00" + host.Certificate.ID
+}
+
+func installedHostIdentity(host InstalledHost) string {
+	return installedHostPairIdentity(host) + "\x00" +
+		strings.Join(host.FQDNs, "\x00")
+}
+
+func sortInstalledHosts(hosts []InstalledHost) {
+	sort.Slice(hosts, func(left, right int) bool {
+		return installedHostIdentity(hosts[left]) <
+			installedHostIdentity(hosts[right])
+	})
 }
 
 // Get returns a certificate by its canonical cPanel ID.
@@ -315,5 +435,10 @@ func (c *Client) IsInstalled(
 		}
 	}
 
-	return false, nil
+	dedicatedHost, err := c.getDedicatedInstalledHost(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	return dedicatedHost.Certificate.ID == id, nil
 }

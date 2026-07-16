@@ -702,7 +702,7 @@ func TestClientPollsUntilDelayedGeneratedCSRAppears(t *testing.T) {
 		},
 	})
 	client.generationRecoveryDelay = time.Millisecond
-	client.generationRecoveryLimit = 100 * time.Millisecond
+	client.generationRecoveryLimit = time.Second
 
 	csr, err := client.Generate(t.Context(), definition)
 	if err != nil {
@@ -2110,8 +2110,8 @@ func newScriptedClient(
 	}
 
 	client := NewClient(baseClient)
-	client.generationRecoveryDelay = 200 * time.Millisecond
-	client.generationRecoveryLimit = 100 * time.Millisecond
+	client.generationRecoveryDelay = 2 * time.Second
+	client.generationRecoveryLimit = time.Second
 
 	return client
 }

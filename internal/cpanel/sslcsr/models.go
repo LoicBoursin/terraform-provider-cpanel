@@ -95,8 +95,11 @@ type apiCSR struct {
 
 type apiPublicKey struct {
 	ID             json.RawMessage `json:"id"`
+	FriendlyName   json.RawMessage `json:"friendly_name"`
+	Created        json.RawMessage `json:"created"`
 	KeyAlgorithm   json.RawMessage `json:"key_algorithm"`
 	Modulus        json.RawMessage `json:"modulus"`
+	ModulusLength  json.RawMessage `json:"modulus_length"`
 	ECDSACurveName json.RawMessage `json:"ecdsa_curve_name"`
 	ECDSAPublic    json.RawMessage `json:"ecdsa_public"`
 }
@@ -107,6 +110,28 @@ type publicKeyMetadata struct {
 	Modulus        string
 	ECDSACurveName string
 	ECDSAPublic    string
+}
+
+// CSRMetadata contains safe list-only metadata for one stored CSR.
+type CSRMetadata struct {
+	ID             string
+	FriendlyName   string
+	CommonName     string
+	Domains        []string
+	Created        int64
+	KeyAlgorithm   string
+	ModulusLength  *int64
+	ECDSACurveName string
+}
+
+// KeyMetadata contains safe public metadata for one stored SSL key.
+type KeyMetadata struct {
+	ID             string
+	FriendlyName   string
+	Created        int64
+	KeyAlgorithm   string
+	ModulusLength  *int64
+	ECDSACurveName string
 }
 
 type rawTBSCertificateRequest struct {
@@ -692,6 +717,153 @@ func publicKeyFromAPI(value apiPublicKey) (publicKeyMetadata, error) {
 	return key, nil
 }
 
+func csrMetadataFromAPI(value apiCSR) (CSRMetadata, error) {
+	csr, err := csrFromAPI(value)
+	if err != nil {
+		return CSRMetadata{}, err
+	}
+	key, err := publicKeyFromAPI(apiPublicKey{
+		ID:             value.ID,
+		KeyAlgorithm:   value.KeyAlgorithm,
+		Modulus:        value.Modulus,
+		ECDSACurveName: value.ECDSACurveName,
+		ECDSAPublic:    value.ECDSAPublic,
+	})
+	if err != nil {
+		return CSRMetadata{}, fmt.Errorf(
+			"validate SSL CSR %q public-key metadata: %w",
+			csr.ID,
+			err,
+		)
+	}
+	modulusLength, err := publicKeyModulusLength(key)
+	if err != nil {
+		return CSRMetadata{}, fmt.Errorf(
+			"derive SSL CSR %q modulus length: %w",
+			csr.ID,
+			err,
+		)
+	}
+
+	return CSRMetadata{
+		ID:             csr.ID,
+		FriendlyName:   csr.FriendlyName,
+		CommonName:     csr.CommonName,
+		Domains:        csr.Domains,
+		Created:        csr.Created,
+		KeyAlgorithm:   csr.KeyAlgorithm,
+		ModulusLength:  modulusLength,
+		ECDSACurveName: csr.ECDSACurveName,
+	}, nil
+}
+
+func keyMetadataFromAPI(value apiPublicKey) (KeyMetadata, error) {
+	key, err := publicKeyFromAPI(value)
+	if err != nil {
+		return KeyMetadata{}, err
+	}
+	friendlyName, err := parseRequiredScalarString(value.FriendlyName)
+	if err != nil {
+		return KeyMetadata{}, fmt.Errorf(
+			"decode SSL key %q friendly_name: %w",
+			key.ID,
+			err,
+		)
+	}
+	if err := ValidateFriendlyName(friendlyName); err != nil {
+		return KeyMetadata{}, fmt.Errorf(
+			"invalid SSL key %q friendly name: %w",
+			key.ID,
+			err,
+		)
+	}
+	created, err := parseRequiredScalarInt64(value.Created)
+	if err != nil {
+		return KeyMetadata{}, fmt.Errorf(
+			"decode SSL key %q created: %w",
+			key.ID,
+			err,
+		)
+	}
+	if created < 0 {
+		return KeyMetadata{}, fmt.Errorf(
+			"decode SSL key %q created: must not be negative",
+			key.ID,
+		)
+	}
+	reportedModulusLength, err := parseOptionalScalarInt64(
+		value.ModulusLength,
+	)
+	if err != nil {
+		return KeyMetadata{}, fmt.Errorf(
+			"decode SSL key %q modulus_length: %w",
+			key.ID,
+			err,
+		)
+	}
+	derivedModulusLength, err := publicKeyModulusLength(key)
+	if err != nil {
+		return KeyMetadata{}, err
+	}
+	switch key.KeyAlgorithm {
+	case "rsaEncryption":
+		if reportedModulusLength == nil {
+			return KeyMetadata{}, fmt.Errorf(
+				"SSL key %q has no modulus_length",
+				key.ID,
+			)
+		}
+		if *reportedModulusLength <= 0 {
+			return KeyMetadata{}, fmt.Errorf(
+				"SSL key %q modulus_length must be positive",
+				key.ID,
+			)
+		}
+		if *reportedModulusLength != *derivedModulusLength {
+			return KeyMetadata{}, fmt.Errorf(
+				"SSL key %q modulus_length is %d; derived %d",
+				key.ID,
+				*reportedModulusLength,
+				*derivedModulusLength,
+			)
+		}
+	case "id-ecPublicKey":
+		if reportedModulusLength != nil {
+			return KeyMetadata{}, fmt.Errorf(
+				"SSL key %q reports an RSA modulus_length for ECDSA",
+				key.ID,
+			)
+		}
+	}
+
+	return KeyMetadata{
+		ID:             key.ID,
+		FriendlyName:   friendlyName,
+		Created:        created,
+		KeyAlgorithm:   key.KeyAlgorithm,
+		ModulusLength:  derivedModulusLength,
+		ECDSACurveName: key.ECDSACurveName,
+	}, nil
+}
+
+func publicKeyModulusLength(
+	key publicKeyMetadata,
+) (*int64, error) {
+	if key.KeyAlgorithm != "rsaEncryption" {
+		return nil, nil
+	}
+	modulus, err := parseHexInteger(
+		key.Modulus,
+		fmt.Sprintf("SSL public key %q RSA modulus", key.ID),
+	)
+	if err != nil {
+		return nil, err
+	}
+	length := int64(modulus.BitLen())
+
+	return &length, nil
+}
+
 func csrFieldError(id, field string, err error) error {
 	return fmt.Errorf("decode SSL CSR %q %s: %w", id, field, err)
 }
@@ -777,6 +949,18 @@ func parseRequiredScalarInt64(raw json.RawMessage) (int64, error) {
 	}
 
 	return parsed, nil
+}
+
+func parseOptionalScalarInt64(raw json.RawMessage) (*int64, error) {
+	if isNullScalar(raw) {
+		return nil, nil
+	}
+	value, err := parseRequiredScalarInt64(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	return &value, nil
 }
 
 func parseRequiredArray[T any](

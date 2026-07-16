@@ -247,11 +247,19 @@ func testAccPreCheck(t *testing.T) {
 	if _, err := cpanelpassenger.NewClient(client).List(ctx); err != nil {
 		t.Fatalf("verify Passenger API access: %v", err)
 	}
-	if _, err := cpanelsslcertificate.NewClient(client).List(ctx); err != nil {
+	sslCertificateClient := cpanelsslcertificate.NewClient(client)
+	if _, err := sslCertificateClient.List(ctx); err != nil {
 		t.Fatalf("verify SSL certificate API access: %v", err)
 	}
-	if _, err := cpanelsslcsr.NewClient(client).List(ctx); err != nil {
-		t.Fatalf("verify SSL CSR API access: %v", err)
+	if _, err := sslCertificateClient.ListInstalledHosts(ctx); err != nil {
+		t.Fatalf("verify installed SSL host API access: %v", err)
+	}
+	sslCSRClient := cpanelsslcsr.NewClient(client)
+	if _, err := sslCSRClient.ListMetadata(ctx); err != nil {
+		t.Fatalf("verify SSL CSR metadata API access: %v", err)
+	}
+	if _, err := sslCSRClient.ListKeys(ctx); err != nil {
+		t.Fatalf("verify SSL key metadata API access: %v", err)
 	}
 }
 

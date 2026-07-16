@@ -79,6 +79,10 @@ Additional read-only account data sources:
 - `cpanel_resource_usage`
 - `cpanel_ssh_public_key`
 - `cpanel_ssh_public_keys`
+- `cpanel_ssl_certificates`
+- `cpanel_ssl_csrs`
+- `cpanel_ssl_installed_hosts`
+- `cpanel_ssl_keys`
 
 ## Requirements
 

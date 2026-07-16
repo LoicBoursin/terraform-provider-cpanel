@@ -442,6 +442,39 @@ ssl_csr_test_count="$(
     "${response_file}"
 )"
 
+request 'execute/SSL/list_keys' 'stored SSL key metadata check'
+if ! jq -e \
+  '
+    (.data | type) == "array"
+    and all(
+      .data[];
+      ((.id? | type) == "string" or (.id? | type) == "number")
+      and ((.id | tostring | length) > 0)
+      and ((.friendly_name? | type) == "string")
+      and ((.created? | type) == "string"
+        or (.created? | type) == "number")
+      and ((.key_algorithm? | type) == "string")
+      and (
+        .modulus_length? == null
+        or (.modulus_length? | type) == "string"
+        or (.modulus_length? | type) == "number"
+      )
+      and (
+        .ecdsa_curve_name? == null
+        or (.ecdsa_curve_name? | type) == "string"
+      )
+    )
+    and (
+      [.data[] | .id | tostring]
+      | length == (unique | length)
+    )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'Stored SSL key metadata inventory is incomplete\n' >&2
+  exit 1
+fi
+ssl_key_count="$(jq -r '.data | length' "${response_file}")"
+
 request 'execute/SSL/list_certs' 'stored SSL certificate check'
 if ! jq -e \
   '
@@ -498,6 +531,161 @@ ssl_certificate_test_count="$(
     ' \
     "${response_file}"
 )"
+
+request 'execute/SSL/installed_hosts' 'installed SSL host metadata check'
+if ! jq -e \
+  '
+    def flexible_bool:
+      . == 0
+      or . == "0"
+      or . == false
+      or . == "false"
+      or . == 1
+      or . == "1"
+      or . == true
+      or . == "true";
+    (.data | type) == "array"
+    and all(
+      .data[];
+      (.servername? | type) == "string"
+      and (.servername | length) > 0
+      and (.domains? | type) == "array"
+      and all(.domains[]; type == "string" and length > 0)
+      and (.fqdns? | type) == "array"
+      and all(.fqdns[]; type == "string" and length > 0)
+      and (.is_primary_on_ip? | flexible_bool)
+      and (.mail_sni_status? | flexible_bool)
+      and (.needs_sni? | flexible_bool)
+      and (.certificate? | type) == "object"
+      and (
+        (.certificate.id? | type) == "string"
+        or (.certificate.id? | type) == "number"
+      )
+      and (.certificate.id | tostring | length) > 0
+      and (.certificate.domains? | type) == "array"
+      and all(.certificate.domains[]; type == "string" and length > 0)
+      and (.certificate.is_autossl? | flexible_bool)
+      and (.certificate.is_self_signed? | flexible_bool)
+      and (
+        (.certificate.not_before? | type) == "string"
+        or (.certificate.not_before? | type) == "number"
+      )
+      and (
+        (.certificate.not_after? | type) == "string"
+        or (.certificate.not_after? | type) == "number"
+      )
+    )
+    and (
+      [
+        .data[]
+        | [
+            .servername,
+            (.certificate.id | tostring),
+            (.fqdns | sort | join(","))
+          ]
+        | join("\u0000")
+      ]
+      | length == (unique | length)
+    )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'Installed SSL host metadata inventory is incomplete\n' >&2
+  exit 1
+fi
+ssl_installed_host_count="$(jq -r '.data | length' "${response_file}")"
+ssl_installed_host_pairs="$(
+  jq -c \
+    '
+      [
+        .data[]
+        | [.servername, (.certificate.id | tostring)]
+      ]
+      | unique
+    ' \
+    "${response_file}"
+)"
+
+request 'execute/SSL/installed_host' 'dedicated-IP SSL host metadata check'
+if ! jq -e \
+  '
+    def flexible_bool:
+      . == 0
+      or . == "0"
+      or . == false
+      or . == "false"
+      or . == 1
+      or . == "1"
+      or . == true
+      or . == "true";
+    (.data | type) == "object"
+    and (.data.host? | type) == "string"
+    and (.data.host | length) > 0
+    and (.data.certificate? | type) == "object"
+    and (
+      (.data.certificate.id? | type) == "string"
+      or (.data.certificate.id? | type) == "number"
+    )
+    and (.data.certificate.id | tostring | length) > 0
+    and (.data.certificate.domains? | type) == "array"
+    and (.data.certificate.domains | length) > 0
+    and all(
+      .data.certificate.domains[];
+      type == "string" and length > 0
+    )
+    and (
+      .data.certificate.domains
+      | length == (unique | length)
+    )
+    and (.data.certificate.is_self_signed? | flexible_bool)
+    and (
+      (.data.certificate.not_before? | type) == "string"
+      or (.data.certificate.not_before? | type) == "number"
+    )
+    and (
+      (.data.certificate.not_before | tostring)
+      | test("^[0-9]+$")
+    )
+    and (
+      (.data.certificate.not_after? | type) == "string"
+      or (.data.certificate.not_after? | type) == "number"
+    )
+    and (
+      (.data.certificate.not_after | tostring)
+      | test("^[0-9]+$")
+    )
+    and (
+      (.data.certificate.not_after | tonumber)
+      >= (.data.certificate.not_before | tonumber)
+    )
+    and (
+      .data.certificate.modulus_length? == null
+      or (
+        (
+          (.data.certificate.modulus_length? | type) == "string"
+          or (.data.certificate.modulus_length? | type) == "number"
+        )
+        and (
+          (.data.certificate.modulus_length | tostring)
+          | test("^[1-9][0-9]*$")
+        )
+      )
+    )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'Dedicated-IP SSL host metadata is incomplete\n' >&2
+  exit 1
+fi
+ssl_dedicated_host_pair="$(
+  jq -c \
+    '[.data.host, (.data.certificate.id | tostring)]' \
+    "${response_file}"
+)"
+if ! jq -e -n \
+  --argjson pairs "${ssl_installed_host_pairs}" \
+  --argjson pair "${ssl_dedicated_host_pair}" \
+  'any($pairs[]; . == $pair)' >/dev/null; then
+  ssl_installed_host_count="$((ssl_installed_host_count + 1))"
+fi
 
 request 'execute/GPG/list_public_keys' 'GPG public-key inventory'
 if ! jq -e \
@@ -1772,6 +1960,8 @@ printf '  stored SSL CSRs: %s (%s test-managed)\n' \
 printf '  stored SSL certificates: %s (%s test-managed)\n' \
   "${ssl_certificate_count}" \
   "${ssl_certificate_test_count}"
+printf '  stored SSL keys: %s\n' "${ssl_key_count}"
+printf '  installed SSL hosts: %s\n' "${ssl_installed_host_count}"
 printf '  GPG public keys: %s (%s test-managed)\n' \
   "${gpg_public_key_count}" \
   "${gpg_public_test_key_count}"

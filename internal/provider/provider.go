@@ -366,7 +366,11 @@ func (p *cpanelProvider) DataSources(_ context.Context) []func() datasource.Data
 		NewSSHPublicKeysDataSource,
 		NewSpamPreferenceDataSource,
 		NewSSLCertificateDataSource,
+		NewSSLCertificatesDataSource,
 		NewSSLCSRDataSource,
+		NewSSLCSRsDataSource,
+		NewSSLInstalledHostsDataSource,
+		NewSSLKeysDataSource,
 		NewSubdomainDataSource,
 	}
 }

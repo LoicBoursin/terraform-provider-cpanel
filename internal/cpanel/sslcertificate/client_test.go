@@ -463,6 +463,7 @@ func TestClientDetectsInstalledCertificateWithFlexibleIDs(t *testing.T) {
 	}{
 		{name: "string", id: "installed-id", installed: true},
 		{name: "number", id: "123", installed: true},
+		{name: "dedicated", id: "dedicated-id", installed: true},
 		{name: "absent", id: "missing-id", installed: false},
 	}
 
@@ -474,29 +475,39 @@ func TestClientDetectsInstalledCertificateWithFlexibleIDs(t *testing.T) {
 				response http.ResponseWriter,
 				request *http.Request,
 			) {
-				assertRequest(
-					t,
-					request,
-					http.MethodGet,
-					"/execute/SSL/installed_hosts",
-				)
+				if request.Method != http.MethodGet {
+					t.Errorf("method = %s, want GET", request.Method)
+				}
 				if request.URL.RawQuery != "" {
 					t.Errorf(
 						"query = %q, want empty",
 						request.URL.RawQuery,
 					)
 				}
-				writeJSON(t, response, map[string]any{
-					"status": 1,
-					"data": []map[string]any{
-						{
-							"certificate": map[string]any{
-								"id": "installed-id",
+				switch request.URL.Path {
+				case "/execute/SSL/installed_hosts":
+					writeJSON(t, response, map[string]any{
+						"status": 1,
+						"data": []map[string]any{
+							{
+								"certificate": map[string]any{
+									"id": "installed-id",
+								},
 							},
+							{"certificate": map[string]any{"id": 123}},
 						},
-						{"certificate": map[string]any{"id": 123}},
-					},
-				})
+					})
+				case "/execute/SSL/installed_host":
+					writeJSON(t, response, map[string]any{
+						"status": 1,
+						"data": dedicatedHostInventoryItem(
+							"dedicated.example.test",
+							"dedicated-id",
+						),
+					})
+				default:
+					t.Errorf("unexpected path %s", request.URL.Path)
+				}
 			}))
 			defer server.Close()
 

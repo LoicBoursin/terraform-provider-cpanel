@@ -221,9 +221,10 @@ the provider deliberately never calls `PassengerApps::ensure_deps`.
 
 Stored SSL certificate operations use UAPI `SSL::list_certs`,
 `SSL::show_cert`, `SSL::upload_cert`, `SSL::set_cert_friendly_name`,
-`SSL::delete_cert`, and `SSL::installed_hosts`. The resource accepts and
-uploads only one public X.509 certificate. It never accepts, reads, sends, or
-stores a private key.
+`SSL::delete_cert`, `SSL::installed_hosts`, and `SSL::installed_host`. The
+singular installed-host check prevents a dedicated-IP certificate from being
+treated as unmanaged. The resource accepts and uploads only one public X.509
+certificate. It never accepts, reads, sends, or stores a private key.
 
 The resource manages only certificates that cPanel reports as neither
 configured for a domain nor installed on an SSL virtual host. Import, update,
@@ -267,6 +268,26 @@ Terraform.
 `SSL::show_csr` may omit optional algorithm-specific fields, but any field it
 does return must agree with the inventory. The provider then binds the
 inventory metadata directly to the signed PKCS#10 public key.
+
+The input-free SSL inventory data sources use only `SSL::list_certs`,
+`SSL::list_csrs`, `SSL::list_keys`, `SSL::installed_hosts`, and
+`SSL::installed_host`. The singular endpoint is cPanel's dedicated-IP view;
+the provider merges it only when its server-name and certificate pair is not
+already present in the plural inventory. Certificate inventory with installed
+status requires three GET requests, installed-host inventory requires two, and
+CSR and key inventory each require one. These data sources never call
+`show_cert`, `show_csr`, export operations, or mutations.
+
+The plural state exposes stable public metadata only. It omits certificate and
+CSR PEM, modulus values, ECDSA public points, installed-host certificate text,
+document roots, IP addresses, issuer organization fields, and raw subject or
+issuer text. Installed-host state includes only server names, domain lists,
+SNI flags, and a bounded public certificate metadata object. When only the
+dedicated-IP endpoint reports a host, fields that endpoint does not return
+remain `null`; the provider does not infer domain lists, SNI flags, or AutoSSL
+status. cPanel identifiers, domain names, provider names, and certificate
+common names are stored in plaintext Terraform state and must be protected
+accordingly.
 
 If generation succeeds but Terraform cannot persist local state, the provider
 reports the verified CSR ID for import and leaves the remote object unchanged.

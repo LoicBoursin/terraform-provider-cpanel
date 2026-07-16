@@ -25,12 +25,12 @@ public-only OpenPGP keys, forwarders and autoresponders, BoxTrapper settings,
 FTP accounts, MySQL or MariaDB users and databases and remote hosts,
 PostgreSQL users and databases, filesystem directories and UTF-8 text files,
 and database grants. They also read the complete DAV user, DAV collection,
-calendar delegation, domain, and public OpenSSH key inventories without
-mutating them. GPG acceptance tests generate public-only RSA fixtures locally,
-verify that the cPanel secret-key inventory never changes, and preserve remote
-public keys when Terraform destroys the resource. Dedicated-account cleanup
-refuses pair deletion unless the account explicitly opts in and its persisted
-baseline declares zero secret keys. BoxTrapper tests use disposable
+calendar delegation, domain, SSL metadata, and public OpenSSH key inventories
+without mutating them. GPG acceptance tests generate public-only RSA fixtures
+locally, verify that the cPanel secret-key inventory never changes, and preserve
+remote public keys when Terraform destroys the resource. Dedicated-account
+cleanup refuses pair deletion unless the account explicitly opts in and its
+persisted baseline declares zero secret keys. BoxTrapper tests use disposable
 mailboxes without sending messages and restore the captured settings before
 mailbox deletion. They verify that configuration changes are rejected while
 cPanel reports a null sender name, then establish a non-null fixture name

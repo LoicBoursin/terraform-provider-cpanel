@@ -119,6 +119,11 @@
   verification, in-place friendly-name updates, import, drift recovery,
   lost-response recovery without mutation replay, strict PKCS#10 validation,
   and cPanel 134 acceptance coverage.
+- Complete stored certificate, CSR, SSL key, and installed-host metadata data
+  sources that omit PEM, modulus, ECDSA public parameters, virtual-host IPs,
+  document roots, and other internal or private material, certified on cPanel
+  134 with Terraform `1.14.9` and `1.15.8`, including the dedicated-IP
+  `SSL::installed_host` view.
 - Import support for cron jobs by cPanel line key.
 - Stable drift and remote-deletion handling for every resource.
 - cPanel 134 acceptance coverage for CRUD, import, drift, recreation, and

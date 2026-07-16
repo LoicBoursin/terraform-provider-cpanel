@@ -55,6 +55,66 @@ func (c *Client) List(ctx context.Context) ([]CSR, error) {
 	return csrs, nil
 }
 
+// ListMetadata returns safe CSR metadata without fetching CSR PEM.
+func (c *Client) ListMetadata(
+	ctx context.Context,
+) ([]CSRMetadata, error) {
+	apiCSRs, err := c.listAPIInventory(ctx)
+	if err != nil {
+		return nil, err
+	}
+	inventory := make([]CSRMetadata, 0, len(apiCSRs))
+	seen := make(map[string]struct{}, len(apiCSRs))
+	for _, apiCSR := range apiCSRs {
+		csr, err := csrMetadataFromAPI(apiCSR)
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := seen[csr.ID]; exists {
+			return nil, fmt.Errorf(
+				"cPanel returned duplicate SSL CSR id %q",
+				csr.ID,
+			)
+		}
+		seen[csr.ID] = struct{}{}
+		inventory = append(inventory, csr)
+	}
+	sort.Slice(inventory, func(left, right int) bool {
+		return inventory[left].ID < inventory[right].ID
+	})
+
+	return inventory, nil
+}
+
+// ListKeys returns safe public metadata for stored SSL keys.
+func (c *Client) ListKeys(ctx context.Context) ([]KeyMetadata, error) {
+	apiKeys, err := c.listAPIKeys(ctx)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]KeyMetadata, 0, len(apiKeys))
+	seen := make(map[string]struct{}, len(apiKeys))
+	for _, apiKey := range apiKeys {
+		key, err := keyMetadataFromAPI(apiKey)
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := seen[key.ID]; exists {
+			return nil, fmt.Errorf(
+				"cPanel returned duplicate SSL key id %q",
+				key.ID,
+			)
+		}
+		seen[key.ID] = struct{}{}
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(left, right int) bool {
+		return keys[left].ID < keys[right].ID
+	})
+
+	return keys, nil
+}
+
 // Get returns one CSR by its canonical cPanel ID.
 func (c *Client) Get(ctx context.Context, id string) (*CSR, error) {
 	if err := ValidateID(id); err != nil {
@@ -471,22 +531,7 @@ func (c *Client) Delete(
 func (c *Client) listPublicKeys(
 	ctx context.Context,
 ) ([]publicKeyMetadata, error) {
-	response := keyListResponse{}
-	if err := c.ExecuteUAPIOperation(
-		ctx,
-		http.MethodGet,
-		moduleSSL,
-		operationListKeys,
-		map[string]string{},
-		&response,
-	); err != nil {
-		return nil, err
-	}
-
-	apiKeys, err := parseRequiredArray[apiPublicKey](
-		response.Data,
-		"SSL public key inventory data",
-	)
+	apiKeys, err := c.listAPIKeys(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -697,22 +742,7 @@ func isDeterministicMutationError(err error) bool {
 }
 
 func (c *Client) listMetadata(ctx context.Context) ([]CSR, error) {
-	response := listResponse{}
-	if err := c.ExecuteUAPIOperation(
-		ctx,
-		http.MethodGet,
-		moduleSSL,
-		operationListCSRs,
-		map[string]string{},
-		&response,
-	); err != nil {
-		return nil, err
-	}
-
-	apiCSRs, err := parseRequiredArray[apiCSR](
-		response.Data,
-		"SSL CSR inventory data",
-	)
+	apiCSRs, err := c.listAPIInventory(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -738,6 +768,53 @@ func (c *Client) listMetadata(ctx context.Context) ([]CSR, error) {
 	})
 
 	return inventory, nil
+}
+
+func (c *Client) listAPIInventory(
+	ctx context.Context,
+) ([]apiCSR, error) {
+	response := listResponse{}
+	if err := c.ExecuteUAPIOperation(
+		ctx,
+		http.MethodGet,
+		moduleSSL,
+		operationListCSRs,
+		map[string]string{},
+		&response,
+	); err != nil {
+		return nil, err
+	}
+
+	apiCSRs, err := parseRequiredArray[apiCSR](
+		response.Data,
+		"SSL CSR inventory data",
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return apiCSRs, nil
+}
+
+func (c *Client) listAPIKeys(
+	ctx context.Context,
+) ([]apiPublicKey, error) {
+	response := keyListResponse{}
+	if err := c.ExecuteUAPIOperation(
+		ctx,
+		http.MethodGet,
+		moduleSSL,
+		operationListKeys,
+		map[string]string{},
+		&response,
+	); err != nil {
+		return nil, err
+	}
+
+	return parseRequiredArray[apiPublicKey](
+		response.Data,
+		"SSL public key inventory data",
+	)
 }
 
 func (c *Client) show(
