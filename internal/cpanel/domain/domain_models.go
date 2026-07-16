@@ -1,6 +1,12 @@
 package domain
 
-import "terraform-provider-cpanel/internal/cpanel"
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+
+	"terraform-provider-cpanel/internal/cpanel"
+)
 
 type API2MutationResponse struct {
 	CpanelResult API2MutationResult `json:"cpanelresult"`
@@ -26,6 +32,70 @@ type DomainList struct {
 	AddonDomains  []string `json:"addon_domains"`
 	SubDomains    []string `json:"sub_domains"`
 	ParkedDomains []string `json:"parked_domains"`
+}
+
+func (d *DomainList) UnmarshalJSON(data []byte) error {
+	type rawDomainList struct {
+		MainDomain    *string         `json:"main_domain"`
+		AddonDomains  json.RawMessage `json:"addon_domains"`
+		SubDomains    json.RawMessage `json:"sub_domains"`
+		ParkedDomains json.RawMessage `json:"parked_domains"`
+	}
+
+	raw := rawDomainList{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.MainDomain == nil {
+		return fmt.Errorf("main_domain must be a non-null string")
+	}
+	addonDomains, err := decodeRequiredDomainArray(
+		raw.AddonDomains,
+		"addon_domains",
+	)
+	if err != nil {
+		return err
+	}
+	subDomains, err := decodeRequiredDomainArray(
+		raw.SubDomains,
+		"sub_domains",
+	)
+	if err != nil {
+		return err
+	}
+	parkedDomains, err := decodeRequiredDomainArray(
+		raw.ParkedDomains,
+		"parked_domains",
+	)
+	if err != nil {
+		return err
+	}
+
+	*d = DomainList{
+		MainDomain:    *raw.MainDomain,
+		AddonDomains:  addonDomains,
+		SubDomains:    subDomains,
+		ParkedDomains: parkedDomains,
+	}
+
+	return nil
+}
+
+func decodeRequiredDomainArray(
+	raw json.RawMessage,
+	field string,
+) ([]string, error) {
+	value := bytes.TrimSpace(raw)
+	if len(value) == 0 || bytes.Equal(value, []byte("null")) {
+		return nil, fmt.Errorf("%s must be a non-null array", field)
+	}
+
+	result := make([]string, 0)
+	if err := json.Unmarshal(value, &result); err != nil {
+		return nil, fmt.Errorf("%s must be an array of strings: %w", field, err)
+	}
+
+	return result, nil
 }
 
 type InventoryDomainType string

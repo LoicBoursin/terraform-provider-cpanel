@@ -111,7 +111,9 @@
   Terraform `1.14.9` and `1.15.8`.
 - Complete domain inventory data source with normalized, typed, sorted, and
   duplicate-checked main, addon, subdomain, and alias identities, certified on
-  cPanel 134 with Terraform `1.14.9` and `1.15.8`.
+  cPanel 134 with Terraform `1.14.9` and `1.15.8`. Incomplete category
+  responses and malformed domain names are rejected instead of publishing
+  partial state.
 - Stored SSL certificate signing request resource and data source with
   generation from an existing cPanel key, RSA and ECDSA public-key
   verification, in-place friendly-name updates, import, drift recovery,

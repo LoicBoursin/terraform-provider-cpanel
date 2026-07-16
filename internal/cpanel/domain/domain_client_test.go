@@ -61,6 +61,57 @@ func TestClientCreatesSubdomainWithPOST(t *testing.T) {
 	}
 }
 
+func TestClientValidatesOptionalDomainMutationResults(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		payload   string
+		wantError bool
+	}{
+		"failed result": {
+			payload:   `{"cpanelresult":{"event":{"result":1},"data":[{"result":0,"reason":"domain already exists"}]}}`,
+			wantError: true,
+		},
+		"empty successful result": {
+			payload: `{"cpanelresult":{"event":{"result":1},"data":[]}}`,
+		},
+		"multiple successful results": {
+			payload: `{"cpanelresult":{"event":{"result":1},"data":[{"result":1},{"result":1}]}}`,
+		},
+	}
+	for name, test := range tests {
+		test := test
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(
+				response http.ResponseWriter,
+				_ *http.Request,
+			) {
+				_, _ = response.Write([]byte(test.payload))
+			}))
+			defer server.Close()
+
+			err := newDomainTestClient(t, server.URL).CreateSubdomain(
+				t.Context(),
+				"terraform",
+				"example.test",
+				"public_html/terraform",
+			)
+			if test.wantError && err == nil {
+				t.Fatal("CreateSubdomain() error = nil, want error")
+			}
+			if !test.wantError && err != nil {
+				t.Fatalf("CreateSubdomain() error = %v, want nil", err)
+			}
+			if test.wantError &&
+				!strings.Contains(err.Error(), "domain already exists") {
+				t.Fatalf("CreateSubdomain() error = %v", err)
+			}
+		})
+	}
+}
+
 func TestClientGetsExactSubdomain(t *testing.T) {
 	t.Parallel()
 
@@ -167,9 +218,14 @@ func TestClientRejectsAmbiguousDomainInventory(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]string{
-		"missing main domain": `{"status":1,"data":{"main_domain":"","addon_domains":[],"sub_domains":[],"parked_domains":[]}}`,
-		"duplicate category":  `{"status":1,"data":{"main_domain":"example.test","addon_domains":["shared.test"],"sub_domains":["SHARED.TEST."],"parked_domains":[]}}`,
-		"blank array item":    `{"status":1,"data":{"main_domain":"example.test","addon_domains":[" "],"sub_domains":[],"parked_domains":[]}}`,
+		"missing main domain":  `{"status":1,"data":{"addon_domains":[],"sub_domains":[],"parked_domains":[]}}`,
+		"missing addon array":  `{"status":1,"data":{"main_domain":"example.test","sub_domains":[],"parked_domains":[]}}`,
+		"null subdomain array": `{"status":1,"data":{"main_domain":"example.test","addon_domains":[],"sub_domains":null,"parked_domains":[]}}`,
+		"wrong parked type":    `{"status":1,"data":{"main_domain":"example.test","addon_domains":[],"sub_domains":[],"parked_domains":{}}}`,
+		"duplicate category":   `{"status":1,"data":{"main_domain":"example.test","addon_domains":["shared.test"],"sub_domains":["SHARED.TEST."],"parked_domains":[]}}`,
+		"duplicate same type":  `{"status":1,"data":{"main_domain":"example.test","addon_domains":["shared.test","SHARED.TEST."],"sub_domains":[],"parked_domains":[]}}`,
+		"blank array item":     `{"status":1,"data":{"main_domain":"example.test","addon_domains":[" "],"sub_domains":[],"parked_domains":[]}}`,
+		"invalid label":        `{"status":1,"data":{"main_domain":"example.test","addon_domains":["bad_label.test"],"sub_domains":[],"parked_domains":[]}}`,
 	}
 	for name, payload := range tests {
 		payload := payload
@@ -190,6 +246,57 @@ func TestClientRejectsAmbiguousDomainInventory(t *testing.T) {
 				t.Fatal("ListDomains() returned no error")
 			}
 		})
+	}
+}
+
+func TestNormalizeInventoryDomainName(t *testing.T) {
+	t.Parallel()
+
+	valid := map[string]string{
+		"example.test":        "example.test",
+		"EXAMPLE.TEST.":       "example.test",
+		"a-b.example":         "a-b.example",
+		"xn--caf-dma.example": "xn--caf-dma.example",
+	}
+	for input, expected := range valid {
+		actual, err := normalizeInventoryDomainName(input)
+		if err != nil {
+			t.Fatalf(
+				"normalizeInventoryDomainName(%q) error: %v",
+				input,
+				err,
+			)
+		}
+		if actual != expected {
+			t.Fatalf(
+				"normalizeInventoryDomainName(%q) = %q, want %q",
+				input,
+				actual,
+				expected,
+			)
+		}
+	}
+
+	invalid := []string{
+		"",
+		" example.test",
+		"example.test ",
+		"localhost",
+		"a..test",
+		"-bad.test",
+		"bad-.test",
+		"bad_label.test",
+		"foo/bar.test",
+		strings.Repeat("a", 64) + ".test",
+		strings.Repeat("a", 250) + ".test",
+	}
+	for _, input := range invalid {
+		if _, err := normalizeInventoryDomainName(input); err == nil {
+			t.Fatalf(
+				"normalizeInventoryDomainName(%q) returned no error",
+				input,
+			)
+		}
 	}
 }
 

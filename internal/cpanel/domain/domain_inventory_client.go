@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 
 	"terraform-provider-cpanel/internal/cpanel"
 )
+
+var inventoryDomainLabelPattern = regexp.MustCompile(`^[a-z0-9-]+$`)
 
 func (c *Client) ListDomains(
 	ctx context.Context,
@@ -64,6 +67,13 @@ func normalizeDomainInventory(
 			)
 		}
 		if existingType, duplicate := seen[name]; duplicate {
+			if existingType == domainType {
+				return fmt.Errorf(
+					"cPanel returned duplicate %s domain %q",
+					domainType,
+					name,
+				)
+			}
 			return fmt.Errorf(
 				"cPanel domain %q appears as both %s and %s",
 				name,
@@ -127,9 +137,30 @@ func normalizeInventoryDomainName(value string) (string, error) {
 		)
 	}
 	normalized := strings.ToLower(strings.TrimSuffix(value, "."))
-	if normalized == "" ||
-		strings.ContainsAny(normalized, " \t\r\n") {
-		return "", fmt.Errorf("domain name %q is invalid", value)
+	if len(normalized) < 3 || len(normalized) > 253 {
+		return "", fmt.Errorf(
+			"domain name %q must contain between 3 and 253 ASCII characters",
+			value,
+		)
+	}
+	labels := strings.Split(normalized, ".")
+	if len(labels) < 2 {
+		return "", fmt.Errorf(
+			"domain name %q must contain at least one dot",
+			value,
+		)
+	}
+	for _, label := range labels {
+		if label == "" ||
+			len(label) > 63 ||
+			!inventoryDomainLabelPattern.MatchString(label) ||
+			strings.HasPrefix(label, "-") ||
+			strings.HasSuffix(label, "-") {
+			return "", fmt.Errorf(
+				"domain name %q contains an invalid label",
+				value,
+			)
+		}
 	}
 
 	return normalized, nil
