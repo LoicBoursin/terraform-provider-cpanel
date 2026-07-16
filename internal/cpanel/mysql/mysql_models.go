@@ -28,11 +28,7 @@ type User struct {
 	Databases []string `json:"databases"`
 }
 
-type RestrictionsResponse struct {
-	cpanel.UAPIDataSourceModel
-	Data Restrictions `json:"data"`
-}
-
+// Restrictions contains only the account's MySQL naming prefix and limits.
 type Restrictions struct {
 	MaxUsernameLength     int    `json:"max_username_length"`
 	MaxDatabaseNameLength int    `json:"max_database_name_length"`

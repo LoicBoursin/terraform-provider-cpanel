@@ -25,8 +25,11 @@ public-only OpenPGP keys, forwarders and autoresponders, BoxTrapper settings,
 FTP accounts, MySQL or MariaDB users and databases and remote hosts,
 PostgreSQL users and databases, filesystem directories and UTF-8 text files,
 and database grants. They also read the complete DAV user, DAV collection,
-calendar delegation, domain, SSL metadata, public OpenSSH key, and email
-inventories without mutating them. The email inventories cover mailbox
+calendar delegation, domain, SSL metadata, public OpenSSH key, email, and
+MySQL inventories without mutating them. The MySQL inventory coverage compares
+the complete database-name, user-name, normalized remote-host, and account
+naming-restriction state, while excluding disk usage, grants, passwords,
+notes, and server metadata. The email inventories cover mailbox
 addresses, mail domains, routing domain and mode pairs, domain forwarder
 domain and destination pairs, Mailman list addresses, and autoresponder
 addresses. They deliberately exclude quota, suspension, message or list

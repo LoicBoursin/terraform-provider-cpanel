@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"context"
+	"fmt"
 
 	"terraform-provider-cpanel/internal/cpanel"
 )
@@ -92,7 +93,7 @@ func (c *Client) GetPrivileges(
 }
 
 func (c *Client) GetRestrictions(ctx context.Context) (*Restrictions, error) {
-	response := RestrictionsResponse{}
+	response := restrictionsResponse{}
 	if err := c.executeReadOperation(
 		ctx,
 		operationGetRestrictions,
@@ -101,6 +102,18 @@ func (c *Client) GetRestrictions(ctx context.Context) (*Restrictions, error) {
 	); err != nil {
 		return nil, err
 	}
+	if err := rejectMySQLInventoryWarnings(
+		"MySQL restrictions",
+		response.Warnings,
+	); err != nil {
+		return nil, err
+	}
 
-	return &response.Data, nil
+	if response.Data == nil {
+		return nil, fmt.Errorf(
+			"cPanel MySQL restrictions data must be a non-null object",
+		)
+	}
+
+	return response.Data, nil
 }

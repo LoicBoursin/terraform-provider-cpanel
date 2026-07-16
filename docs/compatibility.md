@@ -624,6 +624,22 @@ update observed on the certified cPanel 134 environment. IPv4 addresses, IPv4
 CIDR prefixes, cPanel percent-wildcard IPv4 patterns, and hostnames are
 normalized before comparison.
 
+The input-free MySQL and MariaDB inventory data sources use
+`Mysql::list_databases`, `Mysql::list_users`, `Mysql::get_restrictions`, and
+the same authoritative `MysqlFE::listhosts` operation. They expose only sorted
+database names, sorted user names, sorted normalized remote hosts, and the
+account prefix plus maximum database and username lengths. Disk usage,
+database-to-user relationships, grants, passwords, short usernames, host
+notes, URI-encoded host forms, and database-server metadata are omitted.
+
+Database and user identities preserve cPanel's case and accept only non-empty
+ASCII letters, numbers, and underscores. Remote hosts use the resource
+normalizer before duplicate detection. Missing or null data, malformed fields,
+duplicate identities, invalid prefixes or limits, and top-level UAPI warnings
+fail the complete read instead of publishing partial state. API 2 remains
+necessary only for the complete authorized-host list; cPanel documents no UAPI
+equivalent.
+
 Per-domain ModSecurity reads and mutations use UAPI
 `ModSecurity::list_domains`, `ModSecurity::enable_domains`, and
 `ModSecurity::disable_domains`. The provider deliberately does not call the

@@ -912,6 +912,23 @@ user_count="$(jq -r '.data | length' "${response_file}")"
 test_prefix="${CPANEL_USERNAME}_tf"
 
 request 'execute/Mysql/list_databases' 'MySQL database check'
+if ! jq -e \
+  '
+    ((.warnings // []) | length) == 0
+    and (.data | type) == "array"
+    and all(
+      .data[];
+      (.database | type) == "string"
+      and (.database | length) > 0
+      and (.database | test("^[A-Za-z0-9_]+$"))
+    )
+    and ([.data[].database] | length) ==
+      ([.data[].database] | unique | length)
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'MySQL database inventory is incomplete or ambiguous\n' >&2
+  exit 1
+fi
 mysql_database_count="$(jq -r '.data | length' "${response_file}")"
 mysql_test_database_count="$(
   jq -r --arg prefix "${test_prefix}" \
@@ -920,6 +937,23 @@ mysql_test_database_count="$(
 )"
 
 request 'execute/Mysql/list_users' 'MySQL user check'
+if ! jq -e \
+  '
+    ((.warnings // []) | length) == 0
+    and (.data | type) == "array"
+    and all(
+      .data[];
+      (.user | type) == "string"
+      and (.user | length) > 0
+      and (.user | test("^[A-Za-z0-9_]+$"))
+    )
+    and ([.data[].user] | length) ==
+      ([.data[].user] | unique | length)
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'MySQL user inventory is incomplete or ambiguous\n' >&2
+  exit 1
+fi
 mysql_user_count="$(jq -r '.data | length' "${response_file}")"
 mysql_test_user_count="$(
   jq -r --arg prefix "${test_prefix}" \
@@ -927,9 +961,116 @@ mysql_test_user_count="$(
     "${response_file}"
 )"
 
+request 'execute/Mysql/get_restrictions' 'MySQL restriction check'
+if ! jq -e \
+  '
+    ((.warnings // []) | length) == 0
+    and (.data | type) == "object"
+    and (.data | has("prefix"))
+    and (
+      .data.prefix == null
+      or (
+        (.data.prefix | type) == "string"
+        and (
+          (.data.prefix | length) == 0
+          or (
+            (.data.prefix | test("^[A-Za-z0-9_]*_$"))
+          )
+        )
+      )
+    )
+    and (.data.max_database_name_length | type) == "number"
+    and (.data.max_database_name_length | floor) ==
+      .data.max_database_name_length
+    and .data.max_database_name_length > 0
+    and (.data.max_username_length | type) == "number"
+    and (.data.max_username_length | floor) ==
+      .data.max_username_length
+    and .data.max_username_length > 0
+    and ((.data.prefix // "") | length) <
+      .data.max_database_name_length
+    and ((.data.prefix // "") | length) <
+      .data.max_username_length
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'MySQL restriction inventory is incomplete or ambiguous\n' >&2
+  exit 1
+fi
+mysql_prefix="$(jq -r '.data.prefix // ""' "${response_file}")"
+mysql_max_database_name_length="$(
+  jq -r '.data.max_database_name_length' "${response_file}"
+)"
+mysql_max_username_length="$(
+  jq -r '.data.max_username_length' "${response_file}"
+)"
+
 request \
   "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=MysqlFE&cpanel_jsonapi_func=listhosts" \
   'remote MySQL host check'
+if ! jq -e \
+  '
+    def valid_ipv4_octet:
+      (type == "string")
+      and test("^(0|[1-9][0-9]{0,2})$")
+      and ((tonumber >= 0) and (tonumber <= 255));
+    def valid_wildcard_octet:
+      . == "%"
+      or (
+        (type == "string")
+        and test("^[0-9]{1,3}$")
+        and ((tonumber >= 0) and (tonumber <= 255))
+      );
+    def valid_ipv4:
+      split(".") as $parts
+      | ($parts | length) == 4
+      and all($parts[]; valid_ipv4_octet);
+    def valid_ipv4_cidr:
+      split("/") as $parts
+      | ($parts | length) == 2
+      and ($parts[0] | valid_ipv4)
+      and (
+        $parts[1]
+        | test("^(0|[1-9]|[12][0-9]|3[0-2])$")
+      );
+    def valid_ipv4_wildcard:
+      split(".") as $parts
+      | ($parts | length) == 4
+      and all($parts[]; valid_wildcard_octet);
+    def valid_hostname:
+      (length <= 253)
+      and (contains(":") | not)
+      and (test("^[0-9.]+$") | not)
+      and test(
+        "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$"
+      );
+    def valid_remote_host:
+      (type == "string")
+      and (length > 0)
+      and (test("[[:space:][:cntrl:]]") | not)
+      and (
+        if contains("%") then valid_ipv4_wildcard
+        elif contains("/") then valid_ipv4_cidr
+        elif test("^[0-9.]+$") then valid_ipv4
+        else valid_hostname
+        end
+      );
+    (.cpanelresult.event.result == 1)
+    and (.cpanelresult.data | type) == "array"
+    and all(
+      .cpanelresult.data[];
+      (.host | valid_remote_host)
+      and (.uri_host | type) == "string"
+      and (.uri_host | length) > 0
+    )
+    and ([.cpanelresult.data[].host] | length) ==
+      ([.cpanelresult.data[].host] | unique | length)
+    and ([.cpanelresult.data[].host | ascii_downcase] | length) ==
+      ([.cpanelresult.data[].host | ascii_downcase] | unique | length)
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'Remote MySQL host inventory is incomplete or ambiguous\n' >&2
+  exit 1
+fi
 mysql_remote_host_count="$(jq -r '.cpanelresult.data | length' "${response_file}")"
 mysql_test_remote_host_count="$(
   jq -r \
@@ -2033,6 +2174,10 @@ printf '  MySQL databases: %s (%s test-managed)\n' \
 printf '  MySQL users: %s (%s test-managed)\n' \
   "${mysql_user_count}" \
   "${mysql_test_user_count}"
+printf '  MySQL restrictions: prefix=%q database=%s user=%s\n' \
+  "${mysql_prefix}" \
+  "${mysql_max_database_name_length}" \
+  "${mysql_max_username_length}"
 printf '  remote MySQL hosts: %s (%s test-managed)\n' \
   "${mysql_remote_host_count}" \
   "${mysql_test_remote_host_count}"

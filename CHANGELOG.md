@@ -92,6 +92,10 @@
   cPanel 134 acceptance coverage.
 - MySQL and MariaDB user and database resources, matching data sources, import,
   drift recovery, privilege management, and cPanel 134 acceptance coverage.
+- Input-free MySQL and MariaDB inventory data sources for database names, user
+  names, normalized remote hosts, and account naming restrictions. The
+  inventories reject malformed, duplicate, or warning-bearing responses and
+  omit disk usage, grants, passwords, host notes, and server metadata.
 - Remote MySQL host resource and data source with IPv4, CIDR, wildcard, and
   hostname identities, optional notes, import, drift recovery, isolated
   cleanup, and cPanel 134 acceptance coverage.

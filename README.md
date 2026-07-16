@@ -82,6 +82,10 @@ Additional read-only account data sources:
 - `cpanel_email_domains`
 - `cpanel_email_mailing_lists`
 - `cpanel_email_routings`
+- `cpanel_mysql_databases`
+- `cpanel_mysql_remote_hosts`
+- `cpanel_mysql_restrictions`
+- `cpanel_mysql_users`
 - `cpanel_resource_usage`
 - `cpanel_ssh_public_key`
 - `cpanel_ssh_public_keys`
