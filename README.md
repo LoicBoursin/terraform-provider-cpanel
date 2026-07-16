@@ -76,6 +76,12 @@ Additional read-only account data sources:
 - `cpanel_calendar_delegates`
 - `cpanel_dav_users`
 - `cpanel_domains`
+- `cpanel_email_accounts`
+- `cpanel_email_auto_responders`
+- `cpanel_email_domain_forwarders`
+- `cpanel_email_domains`
+- `cpanel_email_mailing_lists`
+- `cpanel_email_routings`
 - `cpanel_resource_usage`
 - `cpanel_ssh_public_key`
 - `cpanel_ssh_public_keys`

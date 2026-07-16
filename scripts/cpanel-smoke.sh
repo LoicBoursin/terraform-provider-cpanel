@@ -1058,6 +1058,34 @@ email_test_suspended_count="$(
 email_accounts="$(jq -r '.data[].email' "${response_file}")"
 
 request \
+  'execute/Email/list_pops?skip_main=1' \
+  'Email address inventory'
+if ! jq -e \
+  '
+    (.data | type) == "array"
+    and all(
+      .data[];
+      (.email? | type) == "string"
+      and (.email | contains("@"))
+    )
+    and (
+      ([.data[].email] | length)
+      == ([.data[].email] | unique | length)
+    )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'Email address inventory is incomplete or ambiguous\n' >&2
+  exit 1
+fi
+email_address_inventory_count="$(jq -r '.data | length' "${response_file}")"
+if [[ "${email_address_inventory_count}" != "${email_account_count}" ]]; then
+  printf 'Email address inventories disagree: %s != %s\n' \
+    "${email_address_inventory_count}" \
+    "${email_account_count}" >&2
+  exit 1
+fi
+
+request \
   "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=BoxTrapper&cpanel_jsonapi_func=accountmanagelist" \
   'BoxTrapper account inventory'
 if ! jq -e \
@@ -1493,6 +1521,30 @@ email_test_non_auto_routing_count="$(
 )"
 
 request 'execute/Email/list_mail_domains' 'Email forwarder domain inventory'
+if ! jq -e \
+  '
+    def normalized_domain:
+      ascii_downcase
+      | if endswith(".") then .[0:-1] else . end;
+    (.data | type) == "array"
+    and all(
+      .data[];
+      (.domain? | type) == "string"
+      and (.domain | length) >= 3
+      and (.domain | length) <= 254
+      and (.domain | contains("."))
+      and (.domain | test("^[^[:space:]]+$"))
+    )
+    and (
+      ([.data[].domain | normalized_domain] | length)
+      == ([.data[].domain | normalized_domain] | unique | length)
+    )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'Email mail domain inventory is incomplete or ambiguous\n' >&2
+  exit 1
+fi
+email_domain_count="$(jq -r '.data | length' "${response_file}")"
 mail_domains="$(jq -r '.data[].domain' "${response_file}")"
 email_forwarder_count=0
 email_test_forwarder_count=0
@@ -2014,6 +2066,7 @@ printf '  email mailing lists: %s (%s test-managed)\n' \
 printf '  email routing domains: %s (%s test non-auto)\n' \
   "${email_routing_count}" \
   "${email_test_non_auto_routing_count}"
+printf '  email domains: %s\n' "${email_domain_count}"
 printf '  email forwarders: %s (%s test-managed)\n' \
   "${email_forwarder_count}" \
   "${email_test_forwarder_count}"

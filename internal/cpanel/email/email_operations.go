@@ -12,6 +12,7 @@ const (
 	operationEditAccountQuota  = "edit_pop_quota"
 	operationGetAutoResponder  = "get_auto_responder"
 	operationListAccounts      = "list_pops_with_disk"
+	operationListAddresses     = "list_pops"
 	operationListAutoResp      = "list_auto_responders"
 	operationListDomainFwds    = "list_domain_forwarders"
 	operationListForwarders    = "list_forwarders"

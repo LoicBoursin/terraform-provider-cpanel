@@ -33,17 +33,7 @@ func (c *Client) DeleteDomainForwarder(
 func (c *Client) ListDomainForwarders(
 	ctx context.Context,
 ) ([]DomainForwarder, error) {
-	response := DomainForwarderListResponse{}
-	if err := c.executeReadOperation(
-		ctx,
-		operationListDomainFwds,
-		map[string]string{},
-		&response,
-	); err != nil {
-		return nil, err
-	}
-
-	return response.Data, nil
+	return c.listDomainForwardersStrict(ctx)
 }
 
 func (c *Client) GetDomainForwarder(

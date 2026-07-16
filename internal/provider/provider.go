@@ -75,8 +75,8 @@ func (p *cpanelProvider) Metadata(_ context.Context, _ provider.MetadataRequest,
 // Schema defines the provider-level schema for configuration data.
 func (p *cpanelProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description:         "Inspect cPanel account capabilities, resource usage, and public OpenSSH keys, and manage API tokens, locale, raw access log settings, account notification preferences, documented SpamAssassin preferences, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates and certificate signing requests, public-only OpenPGP keys, Passenger applications, ModSecurity settings, HTTP redirects, filesystem directories and text files, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, account-level and mailbox-level filters, BoxTrapper settings, calendar delegations, forwarders, autoresponders, Mailman mailing lists, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
-		MarkdownDescription: "Inspect cPanel account capabilities, resource usage, and public OpenSSH keys, and manage API tokens, locale, raw access log settings, account notification preferences, documented SpamAssassin preferences, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates and certificate signing requests, public-only OpenPGP keys, Passenger applications, ModSecurity settings, HTTP redirects, filesystem directories and text files, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, account-level and mailbox-level filters, BoxTrapper settings, calendar delegations, forwarders, autoresponders, Mailman mailing lists, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		Description:         "Inspect cPanel account capabilities, resource usage, public OpenSSH keys, domains, DAV users, SSL metadata, and email inventories, and manage API tokens, locale, raw access log settings, account notification preferences, documented SpamAssassin preferences, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates and certificate signing requests, public-only OpenPGP keys, Passenger applications, ModSecurity settings, HTTP redirects, filesystem directories and text files, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, account-level and mailbox-level filters, BoxTrapper settings, calendar delegations, forwarders, autoresponders, Mailman mailing lists, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		MarkdownDescription: "Inspect cPanel account capabilities, resource usage, public OpenSSH keys, domains, DAV users, SSL metadata, and email inventories, and manage API tokens, locale, raw access log settings, account notification preferences, documented SpamAssassin preferences, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates and certificate signing requests, public-only OpenPGP keys, Passenger applications, ModSecurity settings, HTTP redirects, filesystem directories and text files, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, account-level and mailbox-level filters, BoxTrapper settings, calendar delegations, forwarders, autoresponders, Mailman mailing lists, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
 		Attributes: map[string]schema.Attribute{
 			"username": schema.StringAttribute{
 				Optional:            true,
@@ -336,13 +336,19 @@ func (p *cpanelProvider) DataSources(_ context.Context) []func() datasource.Data
 		NewDomainsDataSource,
 		NewDynamicDNSDataSource,
 		NewEmailAccountDataSource,
+		NewEmailAccountsDataSource,
 		NewEmailAccountSuspensionDataSource,
 		NewEmailAutoResponderDataSource,
+		NewEmailAutoRespondersDataSource,
 		NewEmailDomainForwarderDataSource,
+		NewEmailDomainForwardersDataSource,
+		NewEmailDomainsDataSource,
 		NewEmailFilterDataSource,
 		NewEmailForwarderDataSource,
 		NewEmailMailingListDataSource,
+		NewEmailMailingListsDataSource,
 		NewEmailRoutingDataSource,
+		NewEmailRoutingsDataSource,
 		NewFilesystemDirectoryDataSource,
 		NewFilesystemTextFileDataSource,
 		NewFTPAccountDataSource,

@@ -25,21 +25,32 @@ public-only OpenPGP keys, forwarders and autoresponders, BoxTrapper settings,
 FTP accounts, MySQL or MariaDB users and databases and remote hosts,
 PostgreSQL users and databases, filesystem directories and UTF-8 text files,
 and database grants. They also read the complete DAV user, DAV collection,
-calendar delegation, domain, SSL metadata, and public OpenSSH key inventories
-without mutating them. GPG acceptance tests generate public-only RSA fixtures
-locally, verify that the cPanel secret-key inventory never changes, and preserve
-remote public keys when Terraform destroys the resource. Dedicated-account
-cleanup refuses pair deletion unless the account explicitly opts in and its
-persisted baseline declares zero secret keys. BoxTrapper tests use disposable
-mailboxes without sending messages and restore the captured settings before
-mailbox deletion. They verify that configuration changes are rejected while
-cPanel reports a null sender name, then establish a non-null fixture name
-explicitly for the complete lifecycle. Locale acceptance tests temporarily
-change the account display locale and restore the persisted test-account
-baseline. Log settings tests temporarily change archive, pruning, and retention
-preferences and restore the same durable baseline. Notification preference
-tests temporarily change account alerts and restore the complete persisted
-preference map. Use a dedicated cPanel test account.
+calendar delegation, domain, SSL metadata, public OpenSSH key, and email
+inventories without mutating them. The email inventories cover mailbox
+addresses, mail domains, routing domain and mode pairs, domain forwarder
+domain and destination pairs, Mailman list addresses, and autoresponder
+addresses. They deliberately exclude quota, suspension, message or list
+content, and detailed MX metadata. Autoresponder coverage first reads
+`Email::list_mail_domains`, then reads `Email::list_auto_responders` once per
+normalized domain so a missing domain response cannot silently produce partial
+state. The combined inventory test also creates one disposable mailbox,
+Mailman list, autoresponder, and main-domain forwarder, verifies that each
+appears in the complete state, destroys them, and compares every inventory
+with the captured baseline. GPG acceptance tests generate public-only RSA
+fixtures locally, verify that the cPanel secret-key inventory never changes,
+and preserve remote public keys when Terraform destroys the resource.
+Dedicated-account cleanup refuses pair deletion unless the account explicitly
+opts in and its persisted baseline declares zero secret keys. BoxTrapper tests
+use disposable mailboxes without sending messages and restore the captured
+settings before mailbox deletion.
+They verify that configuration changes are rejected while cPanel reports a
+null sender name, then establish a non-null fixture name explicitly for the
+complete lifecycle. Locale acceptance tests temporarily change the account
+display locale and restore the persisted test-account baseline. Log settings
+tests temporarily change archive, pruning, and retention preferences and
+restore the same durable baseline. Notification preference tests temporarily
+change account alerts and restore the complete persisted preference map. Use a
+dedicated cPanel test account.
 
 The scripts load credentials from the file specified by `CPANEL_ENV_FILE`. When
 that variable is unset, they use:

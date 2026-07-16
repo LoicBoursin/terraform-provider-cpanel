@@ -118,22 +118,7 @@ func (c *Client) GetAccount(
 }
 
 func (c *Client) ListMailDomains(ctx context.Context) ([]string, error) {
-	response := MailDomainListResponse{}
-	if err := c.executeReadOperation(
-		ctx,
-		operationListMailDomains,
-		map[string]string{},
-		&response,
-	); err != nil {
-		return nil, err
-	}
-
-	domains := make([]string, 0, len(response.Data))
-	for _, domain := range response.Data {
-		domains = append(domains, domain.Domain)
-	}
-
-	return domains, nil
+	return c.listMailDomainsStrict(ctx)
 }
 
 func (c *Client) SetLoginSuspended(

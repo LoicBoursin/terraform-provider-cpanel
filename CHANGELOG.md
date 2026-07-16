@@ -59,6 +59,17 @@
   sources, with deterministic ordering, strict duplicate rejection, and no
   mutation operations, certified on cPanel 134 with Terraform `1.14.9` and
   `1.15.8`.
+- Six input-free, read-only email inventory data sources for mailbox addresses,
+  mail domains, routing modes, domain forwarders, Mailman list addresses, and
+  autoresponder addresses. Results are normalized, duplicate-checked, and
+  deterministically sorted, and top-level UAPI warnings fail the complete read
+  closed, while omitting mailbox quota and suspension data, mailing-list and
+  autoresponder content, and detailed MX metadata.
+  Autoresponders are discovered across every mail domain with
+  `Email::list_mail_domains` followed by one
+  `Email::list_auto_responders` request per domain. Empty-baseline and
+  temporary non-empty fixtures are certified on cPanel 134 with Terraform
+  `1.14.9` and `1.15.8`, including exact post-test restoration.
 - User-level email filter resource and data source with ordered rules and
   actions, enable or disable updates, rename, import, drift recovery,
   mailbox-scoped mutation serialization, safe-action enforcement, read-only

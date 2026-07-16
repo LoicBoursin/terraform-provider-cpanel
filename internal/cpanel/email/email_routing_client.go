@@ -49,7 +49,7 @@ type Routing struct {
 
 type routingListResponse struct {
 	cpanel.UAPIDataSourceModel
-	Data []apiRouting `json:"data"`
+	Data json.RawMessage `json:"data"`
 }
 
 type routingMutationResponse struct {
@@ -115,10 +115,23 @@ func (c *Client) ListRoutings(
 	); err != nil {
 		return nil, err
 	}
+	if err := rejectEmailInventoryWarnings(
+		"email routing inventory",
+		response.Warnings,
+	); err != nil {
+		return nil, err
+	}
+	rows, err := decodeEmailInventoryRows[apiRouting](
+		response.Data,
+		"email routing inventory",
+	)
+	if err != nil {
+		return nil, err
+	}
 
-	routings := make([]Routing, 0, len(response.Data))
-	seenDomains := make(map[string]struct{}, len(response.Data))
-	for index, apiValue := range response.Data {
+	routings := make([]Routing, 0, len(rows))
+	seenDomains := make(map[string]struct{}, len(rows))
+	for index, apiValue := range rows {
 		routing, err := routingFromAPI(apiValue)
 		if err != nil {
 			return nil, fmt.Errorf(

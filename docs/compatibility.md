@@ -47,6 +47,9 @@ including restoration of its pre-test value, plus Passenger application
 registration, updates, replacement, import, drift detection, remote deletion,
 recreation, and cleanup.
 
+The six input-free email inventory data sources are included in this certified
+cPanel 134 matrix with Terraform `1.14.9` and `1.15.8`.
+
 Account capability reads use UAPI `Features::list_features`,
 `StatsBar::get_stats`, and `Variables::get_user_information`. The
 `cpanel_account_capabilities` data source exposes the complete feature flag map,
@@ -370,6 +373,38 @@ the `SVCB` capability function.
 The email account resource deliberately uses the email-service API instead of
 creating a cPanel subaccount. It manages only the mailbox and cannot
 accidentally enable or delete FTP and WebDisk services that share a username.
+
+The six input-free email inventory data sources use read-only UAPI operations
+and expose deliberately minimal state:
+
+- `cpanel_email_accounts` calls `Email::list_pops` with `skip_main=1`, then
+  exposes only the sorted virtual-mailbox `addresses`. It omits suspension
+  flags and the cPanel system account.
+- `cpanel_email_domains` calls `Email::list_mail_domains` and exposes only the
+  sorted `domains`.
+- `cpanel_email_routings` calls the complete, unfiltered `Email::list_mxs`
+  inventory and exposes only sorted `routings` objects containing `domain` and
+  `mode`. The public modes are `auto`, `local`, `backup`, and `remote`;
+  cPanel's `secondary` value is normalized to `backup`. Routing flags, MX
+  entries, primary exchangers, statuses, and warnings are not stored.
+- `cpanel_email_domain_forwarders` calls
+  `Email::list_domain_forwarders` and exposes only sorted `forwarders` objects
+  containing `domain` and `destination`.
+- `cpanel_email_mailing_lists` calls `Email::list_lists` and exposes only the
+  sorted list `addresses`, without administrator, privacy, disk-usage,
+  subscriber, archive, or other Mailman content.
+- `cpanel_email_auto_responders` first calls `Email::list_mail_domains`, then
+  calls the domain-scoped `Email::list_auto_responders` once for every
+  normalized mail domain. This deliberate N+1 strategy produces one complete,
+  sorted `addresses` list without storing subjects, message bodies, schedules,
+  character sets, repeat intervals, or HTML flags.
+
+All six inventories normalize domains, preserve valid address local parts,
+sort by their stable public identities, and reject malformed, incomplete,
+cross-domain, or duplicate entries. Any top-level UAPI warning fails the
+complete read because cPanel cannot prove that the returned inventory is
+complete. A failed per-domain autoresponder request likewise fails the complete
+read instead of publishing partial state.
 
 Calendar delegation reads use `CPDAVD::list_users` and
 `CPDAVD::list_delegates` on the certified cPanel 134 environment. cPanel 120
