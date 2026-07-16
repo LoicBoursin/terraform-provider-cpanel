@@ -70,6 +70,7 @@ Matching data sources are available for each resource family.
 Additional read-only account data sources:
 
 - `cpanel_account_capabilities`
+- `cpanel_resource_usage`
 
 ## Requirements
 

@@ -93,6 +93,9 @@
   bool map, exact key-set validation, singleton import, drift recovery,
   restoration of the complete pre-management settings, JSON UAPI mutations,
   and cPanel 134 acceptance coverage.
+- Resource usage data source with strict mixed scalar decoding, stable metric
+  ordering, omission of internal navigation URLs, and cPanel 134 acceptance
+  coverage.
 - Stored SSL certificate signing request resource and data source with
   generation from an existing cPanel key, RSA and ECDSA public-key
   verification, in-place friendly-name updates, import, drift recovery,

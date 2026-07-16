@@ -52,6 +52,11 @@ non-sensitive account identity fields. It deliberately omits contact e-mail
 addresses, IP addresses, UUIDs, API credentials, and other unrelated fields
 returned by cPanel.
 
+Resource usage reads use UAPI `ResourceUsage::get_usages`. The
+`cpanel_resource_usage` data source preserves numeric precision by exposing
+usage and maximum values as strings, keeps nullable limits explicit, and omits
+cPanel navigation URLs from Terraform state.
+
 ## API policy
 
 Email account, direct and domain email forwarder, autoresponder, FTP account,
