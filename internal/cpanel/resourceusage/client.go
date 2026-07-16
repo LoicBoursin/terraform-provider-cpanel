@@ -72,14 +72,6 @@ func decodeMetric(apiMetric apiMetric) (Metric, error) {
 		)
 	}
 
-	description := strings.TrimSpace(apiMetric.Description)
-	if description == "" {
-		return Metric{}, fmt.Errorf(
-			"cPanel returned an empty description for resource usage metric %q",
-			id,
-		)
-	}
-
 	usage, err := decodeScalar(apiMetric.Usage, false)
 	if err != nil {
 		return Metric{}, fmt.Errorf(
@@ -104,22 +96,11 @@ func decodeMetric(apiMetric apiMetric) (Metric, error) {
 			err,
 		)
 	}
-	metricError, err := decodeScalar(apiMetric.Error, true)
-	if err != nil {
-		return Metric{}, fmt.Errorf(
-			"decode cPanel resource usage metric %q error: %w",
-			id,
-			err,
-		)
-	}
-
 	return Metric{
-		Description: description,
-		Error:       metricError,
-		Formatter:   formatter,
-		ID:          id,
-		Maximum:     maximum,
-		Usage:       *usage,
+		Formatter: formatter,
+		ID:        id,
+		Maximum:   maximum,
+		Usage:     *usage,
 	}, nil
 }
 

@@ -62,16 +62,13 @@ func TestClientGet(t *testing.T) {
 	if metrics[0].Usage != "18864694" ||
 		metrics[0].Maximum != nil ||
 		metrics[0].Formatter == nil ||
-		*metrics[0].Formatter != "format_bytes" ||
-		metrics[0].Error == nil ||
-		*metrics[0].Error != "delayed" {
+		*metrics[0].Formatter != "format_bytes" {
 		t.Fatalf("bandwidth metric = %#v", metrics[0])
 	}
 	if metrics[1].Usage != "1.25" ||
 		metrics[1].Maximum == nil ||
 		*metrics[1].Maximum != "100" ||
-		metrics[1].Formatter != nil ||
-		metrics[1].Error != nil {
+		metrics[1].Formatter != nil {
 		t.Fatalf("CPU metric = %#v", metrics[1])
 	}
 }
@@ -97,10 +94,6 @@ func TestClientGetRejectsInvalidInventories(t *testing.T) {
 		"invalid ID": {
 			data:      `[{"id":"Disk Usage","description":"Disk","usage":1}]`,
 			wantError: "invalid resource usage metric ID",
-		},
-		"empty description": {
-			data:      `[{"id":"disk_usage","description":" ","usage":1}]`,
-			wantError: "empty description",
 		},
 		"null usage": {
 			data:      `[{"id":"disk_usage","description":"Disk","usage":null}]`,

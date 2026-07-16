@@ -55,7 +55,8 @@ returned by cPanel.
 Resource usage reads use UAPI `ResourceUsage::get_usages`. The
 `cpanel_resource_usage` data source preserves numeric precision by exposing
 usage and maximum values as strings, keeps nullable limits explicit, and omits
-cPanel navigation URLs from Terraform state.
+cPanel navigation URLs, localized descriptions, and raw metric errors from
+Terraform state.
 
 ## API policy
 

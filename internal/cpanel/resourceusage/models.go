@@ -14,19 +14,15 @@ type response struct {
 }
 
 type apiMetric struct {
-	Description string          `json:"description"`
-	Error       json.RawMessage `json:"error"`
-	Formatter   json.RawMessage `json:"formatter"`
-	ID          string          `json:"id"`
-	Maximum     json.RawMessage `json:"maximum"`
-	Usage       json.RawMessage `json:"usage"`
+	Formatter json.RawMessage `json:"formatter"`
+	ID        string          `json:"id"`
+	Maximum   json.RawMessage `json:"maximum"`
+	Usage     json.RawMessage `json:"usage"`
 }
 
 type Metric struct {
-	Description string
-	Error       *string
-	Formatter   *string
-	ID          string
-	Maximum     *string
-	Usage       string
+	Formatter *string
+	ID        string
+	Maximum   *string
+	Usage     string
 }

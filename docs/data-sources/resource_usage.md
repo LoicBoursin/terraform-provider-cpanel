@@ -39,8 +39,6 @@ output "resource_usage" {
 
 Read-Only:
 
-- `description` (String) The localized metric description.
-- `error` (String) The metric-specific collection error, when reported.
 - `formatter` (String) The cPanel display formatter, when reported, such as `format_bytes`.
 - `id` (String) The stable cPanel metric identifier.
 - `maximum` (String) The reported maximum as a decimal or integer string, or `null` when cPanel reports no maximum.

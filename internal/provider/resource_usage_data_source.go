@@ -30,12 +30,10 @@ type ResourceUsageDataSourceModel struct {
 }
 
 type ResourceUsageMetricModel struct {
-	Description types.String `tfsdk:"description"`
-	Error       types.String `tfsdk:"error"`
-	Formatter   types.String `tfsdk:"formatter"`
-	ID          types.String `tfsdk:"id"`
-	Maximum     types.String `tfsdk:"maximum"`
-	Usage       types.String `tfsdk:"usage"`
+	Formatter types.String `tfsdk:"formatter"`
+	ID        types.String `tfsdk:"id"`
+	Maximum   types.String `tfsdk:"maximum"`
+	Usage     types.String `tfsdk:"usage"`
 }
 
 func (d *resourceUsageDataSource) Metadata(
@@ -71,11 +69,6 @@ func (d *resourceUsageDataSource) Schema(
 							Description:         "The stable cPanel metric identifier.",
 							MarkdownDescription: "The stable cPanel metric identifier.",
 						},
-						"description": schema.StringAttribute{
-							Computed:            true,
-							Description:         "The localized metric description.",
-							MarkdownDescription: "The localized metric description.",
-						},
 						"usage": schema.StringAttribute{
 							Computed:            true,
 							Description:         "The current usage exactly as a decimal or integer string.",
@@ -90,11 +83,6 @@ func (d *resourceUsageDataSource) Schema(
 							Computed:            true,
 							Description:         "The cPanel display formatter, when reported.",
 							MarkdownDescription: "The cPanel display formatter, when reported, such as `format_bytes`.",
-						},
-						"error": schema.StringAttribute{
-							Computed:            true,
-							Description:         "The metric-specific collection error, when reported.",
-							MarkdownDescription: "The metric-specific collection error, when reported.",
 						},
 					},
 				},
@@ -123,12 +111,10 @@ func (d *resourceUsageDataSource) Read(
 	}
 	for _, metric := range metrics {
 		metricModel := ResourceUsageMetricModel{
-			Description: types.StringValue(metric.Description),
-			Error:       resourceUsageNullableStringValue(metric.Error),
-			Formatter:   resourceUsageNullableStringValue(metric.Formatter),
-			ID:          types.StringValue(metric.ID),
-			Maximum:     resourceUsageNullableStringValue(metric.Maximum),
-			Usage:       types.StringValue(metric.Usage),
+			Formatter: resourceUsageNullableStringValue(metric.Formatter),
+			ID:        types.StringValue(metric.ID),
+			Maximum:   resourceUsageNullableStringValue(metric.Maximum),
+			Usage:     types.StringValue(metric.Usage),
 		}
 		model.Metrics = append(model.Metrics, metricModel)
 	}

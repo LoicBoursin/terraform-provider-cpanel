@@ -33,11 +33,9 @@ func TestResourceUsageDataSourceSchema(t *testing.T) {
 	}
 	for _, attributeName := range []string{
 		"id",
-		"description",
 		"usage",
 		"maximum",
 		"formatter",
-		"error",
 	} {
 		attribute, ok := metrics.NestedObject.Attributes[attributeName].(datasourceschema.StringAttribute)
 		if !ok || !attribute.Computed || attribute.Sensitive {
@@ -100,9 +98,6 @@ func testCheckResourceUsageMetric(
 			}
 			if id != metricID {
 				continue
-			}
-			if resourceState.Primary.Attributes[prefix+"description"] == "" {
-				return fmt.Errorf("%s description is empty", metricID)
 			}
 			if resourceState.Primary.Attributes[prefix+"usage"] == "" {
 				return fmt.Errorf("%s usage is empty", metricID)
