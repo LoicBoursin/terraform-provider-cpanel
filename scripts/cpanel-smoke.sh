@@ -631,6 +631,90 @@ if [[
   exit 1
 fi
 
+request \
+  "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=SSH&cpanel_jsonapi_func=listkeys&pub=1" \
+  'SSH public-key inventory'
+if ! jq -e \
+  '
+    def ssh_authorization:
+      if (
+        . == true
+        or . == 1
+        or . == "1"
+        or . == "true"
+        or . == "yes"
+        or . == "authorized"
+      ) then true
+      elif (
+        . == false
+        or . == 0
+        or . == "0"
+        or . == "false"
+        or . == "no"
+        or . == "deauthorized"
+        or . == "unauthorized"
+        or . == "not authorized"
+      ) then false
+      else error("invalid SSH authorization value")
+      end;
+    (.cpanelresult.data | type == "array")
+    and all(
+      .cpanelresult.data[];
+      (.name? | type) == "string"
+      and (.name | test("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"))
+      and (.name | endswith(".pub") | not)
+      and (.key? == (.name + ".pub"))
+      and (.file? | type) == "string"
+      and (
+        .name as $name
+        | .file
+        | endswith("/" + $name + ".pub")
+      )
+      and (
+        [
+          (
+            .auth?,
+            .authstatus?
+          )
+          | select(. != null and . != "")
+          | if type == "string" then ascii_downcase else . end
+          | ssh_authorization
+        ] as $authorization
+        | ($authorization | length) > 0
+        and ($authorization | unique | length) == 1
+      )
+      and ((.ctime | tostring) | test("^[0-9]+$"))
+      and ((.mtime | tostring) | test("^[0-9]+$"))
+    )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'SSH public-key inventory is incomplete\n' >&2
+  exit 1
+fi
+ssh_public_key_count="$(
+  jq -r '.cpanelresult.data | length' "${response_file}"
+)"
+ssh_public_test_key_count="$(
+  jq -r \
+    '
+      [
+        .cpanelresult.data[]
+        | select(.name | startswith("tfcpanelssh"))
+      ]
+      | length
+    ' \
+    "${response_file}"
+)"
+if [[
+  -n "${CPANEL_EXPECTED_SSH_PUBLIC_COUNT:-}"
+  && "${ssh_public_key_count}" != "${CPANEL_EXPECTED_SSH_PUBLIC_COUNT}"
+ ]]; then
+  printf 'SSH public-key count is %s; expected restored count %s\n' \
+    "${ssh_public_key_count}" \
+    "${CPANEL_EXPECTED_SSH_PUBLIC_COUNT}" >&2
+  exit 1
+fi
+
 request 'execute/Postgresql/list_databases' 'PostgreSQL database check'
 database_count="$(jq -r '.data | length' "${response_file}")"
 
@@ -1434,6 +1518,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${ssl_certificate_test_count}" != "0"
     || "${gpg_public_test_key_count}" != "0"
     || "${gpg_secret_test_key_count}" != "0"
+    || "${ssh_public_test_key_count}" != "0"
     || "${database_count}" != "0"
     || "${user_count}" != "0"
     || "${mysql_test_database_count}" != "0"
@@ -1486,6 +1571,8 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
       "${gpg_public_test_key_count}" >&2
     printf '  test GPG secret keys: %s\n' \
       "${gpg_secret_test_key_count}" >&2
+    printf '  test SSH public keys: %s\n' \
+      "${ssh_public_test_key_count}" >&2
     printf '  PostgreSQL databases: %s\n' "${database_count}" >&2
     printf '  PostgreSQL users: %s\n' "${user_count}" >&2
     printf '  MySQL test databases: %s\n' "${mysql_test_database_count}" >&2
@@ -1591,6 +1678,9 @@ printf '  GPG public keys: %s (%s test-managed)\n' \
 printf '  GPG secret keys: %s (%s test-managed)\n' \
   "${gpg_secret_key_count}" \
   "${gpg_secret_test_key_count}"
+printf '  SSH public keys: %s (%s test-managed)\n' \
+  "${ssh_public_key_count}" \
+  "${ssh_public_test_key_count}"
 printf '  public_html directory index: %s\n' "${public_html_index_type}"
 printf '  public_html directory protected: %s\n' "${public_html_protected}"
 printf '  PostgreSQL databases: %s\n' "${database_count}"

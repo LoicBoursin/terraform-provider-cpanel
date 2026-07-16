@@ -24,7 +24,8 @@ stored public SSL certificate signing requests, calendar delegations,
 public-only OpenPGP keys, forwarders and autoresponders, BoxTrapper settings,
 FTP accounts, MySQL or MariaDB users and databases and remote hosts,
 PostgreSQL users and databases, filesystem directories and UTF-8 text files,
-and database grants. GPG acceptance tests generate public-only RSA fixtures
+and database grants. They also read the complete public OpenSSH key inventory
+without mutating it. GPG acceptance tests generate public-only RSA fixtures
 locally, verify that the cPanel secret-key inventory never changes, and preserve
 remote public keys when Terraform destroys the resource. Dedicated-account
 cleanup refuses pair deletion unless the account explicitly opts in and its
@@ -75,6 +76,7 @@ CPANEL_EXPECTED_NOTIFICATION_PREFERENCES='{"notify_account_authn_link":true,"not
 CPANEL_EXPECTED_SPAM_PREFERENCES='{}'
 CPANEL_EXPECTED_GPG_PUBLIC_COUNT=0
 CPANEL_EXPECTED_GPG_SECRET_COUNT=0
+CPANEL_EXPECTED_SSH_PUBLIC_COUNT=0
 CPANEL_ALLOW_GPG_KEYPAIR_DELETE=0
 ```
 
@@ -98,6 +100,11 @@ only `required_score`, `score`, `whitelist_from`, and `blacklist_from`.
 disposable acceptance account whose expected secret-key count is explicitly
 `0`. Set it to `1` only to run the destructive GPG acceptance lifecycle and
 cleanup. cPanel exposes no public-only deletion function.
+
+`CPANEL_EXPECTED_SSH_PUBLIC_COUNT` is the exact clean-account public SSH-key
+count. SSH cleanup is read-only: it never reads private-key inventory and
+fails for manual review if a name begins with the reserved `tfcpanelssh`
+prefix, because cPanel's SSH mutations are name-only and non-atomic.
 
 Run the non-destructive API and capability checks with:
 
@@ -172,6 +179,9 @@ that follow the test naming contract:
   `CPANEL_ALLOW_GPG_KEYPAIR_DELETE=1` opt-in before calling cPanel's only
   deletion function, `GPG::delete_keypair`, once. Ambiguous responses are
   reconciled by read-only inventories without replaying the POST;
+- SSH public-key base names beginning with `tfcpanelssh`; cleanup refuses
+  automatic mutation and fails for manual review, while the final smoke test
+  verifies the exact total from `CPANEL_EXPECTED_SSH_PUBLIC_COUNT`;
 - email account local parts beginning with `tfcpanel`;
 - BoxTrapper test mailbox local parts beginning with
   `tfcpanelboxtrapper`; cleanup verifies that the challenge queue is empty,

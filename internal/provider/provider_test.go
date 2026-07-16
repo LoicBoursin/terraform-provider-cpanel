@@ -49,6 +49,7 @@ import (
 	"terraform-provider-cpanel/internal/cpanel/postgresql"
 	cpanelredirect "terraform-provider-cpanel/internal/cpanel/redirect"
 	cpanelspam "terraform-provider-cpanel/internal/cpanel/spamassassin"
+	cpanelssh "terraform-provider-cpanel/internal/cpanel/ssh"
 	cpanelsslcertificate "terraform-provider-cpanel/internal/cpanel/sslcertificate"
 	cpanelsslcsr "terraform-provider-cpanel/internal/cpanel/sslcsr"
 	cpanelversioncontrol "terraform-provider-cpanel/internal/cpanel/versioncontrol"
@@ -208,6 +209,9 @@ func testAccPreCheck(t *testing.T) {
 	}
 	if _, _, err := cpanelgpg.NewClient(client).Inventory(ctx); err != nil {
 		t.Fatalf("verify GPG API access: %v", err)
+	}
+	if _, err := cpanelssh.NewClient(client).List(ctx); err != nil {
+		t.Fatalf("verify SSH public-key API access: %v", err)
 	}
 	if _, err := cpanelipblock.NewClient(client).ListAddresses(ctx); err != nil {
 		t.Fatalf("verify IP blocker API access: %v", err)

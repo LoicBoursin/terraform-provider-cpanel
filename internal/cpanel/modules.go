@@ -29,6 +29,7 @@ const (
 	ModulePassengerApps      = "PassengerApps"
 	ModulePostgresql         = "Postgresql"
 	ModuleResourceUsage      = "ResourceUsage"
+	ModuleSSH                = "SSH"
 	ModuleSpamAssassin       = "SpamAssassin"
 	ModuleSubDomain          = "SubDomain"
 	ModuleStatsBar           = "StatsBar"

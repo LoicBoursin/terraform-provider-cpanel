@@ -14,6 +14,7 @@ smoke-test:
 clean-acceptance:
 	./scripts/cpanel-restore-test-singletons.sh
 	./scripts/cpanel-clean-test-artifacts.sh
+	CPANEL_REQUIRE_EMPTY=1 ./scripts/cpanel-smoke.sh
 
 .PHONY: test-acceptance
 test-acceptance:

@@ -38,6 +38,7 @@ import (
 	cpanelredirect "terraform-provider-cpanel/internal/cpanel/redirect"
 	cpanelresourceusage "terraform-provider-cpanel/internal/cpanel/resourceusage"
 	cpanelspam "terraform-provider-cpanel/internal/cpanel/spamassassin"
+	cpanelssh "terraform-provider-cpanel/internal/cpanel/ssh"
 	"terraform-provider-cpanel/internal/cpanel/sslcertificate"
 	"terraform-provider-cpanel/internal/cpanel/sslcsr"
 	"terraform-provider-cpanel/internal/cpanel/versioncontrol"
@@ -74,8 +75,8 @@ func (p *cpanelProvider) Metadata(_ context.Context, _ provider.MetadataRequest,
 // Schema defines the provider-level schema for configuration data.
 func (p *cpanelProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description:         "Inspect cPanel account capabilities and resource usage, and manage API tokens, locale, raw access log settings, account notification preferences, documented SpamAssassin preferences, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates and certificate signing requests, public-only OpenPGP keys, Passenger applications, ModSecurity settings, HTTP redirects, filesystem directories and text files, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, account-level and mailbox-level filters, BoxTrapper settings, calendar delegations, forwarders, autoresponders, Mailman mailing lists, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
-		MarkdownDescription: "Inspect cPanel account capabilities and resource usage, and manage API tokens, locale, raw access log settings, account notification preferences, documented SpamAssassin preferences, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates and certificate signing requests, public-only OpenPGP keys, Passenger applications, ModSecurity settings, HTTP redirects, filesystem directories and text files, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, account-level and mailbox-level filters, BoxTrapper settings, calendar delegations, forwarders, autoresponders, Mailman mailing lists, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		Description:         "Inspect cPanel account capabilities, resource usage, and public OpenSSH keys, and manage API tokens, locale, raw access log settings, account notification preferences, documented SpamAssassin preferences, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates and certificate signing requests, public-only OpenPGP keys, Passenger applications, ModSecurity settings, HTTP redirects, filesystem directories and text files, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, account-level and mailbox-level filters, BoxTrapper settings, calendar delegations, forwarders, autoresponders, Mailman mailing lists, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		MarkdownDescription: "Inspect cPanel account capabilities, resource usage, and public OpenSSH keys, and manage API tokens, locale, raw access log settings, account notification preferences, documented SpamAssassin preferences, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates and certificate signing requests, public-only OpenPGP keys, Passenger applications, ModSecurity settings, HTTP redirects, filesystem directories and text files, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, account-level and mailbox-level filters, BoxTrapper settings, calendar delegations, forwarders, autoresponders, Mailman mailing lists, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
 		Attributes: map[string]schema.Attribute{
 			"username": schema.StringAttribute{
 				Optional:            true,
@@ -239,6 +240,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	postgreSQLClient := postgresql.NewClient(client)
 	redirectClient := cpanelredirect.NewClient(client)
 	resourceUsageClient := cpanelresourceusage.NewClient(client)
+	sshClient := cpanelssh.NewClient(client)
 	spamAssassinClient := cpanelspam.NewClient(client)
 	sslCertificateClient := sslcertificate.NewClient(client)
 	sslCSRClient := sslcsr.NewClient(client)
@@ -273,6 +275,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		"postgresql":         postgreSQLClient,
 		"redirect":           redirectClient,
 		"resourceusage":      resourceUsageClient,
+		"ssh":                sshClient,
 		"spamassassin":       spamAssassinClient,
 		"sslcertificate":     sslCertificateClient,
 		"sslcsr":             sslCSRClient,
@@ -356,6 +359,8 @@ func (p *cpanelProvider) DataSources(_ context.Context) []func() datasource.Data
 		NewPostgreSQLUserDataSource,
 		NewRedirectDataSource,
 		NewResourceUsageDataSource,
+		NewSSHPublicKeyDataSource,
+		NewSSHPublicKeysDataSource,
 		NewSpamPreferenceDataSource,
 		NewSSLCertificateDataSource,
 		NewSSLCSRDataSource,

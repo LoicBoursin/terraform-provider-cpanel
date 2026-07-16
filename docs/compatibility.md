@@ -36,8 +36,10 @@ remote MySQL hosts, PostgreSQL databases and users, imports, drift detection,
 per-domain ModSecurity status, stored SSL certificates, email account
 suspension, stored SSL certificate signing requests, default-calendar
 delegation, user-level email filters, BoxTrapper settings, Mailman mailing
-lists, public OpenPGP keys, account notification preferences, documented
-SpamAssassin preferences, and cleanup.
+lists, public OpenPGP and OpenSSH keys, account notification preferences,
+documented SpamAssassin preferences, and cleanup.
+OpenSSH certification is read-only; all other keys named in this list follow
+their resource-specific lifecycle policy below.
 Certification also covers per-domain
 email routing transitions and restoration without changing DNS MX records.
 Certification also covers reading and changing the account display locale,
@@ -317,6 +319,22 @@ ambiguous response through read-only inventories. Because cPanel offers no
 conditional operation, a secret key imported concurrently after the final read
 remains an unavoidable server-side race; production resource deletion is
 disabled for that reason.
+
+Public OpenSSH reads use the remaining cPanel API 2 `SSH::listkeys` and
+`SSH::fetchkey` functions because cPanel does not expose UAPI equivalents.
+Every request hard-codes `pub=1`, so the provider never requests private-key
+metadata or material. The inventory accepts the documented boolean and 0/1
+authorization fields as well as the textual status values observed on cPanel
+134, ignores additive response fields, and rejects contradictory identity or
+authorization data.
+
+The provider deliberately exposes no mutable OpenSSH resource.
+`SSH::importkey` can overwrite a concurrent key with the same name, while
+`SSH::authkey` and `SSH::delkey` identify the target only by name. cPanel
+offers no atomic create-if-absent or fingerprint-conditioned mutation, so a
+client-side read cannot close the replacement window. Automatic SSH cleanup is
+disabled for the same reason; a reserved `tfcpanelssh` key causes cleanup to
+fail for manual review instead of mutating it.
 
 DNS record reads and mutations use UAPI `DNS::parse_zone` and
 `DNS::mass_edit_zone`. Every mutation uses the current SOA serial and is

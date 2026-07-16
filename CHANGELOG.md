@@ -100,6 +100,11 @@
   `score`, `whitelist_from`, and `blacklist_from`, with exact readback,
   singleton restoration, concurrent-change protection, import, drift recovery,
   and cPanel 134 acceptance coverage.
+- Public OpenSSH key inventory and singular lookup data sources with
+  public-only list and fetch requests, strict RSA, Ed25519, and ECDSA
+  validation, tolerant documented authorization decoding, and explicit
+  exclusion of unsafe name-only mutations, certified on cPanel 134 with
+  Terraform `1.14.9` and `1.15.8`.
 - Stored SSL certificate signing request resource and data source with
   generation from an existing cPanel key, RSA and ECDSA public-key
   verification, in-place friendly-name updates, import, drift recovery,

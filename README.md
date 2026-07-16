@@ -6,13 +6,14 @@ documented SpamAssassin preferences,
 web domains, HTTP redirects,
 email accounts, calendar delegations, account-level filters and mailbox-level
 filters, stored SSL certificates and
-certificate signing requests, public-only OpenPGP keys, Passenger applications,
-raw access log settings, ModSecurity settings, filesystem directories and UTF-8
-text files, directory indexes and privacy, Git repositories, custom MIME types,
-Apache handlers, forwarders, autoresponders, BoxTrapper settings, Mailman
-mailing lists, FTP accounts, and MySQL, MariaDB, and PostgreSQL users and
-databases, remote MySQL hosts, plus website IP blocks and email routing, through
-the cPanel API.
+certificate signing requests, public-only OpenPGP keys, read-only public
+OpenSSH keys, Passenger
+applications, raw access log settings, ModSecurity settings, filesystem
+directories and UTF-8 text files, directory indexes and privacy, Git
+repositories, custom MIME types, Apache handlers, forwarders, autoresponders,
+BoxTrapper settings, Mailman mailing lists, FTP accounts, and MySQL, MariaDB,
+and PostgreSQL users and databases, remote MySQL hosts, plus website IP blocks
+and email routing, through the cPanel API.
 
 ## Status
 
@@ -73,6 +74,8 @@ Additional read-only account data sources:
 
 - `cpanel_account_capabilities`
 - `cpanel_resource_usage`
+- `cpanel_ssh_public_key`
+- `cpanel_ssh_public_keys`
 
 ## Requirements
 
@@ -84,7 +87,8 @@ Additional read-only account data sources:
   SSL Manager with an existing RSA key, File Manager, account locales, Raw
   Access log settings, Contact Information notification preferences,
   SpamAssassin user preferences,
-  public-key GPG import and inventory, email accounts,
+  public-key GPG import and inventory, public SSH key inventory, email
+  accounts,
   BoxTrapper, account-level and mailbox-level filters, forwarders and
   autoresponders, email routing, CalDAV
   calendar delegation, Mailman mailing lists, FTP accounts, MySQL or MariaDB
