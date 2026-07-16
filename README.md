@@ -73,6 +73,8 @@ Matching data sources are available for each resource family.
 Additional read-only account data sources:
 
 - `cpanel_account_capabilities`
+- `cpanel_calendar_delegates`
+- `cpanel_dav_users`
 - `cpanel_domains`
 - `cpanel_resource_usage`
 - `cpanel_ssh_public_key`

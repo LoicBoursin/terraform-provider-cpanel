@@ -359,6 +359,15 @@ write through another module. The `CPDAVD` path is acceptance-tested on cPanel
 134; the legacy `CCS` response and mutation formats are covered by unit tests
 but are not acceptance-certified.
 
+The input-free DAV inventory data sources expose complete mailbox usernames,
+collection identifiers, collection display names and types, and delegation
+relationships. They deliberately omit CPDAVD or CCS internal identifiers and
+descriptions. Mailbox addresses, display names, and delegation relationships
+are stored in plaintext Terraform state and must be protected accordingly.
+Both inventories are normalized by the client, sorted by stable identities,
+and rejected when cPanel returns duplicate object keys or delegation
+identities.
+
 The resource manages only the default collection identifier `calendar`.
 Create and update require both complete mailbox addresses to expose that
 CalDAV collection. Terraform refuses an existing relationship unless it is

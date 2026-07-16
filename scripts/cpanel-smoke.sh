@@ -757,6 +757,51 @@ mysql_test_remote_host_count="$(
     "${response_file}"
 )"
 
+request 'execute/CPDAVD/list_users' 'DAV user check'
+if ! jq -e \
+  '
+    (.data | type) == "object"
+    and all(
+      .data | to_entries[];
+      (.key | type) == "string"
+      and (.key | length) > 0
+      and (.key | test("[[:space:]]")) == false
+      and (.value | type) == "object"
+      and all(
+        .value | to_entries[];
+        (.key | type) == "string"
+        and (.key | length) > 0
+        and (.key | test("[[:space:]]")) == false
+        and (.value | type) == "object"
+        and (.value.type? | type) == "string"
+        and (.value.type | length) > 0
+        and (
+          (.value | has("displayname") | not)
+          or (.value.displayname | type) == "string"
+        )
+      )
+    )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'DAV user inventory is incomplete\n' >&2
+  exit 1
+fi
+dav_user_count="$(jq -r '.data | length' "${response_file}")"
+dav_collection_count="$(
+  jq -r '[.data[] | keys[]] | length' "${response_file}"
+)"
+dav_test_user_count="$(
+  jq -r \
+    '
+      [
+        .data | keys[]
+        | select(split("@")[0] | startswith("tfcpanel"))
+      ]
+      | length
+    ' \
+    "${response_file}"
+)"
+
 request 'execute/CPDAVD/list_delegates' 'Calendar delegate check'
 if ! jq -e \
   '
@@ -777,6 +822,10 @@ if ! jq -e \
         or .readonly? == true
         or .readonly? == "true"
       )
+    )
+    and (
+      [.data[] | [.delegator, .delegatee, .calendar] | join("\u0000")]
+      | length == (unique | length)
     )
   ' \
   "${response_file}" >/dev/null; then
@@ -1573,6 +1622,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${mysql_test_database_count}" != "0"
     || "${mysql_test_user_count}" != "0"
     || "${mysql_test_remote_host_count}" != "0"
+    || "${dav_test_user_count}" != "0"
     || "${calendar_test_delegate_count}" != "0"
     || "${email_test_account_count}" != "0"
     || "${email_test_suspended_count}" != "0"
@@ -1628,6 +1678,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     printf '  MySQL test users: %s\n' "${mysql_test_user_count}" >&2
     printf '  test remote MySQL hosts: %s\n' \
       "${mysql_test_remote_host_count}" >&2
+    printf '  test DAV users: %s\n' "${dav_test_user_count}" >&2
     printf '  test calendar delegates: %s\n' \
       "${calendar_test_delegate_count}" >&2
     printf '  email test accounts: %s\n' "${email_test_account_count}" >&2
@@ -1743,6 +1794,10 @@ printf '  MySQL users: %s (%s test-managed)\n' \
 printf '  remote MySQL hosts: %s (%s test-managed)\n' \
   "${mysql_remote_host_count}" \
   "${mysql_test_remote_host_count}"
+printf '  DAV users: %s (%s collections, %s test-managed)\n' \
+  "${dav_user_count}" \
+  "${dav_collection_count}" \
+  "${dav_test_user_count}"
 printf '  calendar delegates: %s (%s test-managed)\n' \
   "${calendar_delegate_count}" \
   "${calendar_test_delegate_count}"

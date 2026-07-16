@@ -55,6 +55,10 @@
   calendar, with read-only or read/write access, composite import, drift
   recovery, strict ownership checks, current CPDAVD support, unit-tested legacy
   CCS compatibility, and cPanel 134 CPDAVD acceptance coverage.
+- Complete DAV user, collection, and calendar delegation inventory data
+  sources, with deterministic ordering, strict duplicate rejection, and no
+  mutation operations, certified on cPanel 134 with Terraform `1.14.9` and
+  `1.15.8`.
 - User-level email filter resource and data source with ordered rules and
   actions, enable or disable updates, rename, import, drift recovery,
   mailbox-scoped mutation serialization, safe-action enforcement, read-only

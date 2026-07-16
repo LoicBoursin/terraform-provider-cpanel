@@ -108,8 +108,12 @@ func testAccPreCheck(t *testing.T) {
 	if boxTrapperSettings == nil {
 		t.Fatal("verify BoxTrapper API access: system account not found")
 	}
-	if _, err := cpanelcalendar.NewClient(client).ListDelegates(ctx); err != nil {
+	calendarClient := cpanelcalendar.NewClient(client)
+	if _, err := calendarClient.ListDelegates(ctx); err != nil {
 		t.Fatalf("verify calendar delegation API access: %v", err)
+	}
+	if _, err := calendarClient.ListUsers(ctx); err != nil {
+		t.Fatalf("verify DAV user API access: %v", err)
 	}
 	if _, err := cpanelcontact.NewClient(client).
 		GetNotificationPreferences(ctx); err != nil {
