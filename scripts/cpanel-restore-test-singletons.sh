@@ -21,7 +21,8 @@ for variable in \
   CPANEL_EXPECTED_LOCALE \
   CPANEL_EXPECTED_LOG_ARCHIVE \
   CPANEL_EXPECTED_LOG_PRUNE \
-  CPANEL_EXPECTED_LOG_RETENTION; do
+  CPANEL_EXPECTED_LOG_RETENTION \
+  CPANEL_EXPECTED_NOTIFICATION_PREFERENCES; do
   if [[ -z "${!variable:-}" ]]; then
     printf 'Missing required environment variable: %s\n' "${variable}" >&2
     exit 1
@@ -55,6 +56,22 @@ if [[
     "${CPANEL_EXPECTED_LOG_RETENTION}" >&2
   exit 1
 fi
+if ! jq -e \
+  '
+    type == "object"
+    and length > 0
+    and all(
+      to_entries[];
+      (.key | test("^notify_[a-z0-9_]+$"))
+      and (.value | type == "boolean")
+    )
+  ' <<<"${CPANEL_EXPECTED_NOTIFICATION_PREFERENCES}" >/dev/null; then
+  printf 'Invalid expected cPanel notification preferences JSON\n' >&2
+  exit 1
+fi
+expected_notification_preferences="$(
+  jq -S -c . <<<"${CPANEL_EXPECTED_NOTIFICATION_PREFERENCES}"
+)"
 
 host="${CPANEL_HOST%/}"
 authorization="Authorization: cpanel ${CPANEL_USERNAME}:${CPANEL_API_TOKEN}"
@@ -136,6 +153,42 @@ uapi_post() {
   fi
 }
 
+uapi_json_post() {
+  local module="$1"
+  local function="$2"
+  local label="$3"
+  local payload="$4"
+  local http_code
+  local status
+
+  http_code="$(
+    curl \
+      --silent \
+      --show-error \
+      --max-time 90 \
+      --request POST \
+      --output "${response_file}" \
+      --write-out '%{http_code}' \
+      --header "${authorization}" \
+      --header 'Content-Type: application/json' \
+      --data-binary "${payload}" \
+      "${host}/execute/${module}/${function}"
+  )"
+
+  if [[ "${http_code}" != "200" ]]; then
+    printf '%s failed with HTTP %s\n' "${label}" "${http_code}" >&2
+    return 1
+  fi
+
+  status="$(jq -r '.status // empty' "${response_file}")"
+  if [[ "${status}" != "1" ]]; then
+    printf '%s failed: %s\n' \
+      "${label}" \
+      "$(jq -c '{errors, messages}' "${response_file}")" >&2
+    return 1
+  fi
+}
+
 read_log_settings() {
   if ! get_request \
     'execute/LogManager/get_settings' \
@@ -162,8 +215,47 @@ read_log_settings() {
   fi
 }
 
+read_notification_preferences() {
+  if ! get_request \
+    'execute/ContactInformation/get_notification_preferences' \
+    'cPanel notification preferences inventory'; then
+    return 1
+  fi
+  if ! jq -e \
+    '
+      (.data | type == "array" and length > 0)
+      and (
+        [.data[].name] as $names
+        | ($names | length) == ($names | unique | length)
+      )
+      and all(
+        .data[];
+        (.name | test("^notify_[a-z0-9_]+$"))
+        and ((.enabled | tostring) | test("^[01]$"))
+      )
+    ' \
+    "${response_file}" >/dev/null; then
+    printf 'cPanel returned invalid notification preferences\n' >&2
+    return 1
+  fi
+
+  current_notification_preferences="$(
+    jq -S -c \
+      '
+        .data
+        | map({
+            key: .name,
+            value: ((.enabled | tostring) == "1")
+          })
+        | from_entries
+      ' \
+      "${response_file}"
+  )"
+}
+
 restored_locale=0
 restored_log_settings=0
+restored_notification_preferences=0
 
 restore_locale() {
   local current_locale
@@ -234,20 +326,67 @@ restore_log_settings() {
   fi
 }
 
+restore_notification_preferences() {
+  local payload
+
+  if ! read_notification_preferences; then
+    return 1
+  fi
+  if [[ "${current_notification_preferences}" != "${expected_notification_preferences}" ]]; then
+    payload="$(
+      jq -c -n \
+        --argjson preferences "${expected_notification_preferences}" \
+        '
+          {
+            preferences: (
+              $preferences
+              | with_entries(.value = if .value then 1 else 0 end)
+            )
+          }
+        '
+    )"
+    if ! uapi_json_post \
+      'ContactInformation' \
+      'set_notification_preferences' \
+      'Restore cPanel notification preferences' \
+      "${payload}"; then
+      return 1
+    fi
+    restored_notification_preferences=1
+  fi
+
+  if ! read_notification_preferences; then
+    return 1
+  fi
+  if [[ "${current_notification_preferences}" != "${expected_notification_preferences}" ]]; then
+    printf 'cPanel notification preferences were not restored exactly\n' >&2
+    return 1
+  fi
+}
+
 set +e
 restore_locale
 locale_status=$?
 restore_log_settings
 log_settings_status=$?
+restore_notification_preferences
+notification_preferences_status=$?
 set -e
 
-if [[ "${locale_status}" != "0" || "${log_settings_status}" != "0" ]]; then
-  printf 'cPanel singleton restoration failed: locale=%d log_settings=%d\n' \
+if [[
+  "${locale_status}" != "0"
+  || "${log_settings_status}" != "0"
+  || "${notification_preferences_status}" != "0"
+ ]]; then
+  printf 'cPanel singleton restoration failed: locale=%d log_settings=%d notification_preferences=%d\n' \
     "${locale_status}" \
-    "${log_settings_status}" >&2
+    "${log_settings_status}" \
+    "${notification_preferences_status}" >&2
   exit 1
 fi
 
 printf 'cPanel singleton restoration passed\n'
 printf '  locale restored: %d\n' "${restored_locale}"
 printf '  log settings restored: %d\n' "${restored_log_settings}"
+printf '  notification preferences restored: %d\n' \
+  "${restored_notification_preferences}"

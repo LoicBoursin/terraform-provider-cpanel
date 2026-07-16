@@ -1,7 +1,8 @@
 # Terraform Provider cPanel
 
 Terraform provider for managing account-level API tokens, cron jobs, DNS
-records, Dynamic DNS domains, account locale, web domains, HTTP redirects,
+records, Dynamic DNS domains, account locale, account notification preferences,
+web domains, HTTP redirects,
 email accounts, calendar delegations, account-level filters and mailbox-level
 filters, stored SSL certificates and
 certificate signing requests, public-only OpenPGP keys, Passenger applications,
@@ -50,6 +51,7 @@ The supported versions and API policy are documented in
 - `cpanel_ip_block`
 - `cpanel_locale`
 - `cpanel_log_settings`
+- `cpanel_notification_preferences`
 - `cpanel_mime_type`
 - `cpanel_modsecurity_domain`
 - `cpanel_mysql_database`
@@ -77,7 +79,8 @@ Additional read-only account data sources:
   DNS, domains, Redirects, Index Manager, Directory Privacy, MIME Types,
   Apache Handlers, ModSecurity, Git Version Control, Passenger Applications,
   SSL Manager with an existing RSA key, File Manager, account locales, Raw
-  Access log settings, public-key GPG import and inventory, email accounts,
+  Access log settings, Contact Information notification preferences,
+  public-key GPG import and inventory, email accounts,
   BoxTrapper, account-level and mailbox-level filters, forwarders and
   autoresponders, email routing, CalDAV
   calendar delegation, Mailman mailing lists, FTP accounts, MySQL or MariaDB

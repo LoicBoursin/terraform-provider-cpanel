@@ -16,6 +16,7 @@ import (
 	cpanelboxtrapper "terraform-provider-cpanel/internal/cpanel/boxtrapper"
 	cpanelcalendar "terraform-provider-cpanel/internal/cpanel/calendar"
 	"terraform-provider-cpanel/internal/cpanel/capabilities"
+	cpanelcontact "terraform-provider-cpanel/internal/cpanel/contactinformation"
 	"terraform-provider-cpanel/internal/cpanel/cron"
 	"terraform-provider-cpanel/internal/cpanel/ddns"
 	"terraform-provider-cpanel/internal/cpanel/directoryindex"
@@ -71,8 +72,8 @@ func (p *cpanelProvider) Metadata(_ context.Context, _ provider.MetadataRequest,
 // Schema defines the provider-level schema for configuration data.
 func (p *cpanelProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description:         "Inspect cPanel account capabilities and manage API tokens, locale, raw access log settings, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates and certificate signing requests, public-only OpenPGP keys, Passenger applications, ModSecurity settings, HTTP redirects, filesystem directories and text files, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, account-level and mailbox-level filters, BoxTrapper settings, calendar delegations, forwarders, autoresponders, Mailman mailing lists, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
-		MarkdownDescription: "Inspect cPanel account capabilities and manage API tokens, locale, raw access log settings, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates and certificate signing requests, public-only OpenPGP keys, Passenger applications, ModSecurity settings, HTTP redirects, filesystem directories and text files, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, account-level and mailbox-level filters, BoxTrapper settings, calendar delegations, forwarders, autoresponders, Mailman mailing lists, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		Description:         "Inspect cPanel account capabilities and manage API tokens, locale, raw access log settings, account notification preferences, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates and certificate signing requests, public-only OpenPGP keys, Passenger applications, ModSecurity settings, HTTP redirects, filesystem directories and text files, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, account-level and mailbox-level filters, BoxTrapper settings, calendar delegations, forwarders, autoresponders, Mailman mailing lists, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
+		MarkdownDescription: "Inspect cPanel account capabilities and manage API tokens, locale, raw access log settings, account notification preferences, cron jobs, DNS records, Dynamic DNS domains, web domains, stored SSL certificates and certificate signing requests, public-only OpenPGP keys, Passenger applications, ModSecurity settings, HTTP redirects, filesystem directories and text files, directory indexes and privacy, Git repositories, custom MIME types and Apache handlers, email accounts and suspensions, account-level and mailbox-level filters, BoxTrapper settings, calendar delegations, forwarders, autoresponders, Mailman mailing lists, FTP accounts, website IP blocks, remote database hosts, and MySQL, MariaDB, and PostgreSQL users and databases.",
 		Attributes: map[string]schema.Attribute{
 			"username": schema.StringAttribute{
 				Optional:            true,
@@ -215,6 +216,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	boxTrapperClient := cpanelboxtrapper.NewClient(client)
 	calendarClient := cpanelcalendar.NewClient(client)
 	capabilitiesClient := capabilities.NewClient(client)
+	contactInformationClient := cpanelcontact.NewClient(client)
 	cronClient := cron.NewClient(client)
 	directoryIndexClient := directoryindex.NewClient(client)
 	directoryPrivacyClient := directoryprivacy.NewClient(client)
@@ -241,61 +243,63 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	// Make the module clients available during DataSource and Resource
 	// type Configure methods.
 	resp.DataSourceData = map[string]interface{}{
-		"apachehandler":    apacheHandlerClient,
-		"apitoken":         apiTokenClient,
-		"boxtrapper":       boxTrapperClient,
-		"calendar":         calendarClient,
-		"capabilities":     capabilitiesClient,
-		"cron":             cronClient,
-		"directoryindex":   directoryIndexClient,
-		"directoryprivacy": directoryPrivacyClient,
-		"dns":              dnsClient,
-		"domain":           domainClient,
-		"ddns":             dynamicDNSClient,
-		"email":            emailClient,
-		"fileman":          filemanClient,
-		"ftp":              ftpClient,
-		"gpg":              gpgClient,
-		"ipblock":          ipBlockClient,
-		"locale":           localeClient,
-		"logmanager":       logManagerClient,
-		"mimetype":         mimeTypeClient,
-		"modsecurity":      modSecurityClient,
-		"mysql":            mySQLClient,
-		"passenger":        passengerClient,
-		"postgresql":       postgreSQLClient,
-		"redirect":         redirectClient,
-		"sslcertificate":   sslCertificateClient,
-		"sslcsr":           sslCSRClient,
-		"versioncontrol":   versionControlClient,
+		"apachehandler":      apacheHandlerClient,
+		"apitoken":           apiTokenClient,
+		"boxtrapper":         boxTrapperClient,
+		"calendar":           calendarClient,
+		"capabilities":       capabilitiesClient,
+		"contactinformation": contactInformationClient,
+		"cron":               cronClient,
+		"directoryindex":     directoryIndexClient,
+		"directoryprivacy":   directoryPrivacyClient,
+		"dns":                dnsClient,
+		"domain":             domainClient,
+		"ddns":               dynamicDNSClient,
+		"email":              emailClient,
+		"fileman":            filemanClient,
+		"ftp":                ftpClient,
+		"gpg":                gpgClient,
+		"ipblock":            ipBlockClient,
+		"locale":             localeClient,
+		"logmanager":         logManagerClient,
+		"mimetype":           mimeTypeClient,
+		"modsecurity":        modSecurityClient,
+		"mysql":              mySQLClient,
+		"passenger":          passengerClient,
+		"postgresql":         postgreSQLClient,
+		"redirect":           redirectClient,
+		"sslcertificate":     sslCertificateClient,
+		"sslcsr":             sslCSRClient,
+		"versioncontrol":     versionControlClient,
 	}
 	resp.ResourceData = map[string]interface{}{
-		"apachehandler":    apacheHandlerClient,
-		"apitoken":         apiTokenClient,
-		"boxtrapper":       boxTrapperClient,
-		"calendar":         calendarClient,
-		"cron":             cronClient,
-		"directoryindex":   directoryIndexClient,
-		"directoryprivacy": directoryPrivacyClient,
-		"dns":              dnsClient,
-		"domain":           domainClient,
-		"ddns":             dynamicDNSClient,
-		"email":            emailClient,
-		"fileman":          filemanClient,
-		"ftp":              ftpClient,
-		"gpg":              gpgClient,
-		"ipblock":          ipBlockClient,
-		"locale":           localeClient,
-		"logmanager":       logManagerClient,
-		"mimetype":         mimeTypeClient,
-		"modsecurity":      modSecurityClient,
-		"mysql":            mySQLClient,
-		"passenger":        passengerClient,
-		"postgresql":       postgreSQLClient,
-		"redirect":         redirectClient,
-		"sslcertificate":   sslCertificateClient,
-		"sslcsr":           sslCSRClient,
-		"versioncontrol":   versionControlClient,
+		"apachehandler":      apacheHandlerClient,
+		"apitoken":           apiTokenClient,
+		"boxtrapper":         boxTrapperClient,
+		"calendar":           calendarClient,
+		"contactinformation": contactInformationClient,
+		"cron":               cronClient,
+		"directoryindex":     directoryIndexClient,
+		"directoryprivacy":   directoryPrivacyClient,
+		"dns":                dnsClient,
+		"domain":             domainClient,
+		"ddns":               dynamicDNSClient,
+		"email":              emailClient,
+		"fileman":            filemanClient,
+		"ftp":                ftpClient,
+		"gpg":                gpgClient,
+		"ipblock":            ipBlockClient,
+		"locale":             localeClient,
+		"logmanager":         logManagerClient,
+		"mimetype":           mimeTypeClient,
+		"modsecurity":        modSecurityClient,
+		"mysql":              mySQLClient,
+		"passenger":          passengerClient,
+		"postgresql":         postgreSQLClient,
+		"redirect":           redirectClient,
+		"sslcertificate":     sslCertificateClient,
+		"sslcsr":             sslCSRClient,
+		"versioncontrol":     versionControlClient,
 	}
 
 	tflog.Info(ctx, "Configured module clients", map[string]any{"success": true})
@@ -334,6 +338,7 @@ func (p *cpanelProvider) DataSources(_ context.Context) []func() datasource.Data
 		NewIPBlockDataSource,
 		NewLocaleDataSource,
 		NewLogSettingsDataSource,
+		NewNotificationPreferencesDataSource,
 		NewMIMETypeDataSource,
 		NewModSecurityDomainDataSource,
 		NewMySQLDatabaseDataSource,
@@ -381,6 +386,7 @@ func (p *cpanelProvider) Resources(_ context.Context) []func() resource.Resource
 		NewIPBlockResource,
 		NewLocaleResource,
 		NewLogSettingsResource,
+		NewNotificationPreferencesResource,
 		NewMIMETypeResource,
 		NewModSecurityDomainResource,
 		NewMySQLDatabaseResource,

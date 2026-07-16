@@ -35,8 +35,9 @@ cPanel reports a null sender name, then establish a non-null fixture name
 explicitly for the complete lifecycle. Locale acceptance tests temporarily
 change the account display locale and restore the persisted test-account
 baseline. Log settings tests temporarily change archive, pruning, and retention
-preferences and restore the same durable baseline. Use a dedicated cPanel test
-account.
+preferences and restore the same durable baseline. Notification preference
+tests temporarily change account alerts and restore the complete persisted
+preference map. Use a dedicated cPanel test account.
 
 The scripts load credentials from the file specified by `CPANEL_ENV_FILE`. When
 that variable is unset, they use:
@@ -70,6 +71,7 @@ CPANEL_EXPECTED_LOCALE=en
 CPANEL_EXPECTED_LOG_ARCHIVE=1
 CPANEL_EXPECTED_LOG_PRUNE=1
 CPANEL_EXPECTED_LOG_RETENTION=-1
+CPANEL_EXPECTED_NOTIFICATION_PREFERENCES='{"notify_account_authn_link":true,"notify_account_authn_link_notification_disabled":true,"notify_contact_address_change":true,"notify_contact_address_change_notification_disabled":true,"notify_disk_limit":true,"notify_password_change":true,"notify_password_change_notification_disabled":true,"notify_ssl_expiry":true,"notify_twofactorauth_change":true,"notify_twofactorauth_change_notification_disabled":true}'
 CPANEL_EXPECTED_GPG_PUBLIC_COUNT=0
 CPANEL_EXPECTED_GPG_SECRET_COUNT=0
 CPANEL_ALLOW_GPG_KEYPAIR_DELETE=0
@@ -79,6 +81,11 @@ CPANEL_ALLOW_GPG_KEYPAIR_DELETE=0
 `0600` and set it from the known clean account configuration, not from a test
 run. The persisted values let a later run recover the account even when an
 earlier Terraform or shell process was interrupted after mutation.
+`CPANEL_EXPECTED_NOTIFICATION_PREFERENCES` must contain the complete clean
+account map as JSON booleans. Read the account's current keys with
+`ContactInformation::get_notification_preferences`; the cPanel 134 example
+above contains the ten keys exposed by the certified account. The finalizer
+refuses a partial or malformed map.
 
 `CPANEL_ALLOW_GPG_KEYPAIR_DELETE` must remain `0` unless this is a dedicated
 disposable acceptance account whose expected secret-key count is explicitly
@@ -197,6 +204,8 @@ that follow the test naming contract:
 - account log settings are also singleton values; the finalizer restores and
   verifies the persisted `archive_logs`, `prune_archive`, and configured
   retention baseline before artifact cleanup;
+- account notification preferences are singleton values; the finalizer restores
+  and verifies the complete persisted JSON map before artifact cleanup;
 - top-level test directories in `public_html` beginning with `tfcpanel-`;
 - cron commands containing `# terraform-provider-cpanel-`;
 - the empty `MAILTO` and default `SHELL=/bin/bash` lines that cPanel creates

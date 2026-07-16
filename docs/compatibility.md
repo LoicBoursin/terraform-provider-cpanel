@@ -36,7 +36,8 @@ remote MySQL hosts, PostgreSQL databases and users, imports, drift detection,
 per-domain ModSecurity status, stored SSL certificates, email account
 suspension, stored SSL certificate signing requests, default-calendar
 delegation, user-level email filters, BoxTrapper settings, Mailman mailing
-lists, public OpenPGP keys, and cleanup. Certification also covers per-domain
+lists, public OpenPGP keys, account notification preferences, and cleanup.
+Certification also covers per-domain
 email routing transitions and restoration without changing DNS MX records.
 Certification also covers reading and changing the account display locale,
 including restoration of its pre-test value, plus Passenger application
@@ -408,6 +409,16 @@ means indefinite retention. Removing the resource restores the full
 configuration captured before Terraform management. The acceptance wrapper
 uses a persisted clean-account baseline and an `EXIT` finalizer to restore
 these singleton values before artifact cleanup, including after a failed test.
+
+Account notification preference operations use UAPI
+`ContactInformation::get_notification_preferences` and
+`ContactInformation::set_notification_preferences`. The mutation endpoint
+receives a JSON object, and the provider verifies the full readback after every
+change. The resource requires the configured key set to exactly match the
+account inventory so a new or removed cPanel preference cannot be silently
+ignored. Removing the resource restores the complete bool map captured before
+Terraform management. The acceptance finalizer independently restores and
+verifies a persisted clean-account JSON baseline.
 
 The resource preserves rule and action order, supports cPanel's string and
 numeric match operators, and limits actions to `deliver`, `fail`, and

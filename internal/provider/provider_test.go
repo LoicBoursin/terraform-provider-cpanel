@@ -29,6 +29,7 @@ import (
 	cpanelboxtrapper "terraform-provider-cpanel/internal/cpanel/boxtrapper"
 	cpanelcalendar "terraform-provider-cpanel/internal/cpanel/calendar"
 	cpanelcapabilities "terraform-provider-cpanel/internal/cpanel/capabilities"
+	cpanelcontact "terraform-provider-cpanel/internal/cpanel/contactinformation"
 	"terraform-provider-cpanel/internal/cpanel/cron"
 	cpanelddns "terraform-provider-cpanel/internal/cpanel/ddns"
 	cpaneldirectoryindex "terraform-provider-cpanel/internal/cpanel/directoryindex"
@@ -107,6 +108,13 @@ func testAccPreCheck(t *testing.T) {
 	}
 	if _, err := cpanelcalendar.NewClient(client).ListDelegates(ctx); err != nil {
 		t.Fatalf("verify calendar delegation API access: %v", err)
+	}
+	if _, err := cpanelcontact.NewClient(client).
+		GetNotificationPreferences(ctx); err != nil {
+		t.Fatalf(
+			"verify notification preferences API access: %v",
+			err,
+		)
 	}
 	if _, err := cron.NewClient(client).GetCronJobs(ctx); err != nil {
 		t.Fatalf("verify Cron API access: %v", err)

@@ -3,13 +3,16 @@
 set -euo pipefail
 
 env_file="${CPANEL_ENV_FILE:-${HOME}/.config/terraform-provider-cpanel/acceptance.env}"
+baseline_file="${CPANEL_BASELINE_FILE:-${env_file%.env}-baseline.env}"
 
-if [[ -f "${env_file}" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "${env_file}"
-  set +a
-fi
+for file in "${env_file}" "${baseline_file}"; do
+  if [[ -f "${file}" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "${file}"
+    set +a
+  fi
+done
 
 for variable in CPANEL_HOST CPANEL_USERNAME CPANEL_API_TOKEN; do
   if [[ -z "${!variable:-}" ]]; then
@@ -153,6 +156,64 @@ if [[
     "${log_configured_retention}" \
     "${CPANEL_EXPECTED_LOG_RETENTION}" >&2
   exit 1
+fi
+
+request \
+  'execute/ContactInformation/get_notification_preferences' \
+  'cPanel notification preferences check'
+if ! jq -e \
+  '
+    (.data | type == "array" and length > 0)
+    and (
+      [.data[].name] as $names
+      | ($names | length) == ($names | unique | length)
+    )
+    and all(
+      .data[];
+      (.name | test("^notify_[a-z0-9_]+$"))
+      and ((.enabled | tostring) | test("^[01]$"))
+      and (.descp | type == "string")
+    )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'cPanel returned invalid notification preferences\n' >&2
+  exit 1
+fi
+notification_preference_count="$(jq -r '.data | length' "${response_file}")"
+notification_preferences="$(
+  jq -S -c \
+    '
+      .data
+      | map({
+          key: .name,
+          value: ((.enabled | tostring) == "1")
+        })
+      | from_entries
+    ' \
+    "${response_file}"
+)"
+if [[ -n "${CPANEL_EXPECTED_NOTIFICATION_PREFERENCES:-}" ]]; then
+  if ! jq -e \
+    '
+      type == "object"
+      and length > 0
+      and all(
+        to_entries[];
+        (.key | test("^notify_[a-z0-9_]+$"))
+        and (.value | type == "boolean")
+      )
+    ' <<<"${CPANEL_EXPECTED_NOTIFICATION_PREFERENCES}" >/dev/null; then
+    printf 'Invalid expected cPanel notification preferences JSON\n' >&2
+    exit 1
+  fi
+  expected_notification_preferences="$(
+    jq -S -c . <<<"${CPANEL_EXPECTED_NOTIFICATION_PREFERENCES}"
+  )"
+  if [[ "${notification_preferences}" != "${expected_notification_preferences}" ]]; then
+    printf 'cPanel notification preferences do not match the restored baseline\n' \
+      >&2
+    exit 1
+  fi
 fi
 
 request 'execute/Features/list_features' 'feature check'
@@ -1393,6 +1454,8 @@ printf '  log archival: archive=%s prune=%s retention=%s (effective %s)\n' \
   "${log_prune_archive}" \
   "${log_configured_retention}" \
   "${log_effective_retention}"
+printf '  notification preferences: %s\n' \
+  "${notification_preference_count}"
 printf '  API tokens: %s (%s test-managed)\n' \
   "${api_token_count}" \
   "${api_test_token_count}"

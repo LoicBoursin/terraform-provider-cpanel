@@ -1,6 +1,7 @@
 package cpanel
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -135,6 +136,46 @@ func (c *Client) ExecuteUAPIOperationValues(
 		return err
 	}
 
+	return decodeUAPIResponse(body, module, function, output)
+}
+
+func (c *Client) ExecuteUAPIOperationJSON(
+	ctx context.Context,
+	module string,
+	function string,
+	input any,
+	output any,
+) error {
+	payload, err := json.Marshal(input)
+	if err != nil {
+		return fmt.Errorf("encode UAPI JSON request: %w", err)
+	}
+
+	endpoint := fmt.Sprintf(
+		"/execute/%s/%s",
+		url.PathEscape(module),
+		url.PathEscape(function),
+	)
+	body, err := c.executeRequest(
+		ctx,
+		http.MethodPost,
+		c.HostURL+endpoint,
+		bytes.NewReader(payload),
+		"application/json",
+	)
+	if err != nil {
+		return err
+	}
+
+	return decodeUAPIResponse(body, module, function, output)
+}
+
+func decodeUAPIResponse(
+	body []byte,
+	module string,
+	function string,
+	output any,
+) error {
 	var envelope struct {
 		Status   int      `json:"status"`
 		Errors   []string `json:"errors"`
@@ -254,6 +295,21 @@ func (c *Client) execute(
 		return nil, fmt.Errorf("unsupported HTTP method: %s", method)
 	}
 
+	contentType := ""
+	if method == http.MethodPost {
+		contentType = "application/x-www-form-urlencoded"
+	}
+
+	return c.executeRequest(ctx, method, requestURL, body, contentType)
+}
+
+func (c *Client) executeRequest(
+	ctx context.Context,
+	method string,
+	requestURL string,
+	body io.Reader,
+	contentType string,
+) ([]byte, error) {
 	request, err := http.NewRequestWithContext(ctx, method, requestURL, body)
 	if err != nil {
 		return nil, fmt.Errorf("create cPanel API request: %w", err)
@@ -265,8 +321,8 @@ func (c *Client) execute(
 		fmt.Sprintf("cpanel %s:%s", c.Auth.Username, c.Auth.APIToken),
 	)
 	request.Header.Set("User-Agent", "terraform-provider-cpanel")
-	if method == http.MethodPost {
-		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if contentType != "" {
+		request.Header.Set("Content-Type", contentType)
 	}
 
 	c.requestMu.Lock()

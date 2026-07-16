@@ -89,6 +89,10 @@
 - Raw access log settings resource and data source with server-default or
   explicit retention, import, drift recovery, restoration of the complete
   pre-management settings, and cPanel 134 acceptance coverage.
+- Account notification preferences resource and data source with a complete
+  bool map, exact key-set validation, singleton import, drift recovery,
+  restoration of the complete pre-management settings, JSON UAPI mutations,
+  and cPanel 134 acceptance coverage.
 - Stored SSL certificate signing request resource and data source with
   generation from an existing cPanel key, RSA and ECDSA public-key
   verification, in-place friendly-name updates, import, drift recovery,
@@ -109,6 +113,8 @@
   timeouts and response-size limits.
 - Restore persisted locale and raw-log singleton baselines from an acceptance
   `EXIT` finalizer before cleaning prefix-addressable test artifacts.
+- Restore and verify the complete account notification preference baseline
+  from the same acceptance finalizer.
 - Validate cron expressions and cPanel-prefixed PostgreSQL names before API
   mutation.
 - Verify PostgreSQL privilege changes and require inspection and re-import

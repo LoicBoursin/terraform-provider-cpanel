@@ -2,6 +2,7 @@ package cpanel
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -164,6 +165,75 @@ func TestExecuteUAPIOperationPOSTKeepsSecretsOutOfURL(t *testing.T) {
 	)
 	if err != nil {
 		t.Fatalf("ExecuteUAPIOperation() error: %v", err)
+	}
+}
+
+func TestExecuteUAPIOperationJSON(t *testing.T) {
+	t.Parallel()
+
+	type requestModel struct {
+		Preferences map[string]int `json:"preferences"`
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(
+		response http.ResponseWriter,
+		request *http.Request,
+	) {
+		if request.Method != http.MethodPost {
+			t.Errorf("method = %s, want POST", request.Method)
+		}
+		if request.URL.Path !=
+			"/execute/ContactInformation/set_notification_preferences" {
+			t.Errorf("path = %s", request.URL.Path)
+		}
+		if request.URL.RawQuery != "" {
+			t.Errorf("request URL contains JSON data: %s", request.URL.Redacted())
+		}
+		if got := request.Header.Get("Content-Type"); got != "application/json" {
+			t.Errorf("Content-Type = %q", got)
+		}
+
+		var input requestModel
+		if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if got := input.Preferences["notify_disk_limit"]; got != 0 {
+			t.Errorf("notify_disk_limit = %d, want 0", got)
+		}
+
+		_, _ = response.Write([]byte(`{"status":1,"data":null}`))
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL)
+	var output map[string]any
+	err := client.ExecuteUAPIOperationJSON(
+		t.Context(),
+		"ContactInformation",
+		"set_notification_preferences",
+		requestModel{
+			Preferences: map[string]int{"notify_disk_limit": 0},
+		},
+		&output,
+	)
+	if err != nil {
+		t.Fatalf("ExecuteUAPIOperationJSON() error: %v", err)
+	}
+}
+
+func TestExecuteUAPIOperationJSONRejectsInvalidInput(t *testing.T) {
+	t.Parallel()
+
+	client := newTestClient(t, "http://127.0.0.1:1")
+	err := client.ExecuteUAPIOperationJSON(
+		t.Context(),
+		"ContactInformation",
+		"set_notification_preferences",
+		map[string]any{"invalid": make(chan int)},
+		&map[string]any{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "encode UAPI JSON request") {
+		t.Fatalf("ExecuteUAPIOperationJSON() error = %v", err)
 	}
 }
 
