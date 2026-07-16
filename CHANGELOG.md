@@ -105,6 +105,9 @@
   validation, tolerant documented authorization decoding, and explicit
   exclusion of unsafe name-only mutations, certified on cPanel 134 with
   Terraform `1.14.9` and `1.15.8`.
+- Complete domain inventory data source with normalized, typed, sorted, and
+  duplicate-checked main, addon, subdomain, and alias identities, certified on
+  cPanel 134 with Terraform `1.14.9` and `1.15.8`.
 - Stored SSL certificate signing request resource and data source with
   generation from an existing cPanel key, RSA and ECDSA public-key
   verification, in-place friendly-name updates, import, drift recovery,

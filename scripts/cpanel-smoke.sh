@@ -1326,7 +1326,56 @@ ip_test_block_count="$(
     "${response_file}"
 )"
 
-request 'execute/DomainInfo/list_domains' 'DNS zone inventory'
+request 'execute/DomainInfo/list_domains' 'domain inventory'
+if ! jq -e \
+  '
+    def normalized_domain:
+      ascii_downcase
+      | rtrimstr(".");
+    (.data | type) == "object"
+    and (.data.main_domain? | type) == "string"
+    and (.data.main_domain | length) > 0
+    and (.data.addon_domains? | type) == "array"
+    and (.data.sub_domains? | type) == "array"
+    and (.data.parked_domains? | type) == "array"
+    and (
+      [
+        .data.main_domain,
+        .data.addon_domains[],
+        .data.sub_domains[],
+        .data.parked_domains[]
+      ]
+      | all(
+          type == "string"
+          and length > 0
+          and test("[[:space:]]") == false
+        )
+    )
+    and (
+      [
+        .data.main_domain,
+        .data.addon_domains[],
+        .data.sub_domains[],
+        .data.parked_domains[]
+        | normalized_domain
+      ] as $domains
+      | ($domains | length) == ($domains | unique | length)
+    )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'cPanel domain inventory is incomplete or ambiguous\n' >&2
+  exit 1
+fi
+domain_inventory_count="$(
+  jq -r \
+    '
+      1
+      + (.data.addon_domains | length)
+      + (.data.sub_domains | length)
+      + (.data.parked_domains | length)
+    ' \
+    "${response_file}"
+)"
 dns_zones="$(
   jq -r \
     '[.data.main_domain] + (.data.addon_domains // []) | .[]' \
@@ -1738,6 +1787,7 @@ printf '  IP blocks: %s (%s test-managed)\n' \
 printf '  DNS records: %s (%s test-managed)\n' \
   "${dns_record_count}" \
   "${dns_test_record_count}"
+printf '  domains: %s total\n' "${domain_inventory_count}"
 printf '  addon domains: %s (%s test-managed)\n' \
   "${addon_domain_count}" \
   "${addon_domain_test_count}"

@@ -583,9 +583,12 @@ Addon-domain, domain-alias, and web-subdomain creation and deletion, plus
 document-root changes, use cPanel API 2 because cPanel does not provide
 equivalent account-level UAPI mutations. A domain alias always targets the
 account main domain and shares its `public_html` document root; Terraform never
-deletes that shared directory. Reads use the domain inventory exposed by
-cPanel, and every release must repeat the domain acceptance suites against the
-certified environment.
+deletes that shared directory. The complete read-only domain inventory uses
+UAPI `DomainInfo::list_domains`, maps parked domains to the `alias` category,
+normalizes names, sorts the combined result, and rejects a domain reported in
+multiple categories. It exposes no document roots or internal domain keys.
+Every release must repeat the domain acceptance suites against the certified
+environment.
 
 ## Concurrency
 

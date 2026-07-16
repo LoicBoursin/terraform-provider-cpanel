@@ -331,6 +331,7 @@ func (p *cpanelProvider) DataSources(_ context.Context) []func() datasource.Data
 		NewDirectoryPrivacyUserDataSource,
 		NewDNSRecordDataSource,
 		NewDomainAliasDataSource,
+		NewDomainsDataSource,
 		NewDynamicDNSDataSource,
 		NewEmailAccountDataSource,
 		NewEmailAccountSuspensionDataSource,

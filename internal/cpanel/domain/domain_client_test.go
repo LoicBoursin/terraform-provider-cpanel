@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -120,6 +121,75 @@ func TestClientListsBaseDomains(t *testing.T) {
 	}
 	if len(domains) != 2 || domains[0] != "example.test" || domains[1] != "addon.test" {
 		t.Fatalf("domains = %v", domains)
+	}
+}
+
+func TestClientListsCompleteDomainInventory(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(
+		response http.ResponseWriter,
+		request *http.Request,
+	) {
+		if request.Method != http.MethodGet {
+			t.Errorf("method = %s, want GET", request.Method)
+		}
+		if request.URL.Path != "/execute/DomainInfo/list_domains" {
+			t.Errorf("path = %s", request.URL.Path)
+		}
+		if request.URL.RawQuery != "" {
+			t.Errorf("query = %q, want empty", request.URL.RawQuery)
+		}
+		_, _ = response.Write([]byte(
+			`{"status":1,"data":{"main_domain":"Main.Example.","addon_domains":["z-addon.test","A-addon.test"],"sub_domains":["Sub.Main.Example"],"parked_domains":["Alias.Test"]}}`,
+		))
+	}))
+	defer server.Close()
+
+	client := newDomainTestClient(t, server.URL)
+	domains, err := client.ListDomains(t.Context())
+	if err != nil {
+		t.Fatalf("ListDomains() error = %v", err)
+	}
+	expected := []InventoryDomain{
+		{Name: "a-addon.test", Type: InventoryDomainTypeAddon},
+		{Name: "alias.test", Type: InventoryDomainTypeAlias},
+		{Name: "main.example", Type: InventoryDomainTypeMain},
+		{Name: "sub.main.example", Type: InventoryDomainTypeSubdomain},
+		{Name: "z-addon.test", Type: InventoryDomainTypeAddon},
+	}
+	if !reflect.DeepEqual(domains, expected) {
+		t.Fatalf("ListDomains() = %#v; expected %#v", domains, expected)
+	}
+}
+
+func TestClientRejectsAmbiguousDomainInventory(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]string{
+		"missing main domain": `{"status":1,"data":{"main_domain":"","addon_domains":[],"sub_domains":[],"parked_domains":[]}}`,
+		"duplicate category":  `{"status":1,"data":{"main_domain":"example.test","addon_domains":["shared.test"],"sub_domains":["SHARED.TEST."],"parked_domains":[]}}`,
+		"blank array item":    `{"status":1,"data":{"main_domain":"example.test","addon_domains":[" "],"sub_domains":[],"parked_domains":[]}}`,
+	}
+	for name, payload := range tests {
+		payload := payload
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(
+				response http.ResponseWriter,
+				_ *http.Request,
+			) {
+				_, _ = response.Write([]byte(payload))
+			}))
+			defer server.Close()
+
+			_, err := newDomainTestClient(t, server.URL).
+				ListDomains(t.Context())
+			if err == nil {
+				t.Fatal("ListDomains() returned no error")
+			}
+		})
 	}
 }
 

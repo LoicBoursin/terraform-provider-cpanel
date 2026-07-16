@@ -156,6 +156,9 @@ func testAccPreCheck(t *testing.T) {
 	if _, err := cpaneldomain.NewClient(client).ListDomainAliases(ctx); err != nil {
 		t.Fatalf("verify domain alias API access: %v", err)
 	}
+	if _, err := cpaneldomain.NewClient(client).ListDomains(ctx); err != nil {
+		t.Fatalf("verify complete domain inventory API access: %v", err)
+	}
 	mainDomain, err := cpaneldomain.NewClient(client).GetMainDomain(ctx)
 	if err != nil {
 		t.Fatalf("read cPanel main domain: %v", err)

@@ -2,7 +2,6 @@ package domain
 
 import (
 	"context"
-	"net/http"
 
 	"terraform-provider-cpanel/internal/cpanel"
 )
@@ -110,20 +109,13 @@ func (c *Client) GetSubdomain(ctx context.Context, name string) (*Subdomain, err
 }
 
 func (c *Client) ListBaseDomains(ctx context.Context) ([]string, error) {
-	response := DomainListResponse{}
-	if err := c.ExecuteUAPIOperation(
-		ctx,
-		http.MethodGet,
-		cpanel.ModuleDomainInfo,
-		"list_domains",
-		map[string]string{},
-		&response,
-	); err != nil {
+	domainList, err := c.getDomainList(ctx)
+	if err != nil {
 		return nil, err
 	}
 
-	domains := []string{response.Data.MainDomain}
-	domains = append(domains, response.Data.AddonDomains...)
+	domains := []string{domainList.MainDomain}
+	domains = append(domains, domainList.AddonDomains...)
 
 	return domains, nil
 }

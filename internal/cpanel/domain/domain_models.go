@@ -28,6 +28,20 @@ type DomainList struct {
 	ParkedDomains []string `json:"parked_domains"`
 }
 
+type InventoryDomainType string
+
+const (
+	InventoryDomainTypeMain      InventoryDomainType = "main"
+	InventoryDomainTypeAddon     InventoryDomainType = "addon"
+	InventoryDomainTypeSubdomain InventoryDomainType = "subdomain"
+	InventoryDomainTypeAlias     InventoryDomainType = "alias"
+)
+
+type InventoryDomain struct {
+	Name string
+	Type InventoryDomainType
+}
+
 type SubdomainListResponse struct {
 	CpanelResult SubdomainListResult `json:"cpanelresult"`
 }
