@@ -4,10 +4,36 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	datasourceschema "github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 
 	cpanelmail "terraform-provider-cpanel/internal/cpanel/email"
 )
+
+func TestAccountEmailFilterDataSourceSchema(t *testing.T) {
+	t.Parallel()
+
+	filterDataSource := NewAccountEmailFilterDataSource()
+	response := &datasource.SchemaResponse{}
+	filterDataSource.Schema(
+		t.Context(),
+		datasource.SchemaRequest{},
+		response,
+	)
+	if response.Diagnostics.HasError() {
+		t.Fatalf("Schema() diagnostics: %v", response.Diagnostics)
+	}
+
+	account, ok := response.Schema.Attributes["account"].(datasourceschema.StringAttribute)
+	if !ok || !account.Computed || account.Required || account.Optional {
+		t.Fatalf("account schema = %#v", response.Schema.Attributes["account"])
+	}
+	name, ok := response.Schema.Attributes["name"].(datasourceschema.StringAttribute)
+	if !ok || !name.Required {
+		t.Fatalf("name schema = %#v", response.Schema.Attributes["name"])
+	}
+}
 
 func TestAccEmailFilterDataSource(t *testing.T) {
 	const password = "P9!emailFilterDataSource-2026"

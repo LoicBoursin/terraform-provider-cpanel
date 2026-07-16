@@ -118,6 +118,26 @@ func TestValidateEmailFilter(t *testing.T) {
 	}
 }
 
+func TestValidateAccountEmailFilter(t *testing.T) {
+	t.Parallel()
+
+	filter := testEmailFilterDefinition()
+	filter.Account = "terraform"
+	if err := validateAccountEmailFilter(filter); err != nil {
+		t.Fatalf("validateAccountEmailFilter() error: %v", err)
+	}
+
+	for _, account := range []string{"", "user@example.test", "bad|account"} {
+		filter.Account = account
+		if err := validateAccountEmailFilter(filter); err == nil {
+			t.Fatalf(
+				"validateAccountEmailFilter() accepted account %q",
+				account,
+			)
+		}
+	}
+}
+
 func TestEmailFilterDestinationValidators(t *testing.T) {
 	t.Parallel()
 

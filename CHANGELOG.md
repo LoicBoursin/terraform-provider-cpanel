@@ -59,6 +59,9 @@
   actions, enable or disable updates, rename, import, drift recovery,
   mailbox-scoped mutation serialization, safe-action enforcement, read-only
   observation of external filters, and cPanel 134 acceptance coverage.
+- Account-level email filter resource and data source with the same ordered,
+  safe filter model, exact global-scope UAPI calls, import, rename, drift
+  recovery, isolated cleanup, and cPanel 134 acceptance coverage.
 - Mailman mailing list resource and data source with write-only administrator
   passwords, explicit password-version rotations, exact and mixed access
   settings, in-place password and privacy updates, import, drift recovery,

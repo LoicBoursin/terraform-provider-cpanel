@@ -29,12 +29,21 @@ func NewEmailFilterResource() resource.Resource {
 	return &emailFilterResource{}
 }
 
+func NewAccountEmailFilterResource() resource.Resource {
+	return &emailFilterResource{accountLevel: true}
+}
+
 type emailFilterClient interface {
+	DeleteAccountFilter(context.Context, string) error
 	DeleteFilter(context.Context, string, string) error
+	GetAccountFilter(context.Context, string) (*cpanelmail.Filter, error)
 	GetAccount(context.Context, string, string) (*cpanelmail.Account, error)
 	GetFilter(context.Context, string, string) (*cpanelmail.Filter, error)
+	LockAccountFilters() func()
 	LockFilterAccount(string) func()
+	SetAccountFilterEnabled(context.Context, string, bool) error
 	SetFilterEnabled(context.Context, string, string, bool) error
+	StoreAccountFilter(context.Context, string, cpanelmail.Filter) error
 	StoreFilter(
 		context.Context,
 		string,
@@ -44,7 +53,9 @@ type emailFilterClient interface {
 }
 
 type emailFilterResource struct {
-	client emailFilterClient
+	client       emailFilterClient
+	accountLevel bool
+	account      string
 }
 
 func (r *emailFilterResource) Metadata(
@@ -52,7 +63,11 @@ func (r *emailFilterResource) Metadata(
 	request resource.MetadataRequest,
 	response *resource.MetadataResponse,
 ) {
-	response.TypeName = request.ProviderTypeName + "_email_filter"
+	suffix := "_email_filter"
+	if r.accountLevel {
+		suffix = "_account_email_filter"
+	}
+	response.TypeName = request.ProviderTypeName + suffix
 }
 
 func (r *emailFilterResource) Schema(
@@ -60,19 +75,32 @@ func (r *emailFilterResource) Schema(
 	_ resource.SchemaRequest,
 	response *resource.SchemaResponse,
 ) {
+	description := "Manages one ordered user-level cPanel email filter for an existing mailbox."
+	markdownDescription := "Manages one ordered user-level cPanel email filter for an existing mailbox. For safety, actions are limited to `deliver`, `fail`, and `finish`; arbitrary file writes and command execution through `save` or `pipe` are rejected."
+	accountAttribute := schema.StringAttribute{
+		Required:            true,
+		Description:         "The existing mailbox that owns the user-level filter.",
+		MarkdownDescription: "The existing mailbox that owns the user-level filter.",
+		Validators:          emailAddressValidators(),
+		PlanModifiers: []planmodifier.String{
+			stringplanmodifier.RequiresReplace(),
+		},
+	}
+	if r.accountLevel {
+		description = "Manages one ordered account-level cPanel email filter."
+		markdownDescription = "Manages one ordered account-level cPanel email filter. For safety, actions are limited to `deliver`, `fail`, and `finish`; arbitrary file writes and command execution through `save` or `pipe` are rejected."
+		accountAttribute = schema.StringAttribute{
+			Computed:            true,
+			Description:         "The cPanel account username that owns the account-level filter.",
+			MarkdownDescription: "The cPanel account username that owns the account-level filter.",
+		}
+	}
+
 	response.Schema = schema.Schema{
-		Description:         "Manages one ordered user-level cPanel email filter for an existing mailbox.",
-		MarkdownDescription: "Manages one ordered user-level cPanel email filter for an existing mailbox. Account-level filters are deliberately unsupported. For safety, actions are limited to `deliver`, `fail`, and `finish`; arbitrary file writes and command execution through `save` or `pipe` are rejected.",
+		Description:         description,
+		MarkdownDescription: markdownDescription,
 		Attributes: map[string]schema.Attribute{
-			"account": schema.StringAttribute{
-				Required:            true,
-				Description:         "The existing mailbox that owns the user-level filter.",
-				MarkdownDescription: "The existing mailbox that owns the user-level filter.",
-				Validators:          emailAddressValidators(),
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
+			"account": accountAttribute,
 			"name": schema.StringAttribute{
 				Required:            true,
 				Description:         "The cPanel filter name.",
@@ -171,12 +199,13 @@ func (r *emailFilterResource) Read(
 		return
 	}
 
-	unlock := r.client.LockFilterAccount(state.Account.ValueString())
+	account := r.filterAccount(state.Account.ValueString())
+	unlock := r.lockFilterAccount(account)
 	defer unlock()
 
-	filter, err := r.client.GetFilter(
+	filter, err := r.getFilter(
 		ctx,
-		state.Account.ValueString(),
+		account,
 		state.Name.ValueString(),
 	)
 	if err != nil {
@@ -187,7 +216,7 @@ func (r *emailFilterResource) Read(
 		response.State.RemoveResource(ctx)
 		return
 	}
-	if err := validateEmailFilter(*filter); err != nil {
+	if err := r.validateManagedFilter(*filter); err != nil {
 		response.Diagnostics.AddError(
 			"Email filter is not safely manageable",
 			err.Error(),
@@ -218,12 +247,13 @@ func (r *emailFilterResource) Create(
 	if response.Diagnostics.HasError() {
 		return
 	}
-	if err := validateEmailFilter(desired); err != nil {
+	desired.Account = r.filterAccount(desired.Account)
+	if err := r.validateManagedFilter(desired); err != nil {
 		response.Diagnostics.AddError("Invalid email filter", err.Error())
 		return
 	}
 
-	unlock := r.client.LockFilterAccount(desired.Account)
+	unlock := r.lockFilterAccount(desired.Account)
 	defer unlock()
 
 	if err := r.validateExistingMailbox(ctx, desired.Account); err != nil {
@@ -231,7 +261,7 @@ func (r *emailFilterResource) Create(
 		return
 	}
 
-	existing, err := r.client.GetFilter(ctx, desired.Account, desired.Name)
+	existing, err := r.getFilter(ctx, desired.Account, desired.Name)
 	if err != nil {
 		response.Diagnostics.AddError("Unable to read email filter", err.Error())
 		return
@@ -246,37 +276,31 @@ func (r *emailFilterResource) Create(
 
 	created, err := r.applyRemoteFilter(ctx, "", desired)
 	if err != nil {
-		rollbackErr := r.rollbackCreatedFilter(ctx, desired)
 		response.Diagnostics.AddError(
 			"Unable to create email filter",
-			emailMutationErrorDetail(err, rollbackErr),
+			fmt.Sprintf(
+				"%v. Terraform did not adopt or delete any filter after the failed creation because this API does not expose a stable filter identifier. Inspect cPanel and import the filter if it exists.",
+				err,
+			),
 		)
 		return
 	}
 
 	response.Diagnostics.Append(applyEmailFilterToModel(ctx, &plan, *created)...)
 	if response.Diagnostics.HasError() {
-		rollbackErr := r.rollbackCreatedFilter(ctx, desired)
 		response.Diagnostics.AddError(
 			"Unable to store email filter state",
-			emailMutationErrorDetail(
-				errors.New("convert email filter state"),
-				rollbackErr,
-			),
+			"Terraform created the email filter but could not convert its state. Terraform left the remote filter untouched; inspect cPanel and import it.",
 		)
 		return
 	}
 
 	stateDiagnostics := response.State.Set(ctx, &plan)
 	if stateDiagnostics.HasError() {
-		rollbackErr := r.rollbackCreatedFilter(ctx, desired)
 		response.Diagnostics.Append(stateDiagnostics...)
 		response.Diagnostics.AddError(
 			"Unable to store email filter state",
-			emailMutationErrorDetail(
-				errors.New("write Terraform state"),
-				rollbackErr,
-			),
+			"Terraform created the email filter but could not write its state. Terraform left the remote filter untouched; inspect cPanel and import it.",
 		)
 		return
 	}
@@ -303,11 +327,13 @@ func (r *emailFilterResource) Update(
 	if response.Diagnostics.HasError() {
 		return
 	}
-	if err := validateEmailFilter(desired); err != nil {
+	desired.Account = r.filterAccount(desired.Account)
+	previous.Account = r.filterAccount(previous.Account)
+	if err := r.validateManagedFilter(desired); err != nil {
 		response.Diagnostics.AddError("Invalid email filter", err.Error())
 		return
 	}
-	if err := validateEmailFilter(previous); err != nil {
+	if err := r.validateManagedFilter(previous); err != nil {
 		response.Diagnostics.AddError(
 			"Invalid email filter state",
 			err.Error(),
@@ -322,7 +348,7 @@ func (r *emailFilterResource) Update(
 		return
 	}
 
-	unlock := r.client.LockFilterAccount(desired.Account)
+	unlock := r.lockFilterAccount(desired.Account)
 	defer unlock()
 
 	if err := r.validateExistingMailbox(ctx, desired.Account); err != nil {
@@ -330,7 +356,7 @@ func (r *emailFilterResource) Update(
 		return
 	}
 
-	current, err := r.client.GetFilter(ctx, previous.Account, previous.Name)
+	current, err := r.getFilter(ctx, previous.Account, previous.Name)
 	if err != nil {
 		response.Diagnostics.AddError("Unable to read email filter", err.Error())
 		return
@@ -351,7 +377,7 @@ func (r *emailFilterResource) Update(
 	}
 
 	if desired.Name != previous.Name {
-		conflict, conflictErr := r.client.GetFilter(
+		conflict, conflictErr := r.getFilter(
 			ctx,
 			desired.Account,
 			desired.Name,
@@ -427,7 +453,8 @@ func (r *emailFilterResource) Delete(
 	if response.Diagnostics.HasError() {
 		return
 	}
-	if err := validateEmailFilter(expected); err != nil {
+	expected.Account = r.filterAccount(expected.Account)
+	if err := r.validateManagedFilter(expected); err != nil {
 		response.Diagnostics.AddError(
 			"Invalid email filter state",
 			err.Error(),
@@ -435,10 +462,10 @@ func (r *emailFilterResource) Delete(
 		return
 	}
 
-	unlock := r.client.LockFilterAccount(expected.Account)
+	unlock := r.lockFilterAccount(expected.Account)
 	defer unlock()
 
-	current, err := r.client.GetFilter(ctx, expected.Account, expected.Name)
+	current, err := r.getFilter(ctx, expected.Account, expected.Name)
 	if err != nil {
 		response.Diagnostics.AddError("Unable to read email filter", err.Error())
 		return
@@ -454,8 +481,8 @@ func (r *emailFilterResource) Delete(
 		return
 	}
 
-	if err := r.client.DeleteFilter(ctx, expected.Account, expected.Name); err != nil {
-		actual, readErr := r.client.GetFilter(
+	if err := r.deleteFilter(ctx, expected.Account, expected.Name); err != nil {
+		actual, readErr := r.getFilter(
 			ctx,
 			expected.Account,
 			expected.Name,
@@ -486,6 +513,24 @@ func (r *emailFilterResource) ImportState(
 	request resource.ImportStateRequest,
 	response *resource.ImportStateResponse,
 ) {
+	if r.accountLevel {
+		if err := validateEmailFilterName(request.ID); err != nil {
+			response.Diagnostics.AddError(
+				"Invalid account email filter import identifier",
+				err.Error(),
+			)
+			return
+		}
+		response.Diagnostics.Append(
+			response.State.SetAttribute(ctx, path.Root("account"), r.account)...,
+		)
+		response.Diagnostics.Append(
+			response.State.SetAttribute(ctx, path.Root("name"), request.ID)...,
+		)
+
+		return
+	}
+
 	account, name, err := parseEmailFilterImportID(request.ID)
 	if err != nil {
 		response.Diagnostics.AddError(
@@ -537,12 +582,17 @@ func (r *emailFilterResource) Configure(
 	}
 
 	r.client = client
+	r.account = client.Auth.Username
 }
 
 func (r *emailFilterResource) validateExistingMailbox(
 	ctx context.Context,
 	address string,
 ) error {
+	if r.accountLevel {
+		return nil
+	}
+
 	user, domain, err := splitEmailAccountAddress(address)
 	if err != nil {
 		return err
@@ -567,9 +617,13 @@ func (r *emailFilterResource) applyRemoteFilter(
 	previousName string,
 	desired cpanelmail.Filter,
 ) (*cpanelmail.Filter, error) {
-	storeErr := r.client.StoreFilter(ctx, desired.Account, previousName, desired)
+	storeErr := r.storeFilter(ctx, previousName, desired)
 	if storeErr != nil {
-		actual, readErr := r.client.GetFilter(
+		if previousName == "" {
+			return nil, storeErr
+		}
+
+		actual, readErr := r.getFilter(
 			ctx,
 			desired.Account,
 			desired.Name,
@@ -585,14 +639,14 @@ func (r *emailFilterResource) applyRemoteFilter(
 		}
 	}
 
-	enableErr := r.client.SetFilterEnabled(
+	enableErr := r.setFilterEnabled(
 		ctx,
 		desired.Account,
 		desired.Name,
 		desired.Enabled,
 	)
 	if enableErr != nil {
-		actual, readErr := r.client.GetFilter(
+		actual, readErr := r.getFilter(
 			ctx,
 			desired.Account,
 			desired.Name,
@@ -613,7 +667,7 @@ func (r *emailFilterResource) applyRemoteFilter(
 		return nil, err
 	}
 	if previousName != "" && previousName != desired.Name {
-		previous, readErr := r.client.GetFilter(
+		previous, readErr := r.getFilter(
 			ctx,
 			desired.Account,
 			previousName,
@@ -640,7 +694,7 @@ func (r *emailFilterResource) verifyFilter(
 	ctx context.Context,
 	expected cpanelmail.Filter,
 ) (*cpanelmail.Filter, error) {
-	actual, err := r.client.GetFilter(ctx, expected.Account, expected.Name)
+	actual, err := r.getFilter(ctx, expected.Account, expected.Name)
 	if err != nil {
 		return nil, fmt.Errorf("read email filter after mutation: %w", err)
 	}
@@ -651,7 +705,7 @@ func (r *emailFilterResource) verifyFilter(
 			expected.Account,
 		)
 	}
-	if err := validateEmailFilter(*actual); err != nil {
+	if err := r.validateManagedFilter(*actual); err != nil {
 		return nil, fmt.Errorf(
 			"email filter returned unsupported state after mutation: %w",
 			err,
@@ -673,7 +727,7 @@ func (r *emailFilterResource) verifyFilterAbsent(
 	account string,
 	name string,
 ) error {
-	actual, err := r.client.GetFilter(ctx, account, name)
+	actual, err := r.getFilter(ctx, account, name)
 	if err != nil {
 		return fmt.Errorf("read email filter after deletion: %w", err)
 	}
@@ -688,35 +742,12 @@ func (r *emailFilterResource) verifyFilterAbsent(
 	return nil
 }
 
-func (r *emailFilterResource) rollbackCreatedFilter(
-	ctx context.Context,
-	desired cpanelmail.Filter,
-) error {
-	actual, err := r.client.GetFilter(ctx, desired.Account, desired.Name)
-	if err != nil {
-		return fmt.Errorf("inspect created email filter before rollback: %w", err)
-	}
-	if actual == nil {
-		return nil
-	}
-	if !emailFiltersEqual(*actual, desired) {
-		return errors.New(
-			"refuse to roll back email filter creation because the remote state no longer matches the attempted state",
-		)
-	}
-	if err := r.client.DeleteFilter(ctx, desired.Account, desired.Name); err != nil {
-		return fmt.Errorf("delete created email filter during rollback: %w", err)
-	}
-
-	return r.verifyFilterAbsent(ctx, desired.Account, desired.Name)
-}
-
 func (r *emailFilterResource) rollbackUpdatedFilter(
 	ctx context.Context,
 	previous cpanelmail.Filter,
 	desired cpanelmail.Filter,
 ) error {
-	previousIdentity, err := r.client.GetFilter(
+	previousIdentity, err := r.getFilter(
 		ctx,
 		previous.Account,
 		previous.Name,
@@ -729,7 +760,7 @@ func (r *emailFilterResource) rollbackUpdatedFilter(
 	if desired.Name == previous.Name {
 		desiredIdentity = previousIdentity
 	} else {
-		desiredIdentity, err = r.client.GetFilter(
+		desiredIdentity, err = r.getFilter(
 			ctx,
 			desired.Account,
 			desired.Name,
@@ -774,14 +805,13 @@ func (r *emailFilterResource) restorePreviousFilter(
 	previous cpanelmail.Filter,
 	desiredName string,
 ) error {
-	storeErr := r.client.StoreFilter(
+	storeErr := r.storeFilter(
 		ctx,
-		previous.Account,
 		currentName,
 		previous,
 	)
 	if storeErr != nil {
-		actual, readErr := r.client.GetFilter(
+		actual, readErr := r.getFilter(
 			ctx,
 			previous.Account,
 			previous.Name,
@@ -799,14 +829,14 @@ func (r *emailFilterResource) restorePreviousFilter(
 		}
 	}
 
-	statusErr := r.client.SetFilterEnabled(
+	statusErr := r.setFilterEnabled(
 		ctx,
 		previous.Account,
 		previous.Name,
 		previous.Enabled,
 	)
 	if statusErr != nil {
-		actual, readErr := r.client.GetFilter(
+		actual, readErr := r.getFilter(
 			ctx,
 			previous.Account,
 			previous.Name,
@@ -836,6 +866,81 @@ func (r *emailFilterResource) restorePreviousFilter(
 	}
 
 	return nil
+}
+
+func (r *emailFilterResource) filterAccount(configured string) string {
+	if r.accountLevel {
+		return r.account
+	}
+
+	return configured
+}
+
+func (r *emailFilterResource) lockFilterAccount(account string) func() {
+	if r.accountLevel {
+		return r.client.LockAccountFilters()
+	}
+
+	return r.client.LockFilterAccount(account)
+}
+
+func (r *emailFilterResource) getFilter(
+	ctx context.Context,
+	account string,
+	name string,
+) (*cpanelmail.Filter, error) {
+	if r.accountLevel {
+		return r.client.GetAccountFilter(ctx, name)
+	}
+
+	return r.client.GetFilter(ctx, account, name)
+}
+
+func (r *emailFilterResource) storeFilter(
+	ctx context.Context,
+	oldName string,
+	filter cpanelmail.Filter,
+) error {
+	if r.accountLevel {
+		return r.client.StoreAccountFilter(ctx, oldName, filter)
+	}
+
+	return r.client.StoreFilter(ctx, filter.Account, oldName, filter)
+}
+
+func (r *emailFilterResource) setFilterEnabled(
+	ctx context.Context,
+	account string,
+	name string,
+	enabled bool,
+) error {
+	if r.accountLevel {
+		return r.client.SetAccountFilterEnabled(ctx, name, enabled)
+	}
+
+	return r.client.SetFilterEnabled(ctx, account, name, enabled)
+}
+
+func (r *emailFilterResource) deleteFilter(
+	ctx context.Context,
+	account string,
+	name string,
+) error {
+	if r.accountLevel {
+		return r.client.DeleteAccountFilter(ctx, name)
+	}
+
+	return r.client.DeleteFilter(ctx, account, name)
+}
+
+func (r *emailFilterResource) validateManagedFilter(
+	filter cpanelmail.Filter,
+) error {
+	if r.accountLevel {
+		return validateAccountEmailFilter(filter)
+	}
+
+	return validateEmailFilter(filter)
 }
 
 func parseEmailFilterImportID(identifier string) (string, string, error) {

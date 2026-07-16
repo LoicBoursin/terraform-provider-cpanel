@@ -76,6 +76,10 @@ func (c *Client) LockFilterAccount(account string) func() {
 	}
 }
 
+func (c *Client) LockAccountFilters() func() {
+	return c.LockFilterAccount("\x00account-level")
+}
+
 func (c *Client) LockMailingList(address string) func() {
 	c.mailingListLocksMu.Lock()
 	if c.mailingListLocks == nil {

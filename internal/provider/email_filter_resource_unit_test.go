@@ -5,8 +5,59 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	resourceschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
+
 	cpanelmail "terraform-provider-cpanel/internal/cpanel/email"
 )
+
+func TestAccountEmailFilterResourceSchema(t *testing.T) {
+	t.Parallel()
+
+	filterResource := NewAccountEmailFilterResource()
+	response := &resource.SchemaResponse{}
+	filterResource.Schema(
+		t.Context(),
+		resource.SchemaRequest{},
+		response,
+	)
+	if response.Diagnostics.HasError() {
+		t.Fatalf("Schema() diagnostics: %v", response.Diagnostics)
+	}
+
+	account, ok := response.Schema.Attributes["account"].(resourceschema.StringAttribute)
+	if !ok || !account.Computed || account.Required || account.Optional {
+		t.Fatalf("account schema = %#v", response.Schema.Attributes["account"])
+	}
+	name, ok := response.Schema.Attributes["name"].(resourceschema.StringAttribute)
+	if !ok || !name.Required {
+		t.Fatalf("name schema = %#v", response.Schema.Attributes["name"])
+	}
+}
+
+func TestAccountEmailFilterResourceUsesAccountScope(t *testing.T) {
+	t.Parallel()
+
+	desired := testEmailFilterDefinition()
+	desired.Account = fakeAccountEmailFilterOwner
+	client := newFakeEmailFilterClient()
+	filterResource := emailFilterResource{
+		client:       client,
+		accountLevel: true,
+		account:      fakeAccountEmailFilterOwner,
+	}
+
+	actual, err := filterResource.applyRemoteFilter(t.Context(), "", desired)
+	if err != nil {
+		t.Fatalf("applyRemoteFilter() error: %v", err)
+	}
+	if actual == nil || !emailFiltersEqual(*actual, desired) {
+		t.Fatalf("applyRemoteFilter() = %#v, want %#v", actual, desired)
+	}
+	if client.get(fakeAccountEmailFilterOwner, desired.Name) == nil {
+		t.Fatal("account-level filter was not stored in account scope")
+	}
+}
 
 func TestEmailFilterApplyRemoteHandlesAmbiguousMutations(t *testing.T) {
 	t.Parallel()
@@ -27,11 +78,11 @@ func TestEmailFilterApplyRemoteHandlesAmbiguousMutations(t *testing.T) {
 			wantStatusCall: true,
 		},
 		{
-			name:           "ambiguous store applied",
-			storeError:     errors.New("store response lost"),
-			applyStore:     true,
-			applyStatus:    true,
-			wantStatusCall: true,
+			name:        "ambiguous store applied is not adopted",
+			storeError:  errors.New("store response lost"),
+			applyStore:  true,
+			applyStatus: true,
+			wantError:   true,
 		},
 		{
 			name:        "ambiguous store not applied",
@@ -97,73 +148,6 @@ func TestEmailFilterApplyRemoteHandlesAmbiguousMutations(t *testing.T) {
 					"applyRemoteFilter() = %#v, want %#v",
 					actual,
 					desired,
-				)
-			}
-		})
-	}
-}
-
-func TestEmailFilterRollbackCreatedRequiresExactState(t *testing.T) {
-	t.Parallel()
-
-	testCases := []struct {
-		name            string
-		current         *cpanelmail.Filter
-		wantError       bool
-		wantDeleteCalls int
-	}{
-		{
-			name:            "exact state",
-			current:         filterPointer(testEmailFilterDefinition()),
-			wantDeleteCalls: 1,
-		},
-		{
-			name: "status changed",
-			current: filterPointer(func() cpanelmail.Filter {
-				filter := testEmailFilterDefinition()
-				filter.Enabled = false
-
-				return filter
-			}()),
-			wantError: true,
-		},
-		{
-			name: "definition changed",
-			current: filterPointer(func() cpanelmail.Filter {
-				filter := testEmailFilterDefinition()
-				filter.Rules[0].Value = "external change"
-
-				return filter
-			}()),
-			wantError: true,
-		},
-		{name: "already absent"},
-	}
-
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
-			t.Parallel()
-
-			desired := testEmailFilterDefinition()
-			client := newFakeEmailFilterClient()
-			if testCase.current != nil {
-				client.put(*testCase.current)
-			}
-			resource := emailFilterResource{client: client}
-
-			err := resource.rollbackCreatedFilter(t.Context(), desired)
-			if (err != nil) != testCase.wantError {
-				t.Fatalf(
-					"rollbackCreatedFilter() error = %v, wantError %t",
-					err,
-					testCase.wantError,
-				)
-			}
-			if client.deleteCalls != testCase.wantDeleteCalls {
-				t.Fatalf(
-					"delete calls = %d, want %d",
-					client.deleteCalls,
-					testCase.wantDeleteCalls,
 				)
 			}
 		})
@@ -271,6 +255,8 @@ type fakeEmailFilterClient struct {
 	deleteCalls int
 }
 
+const fakeAccountEmailFilterOwner = "terraform"
+
 func newFakeEmailFilterClient() *fakeEmailFilterClient {
 	return &fakeEmailFilterClient{
 		filters:     make(map[string]cpanelmail.Filter),
@@ -278,6 +264,13 @@ func newFakeEmailFilterClient() *fakeEmailFilterClient {
 		applyStatus: true,
 		applyDelete: true,
 	}
+}
+
+func (c *fakeEmailFilterClient) DeleteAccountFilter(
+	ctx context.Context,
+	name string,
+) error {
+	return c.DeleteFilter(ctx, fakeAccountEmailFilterOwner, name)
 }
 
 func (c *fakeEmailFilterClient) DeleteFilter(
@@ -291,6 +284,13 @@ func (c *fakeEmailFilterClient) DeleteFilter(
 	}
 
 	return c.deleteError
+}
+
+func (c *fakeEmailFilterClient) GetAccountFilter(
+	ctx context.Context,
+	name string,
+) (*cpanelmail.Filter, error) {
+	return c.GetFilter(ctx, fakeAccountEmailFilterOwner, name)
 }
 
 func (c *fakeEmailFilterClient) GetAccount(
@@ -317,6 +317,23 @@ func (c *fakeEmailFilterClient) LockFilterAccount(string) func() {
 	return func() {}
 }
 
+func (c *fakeEmailFilterClient) LockAccountFilters() func() {
+	return func() {}
+}
+
+func (c *fakeEmailFilterClient) SetAccountFilterEnabled(
+	ctx context.Context,
+	name string,
+	enabled bool,
+) error {
+	return c.SetFilterEnabled(
+		ctx,
+		fakeAccountEmailFilterOwner,
+		name,
+		enabled,
+	)
+}
+
 func (c *fakeEmailFilterClient) SetFilterEnabled(
 	_ context.Context,
 	account string,
@@ -333,6 +350,19 @@ func (c *fakeEmailFilterClient) SetFilterEnabled(
 	}
 
 	return c.statusError
+}
+
+func (c *fakeEmailFilterClient) StoreAccountFilter(
+	ctx context.Context,
+	oldName string,
+	desired cpanelmail.Filter,
+) error {
+	return c.StoreFilter(
+		ctx,
+		fakeAccountEmailFilterOwner,
+		oldName,
+		desired,
+	)
 }
 
 func (c *fakeEmailFilterClient) StoreFilter(
@@ -402,8 +432,4 @@ func cloneEmailFilter(filter cpanelmail.Filter) cpanelmail.Filter {
 
 func emailFilterFakeKey(account, name string) string {
 	return account + "\x00" + name
-}
-
-func filterPointer(filter cpanelmail.Filter) *cpanelmail.Filter {
-	return &filter
 }

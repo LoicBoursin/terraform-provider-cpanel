@@ -119,6 +119,19 @@ func validateEmailFilter(filter cpanelmail.Filter) error {
 	if err := validateReadableEmailFilter(filter); err != nil {
 		return err
 	}
+
+	return validateManagedEmailFilterDefinition(filter)
+}
+
+func validateAccountEmailFilter(filter cpanelmail.Filter) error {
+	if err := validateReadableAccountEmailFilter(filter); err != nil {
+		return err
+	}
+
+	return validateManagedEmailFilterDefinition(filter)
+}
+
+func validateManagedEmailFilterDefinition(filter cpanelmail.Filter) error {
 	if err := validateEmailFilterName(filter.Name); err != nil {
 		return err
 	}
@@ -207,6 +220,22 @@ func validateReadableEmailFilter(filter cpanelmail.Filter) error {
 	if _, _, err := splitEmailAccountAddress(filter.Account); err != nil {
 		return fmt.Errorf("invalid filter account: %w", err)
 	}
+
+	return validateReadableEmailFilterDefinition(filter)
+}
+
+func validateReadableAccountEmailFilter(filter cpanelmail.Filter) error {
+	if filter.Account == "" {
+		return errors.New("cPanel account username must not be empty")
+	}
+	if strings.ContainsAny(filter.Account, "@|\x00\r\n") {
+		return errors.New("cPanel account username is invalid")
+	}
+
+	return validateReadableEmailFilterDefinition(filter)
+}
+
+func validateReadableEmailFilterDefinition(filter cpanelmail.Filter) error {
 	if filter.Name == "" {
 		return errors.New("email filter name must not be empty")
 	}

@@ -2,7 +2,8 @@
 
 Terraform provider for managing account-level API tokens, cron jobs, DNS
 records, Dynamic DNS domains, account locale, web domains, HTTP redirects,
-email accounts, calendar delegations and filters, stored SSL certificates and
+email accounts, calendar delegations, account-level filters and mailbox-level
+filters, stored SSL certificates and
 certificate signing requests, public-only OpenPGP keys, Passenger applications,
 raw access log settings, ModSecurity settings, filesystem directories and UTF-8
 text files, directory indexes and privacy, Git repositories, custom MIME types,
@@ -20,6 +21,7 @@ The supported versions and API policy are documented in
 [`docs/compatibility.md`](docs/compatibility.md).
 ## Supported resources
 
+- `cpanel_account_email_filter`
 - `cpanel_addon_domain`
 - `cpanel_apache_handler`
 - `cpanel_api_token`
@@ -76,7 +78,8 @@ Additional read-only account data sources:
   Apache Handlers, ModSecurity, Git Version Control, Passenger Applications,
   SSL Manager with an existing RSA key, File Manager, account locales, Raw
   Access log settings, public-key GPG import and inventory, email accounts,
-  BoxTrapper, filters, forwarders and autoresponders, email routing, CalDAV
+  BoxTrapper, account-level and mailbox-level filters, forwarders and
+  autoresponders, email routing, CalDAV
   calendar delegation, Mailman mailing lists, FTP accounts, MySQL or MariaDB
   with remote-host access, and PostgreSQL enabled, plus the IP Blocker feature
 

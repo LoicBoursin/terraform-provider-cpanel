@@ -6,6 +6,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	cpanelmail "terraform-provider-cpanel/internal/cpanel/email"
 )
@@ -19,8 +20,13 @@ func NewEmailFilterDataSource() datasource.DataSource {
 	return &emailFilterDataSource{}
 }
 
+func NewAccountEmailFilterDataSource() datasource.DataSource {
+	return &emailFilterDataSource{accountLevel: true}
+}
+
 type emailFilterDataSource struct {
-	client *cpanelmail.Client
+	client       *cpanelmail.Client
+	accountLevel bool
 }
 
 func (d *emailFilterDataSource) Metadata(
@@ -28,7 +34,11 @@ func (d *emailFilterDataSource) Metadata(
 	request datasource.MetadataRequest,
 	response *datasource.MetadataResponse,
 ) {
-	response.TypeName = request.ProviderTypeName + "_email_filter"
+	suffix := "_email_filter"
+	if d.accountLevel {
+		suffix = "_account_email_filter"
+	}
+	response.TypeName = request.ProviderTypeName + suffix
 }
 
 func (d *emailFilterDataSource) Schema(
@@ -36,16 +46,29 @@ func (d *emailFilterDataSource) Schema(
 	_ datasource.SchemaRequest,
 	response *datasource.SchemaResponse,
 ) {
+	description := "Looks up one user-level cPanel email filter for an existing mailbox."
+	markdownDescription := "Looks up one user-level cPanel email filter for an existing mailbox, including its ordered rules, ordered actions, and enabled state. The data source can observe external `save` and `pipe` actions even though the resource deliberately does not manage them."
+	accountAttribute := schema.StringAttribute{
+		Required:            true,
+		Description:         "The mailbox that owns the user-level filter.",
+		MarkdownDescription: "The mailbox that owns the user-level filter.",
+		Validators:          emailAddressValidators(),
+	}
+	if d.accountLevel {
+		description = "Looks up one account-level cPanel email filter."
+		markdownDescription = "Looks up one account-level cPanel email filter, including its ordered rules, ordered actions, and enabled state. The data source can observe external `save` and `pipe` actions even though the resource deliberately does not manage them."
+		accountAttribute = schema.StringAttribute{
+			Computed:            true,
+			Description:         "The cPanel account username that owns the account-level filter.",
+			MarkdownDescription: "The cPanel account username that owns the account-level filter.",
+		}
+	}
+
 	response.Schema = schema.Schema{
-		Description:         "Looks up one user-level cPanel email filter for an existing mailbox.",
-		MarkdownDescription: "Looks up one user-level cPanel email filter for an existing mailbox, including its ordered rules, ordered actions, and enabled state. The data source can observe external `save` and `pipe` actions even though the resource deliberately does not manage them.",
+		Description:         description,
+		MarkdownDescription: markdownDescription,
 		Attributes: map[string]schema.Attribute{
-			"account": schema.StringAttribute{
-				Required:            true,
-				Description:         "The mailbox that owns the user-level filter.",
-				MarkdownDescription: "The mailbox that owns the user-level filter.",
-				Validators:          emailAddressValidators(),
-			},
+			"account": accountAttribute,
 			"name": schema.StringAttribute{
 				Required:            true,
 				Description:         "The cPanel filter name.",
@@ -121,9 +144,21 @@ func (d *emailFilterDataSource) Read(
 	}
 
 	account := config.Account.ValueString()
+	if d.accountLevel {
+		account = d.client.Auth.Username
+		config.Account = types.StringValue(account)
+	}
 	name := config.Name.ValueString()
-	if _, _, err := splitEmailAccountAddress(account); err != nil {
-		response.Diagnostics.AddError("Invalid email filter account", err.Error())
+	if !d.accountLevel {
+		if _, _, err := splitEmailAccountAddress(account); err != nil {
+			response.Diagnostics.AddError("Invalid email filter account", err.Error())
+			return
+		}
+	} else if account == "" {
+		response.Diagnostics.AddError(
+			"Invalid email filter account",
+			"The cPanel account username must not be empty.",
+		)
 		return
 	}
 	if name == "" {
@@ -134,10 +169,21 @@ func (d *emailFilterDataSource) Read(
 		return
 	}
 
-	unlock := d.client.LockFilterAccount(account)
+	var unlock func()
+	if d.accountLevel {
+		unlock = d.client.LockAccountFilters()
+	} else {
+		unlock = d.client.LockFilterAccount(account)
+	}
 	defer unlock()
 
-	filter, err := d.client.GetFilter(ctx, account, name)
+	var filter *cpanelmail.Filter
+	var err error
+	if d.accountLevel {
+		filter, err = d.client.GetAccountFilter(ctx, name)
+	} else {
+		filter, err = d.client.GetFilter(ctx, account, name)
+	}
 	if err != nil {
 		response.Diagnostics.AddError("Unable to read email filter", err.Error())
 		return
@@ -146,14 +192,18 @@ func (d *emailFilterDataSource) Read(
 		response.Diagnostics.AddError(
 			"Email filter not found",
 			fmt.Sprintf(
-				"No user-level email filter named %q exists for %q.",
+				"No email filter named %q exists for %q.",
 				name,
 				account,
 			),
 		)
 		return
 	}
-	if err := validateReadableEmailFilter(*filter); err != nil {
+	validateReadable := validateReadableEmailFilter
+	if d.accountLevel {
+		validateReadable = validateReadableAccountEmailFilter
+	}
+	if err := validateReadable(*filter); err != nil {
 		response.Diagnostics.AddError(
 			"Email filter is not readable",
 			err.Error(),

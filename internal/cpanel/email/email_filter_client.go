@@ -98,11 +98,32 @@ func (c *Client) ListFilters(
 		return nil, err
 	}
 
+	return c.listFilters(ctx, account, true)
+}
+
+func (c *Client) ListAccountFilters(ctx context.Context) ([]Filter, error) {
+	if err := validateFilterAccount(c.Auth.Username); err != nil {
+		return nil, err
+	}
+
+	return c.listFilters(ctx, c.Auth.Username, false)
+}
+
+func (c *Client) listFilters(
+	ctx context.Context,
+	owner string,
+	includeAccount bool,
+) ([]Filter, error) {
+	parameters := map[string]string{}
+	if includeAccount {
+		parameters["account"] = owner
+	}
+
 	response := filterListResponse{}
 	if err := c.executeReadOperation(
 		ctx,
 		operationListFilters,
-		map[string]string{"account": account},
+		parameters,
 		&response,
 	); err != nil {
 		return nil, err
@@ -111,7 +132,7 @@ func (c *Client) ListFilters(
 	filters := make([]Filter, 0, len(response.Data))
 	seenNames := make(map[string]struct{}, len(response.Data))
 	for _, apiValue := range response.Data {
-		filter, err := normalizeAPIFilter(account, apiValue)
+		filter, err := normalizeAPIFilter(owner, apiValue)
 		if err != nil {
 			return nil, err
 		}
@@ -119,7 +140,7 @@ func (c *Client) ListFilters(
 			return nil, fmt.Errorf(
 				"cPanel returned duplicate email filter %q for account %q",
 				filter.Name,
-				account,
+				owner,
 			)
 		}
 		seenNames[filter.Name] = struct{}{}
@@ -134,11 +155,35 @@ func (c *Client) GetFilter(
 	account string,
 	name string,
 ) (*Filter, error) {
+	if err := validateFilterAccount(account); err != nil {
+		return nil, err
+	}
+
+	return c.getFilter(ctx, account, name, true)
+}
+
+func (c *Client) GetAccountFilter(
+	ctx context.Context,
+	name string,
+) (*Filter, error) {
+	if err := validateFilterAccount(c.Auth.Username); err != nil {
+		return nil, err
+	}
+
+	return c.getFilter(ctx, c.Auth.Username, name, false)
+}
+
+func (c *Client) getFilter(
+	ctx context.Context,
+	owner string,
+	name string,
+	includeAccount bool,
+) (*Filter, error) {
 	if err := validateFilterName(name); err != nil {
 		return nil, err
 	}
 
-	filters, err := c.ListFilters(ctx, account)
+	filters, err := c.listFilters(ctx, owner, includeAccount)
 	if err != nil {
 		return nil, err
 	}
@@ -154,14 +199,16 @@ func (c *Client) GetFilter(
 		return nil, nil
 	}
 
+	parameters := map[string]string{"filtername": name}
+	if includeAccount {
+		parameters["account"] = owner
+	}
+
 	response := filterDetailResponse{}
 	if err := c.executeReadOperation(
 		ctx,
 		operationGetFilter,
-		map[string]string{
-			"account":    account,
-			"filtername": name,
-		},
+		parameters,
 		&response,
 	); err != nil {
 		return nil, err
@@ -171,7 +218,7 @@ func (c *Client) GetFilter(
 			"cPanel returned email filter %q when %q was requested for account %q",
 			response.Data.Name,
 			name,
-			account,
+			owner,
 		)
 	}
 
@@ -180,7 +227,7 @@ func (c *Client) GetFilter(
 		return nil, err
 	}
 	actions, err := normalizeNumberedFilterActions(
-		account,
+		owner,
 		name,
 		response.Data.Actions,
 	)
@@ -196,7 +243,7 @@ func (c *Client) GetFilter(
 	}
 
 	return &Filter{
-		Account: account,
+		Account: owner,
 		Name:    name,
 		Enabled: inventoryFilter.Enabled,
 		Rules:   rules,
@@ -213,13 +260,38 @@ func (c *Client) StoreFilter(
 	if err := validateFilterAccount(account); err != nil {
 		return err
 	}
+
+	return c.storeFilter(ctx, account, oldName, filter, true)
+}
+
+func (c *Client) StoreAccountFilter(
+	ctx context.Context,
+	oldName string,
+	filter Filter,
+) error {
+	if err := validateFilterAccount(c.Auth.Username); err != nil {
+		return err
+	}
+
+	return c.storeFilter(ctx, c.Auth.Username, oldName, filter, false)
+}
+
+func (c *Client) storeFilter(
+	ctx context.Context,
+	owner string,
+	oldName string,
+	filter Filter,
+	includeAccount bool,
+) error {
 	if err := validateFilterDefinition(filter); err != nil {
 		return err
 	}
 
 	parameters := map[string]string{
-		"account":    account,
 		"filtername": filter.Name,
+	}
+	if includeAccount {
+		parameters["account"] = owner
 	}
 	if oldName != "" {
 		parameters["oldfiltername"] = oldName
@@ -260,6 +332,29 @@ func (c *Client) SetFilterEnabled(
 	if err := validateFilterAccount(account); err != nil {
 		return err
 	}
+
+	return c.setFilterEnabled(ctx, account, name, enabled, true)
+}
+
+func (c *Client) SetAccountFilterEnabled(
+	ctx context.Context,
+	name string,
+	enabled bool,
+) error {
+	if err := validateFilterAccount(c.Auth.Username); err != nil {
+		return err
+	}
+
+	return c.setFilterEnabled(ctx, c.Auth.Username, name, enabled, false)
+}
+
+func (c *Client) setFilterEnabled(
+	ctx context.Context,
+	owner string,
+	name string,
+	enabled bool,
+	includeAccount bool,
+) error {
 	if err := validateFilterName(name); err != nil {
 		return err
 	}
@@ -270,14 +365,15 @@ func (c *Client) SetFilterEnabled(
 	}
 
 	response := filterMutationResponse{}
+	parameters := map[string]string{"filtername": name}
+	if includeAccount {
+		parameters["account"] = owner
+	}
 
 	return c.executeMutation(
 		ctx,
 		operation,
-		map[string]string{
-			"account":    account,
-			"filtername": name,
-		},
+		parameters,
 		&response,
 	)
 }
@@ -290,19 +386,41 @@ func (c *Client) DeleteFilter(
 	if err := validateFilterAccount(account); err != nil {
 		return err
 	}
+
+	return c.deleteFilter(ctx, account, name, true)
+}
+
+func (c *Client) DeleteAccountFilter(
+	ctx context.Context,
+	name string,
+) error {
+	if err := validateFilterAccount(c.Auth.Username); err != nil {
+		return err
+	}
+
+	return c.deleteFilter(ctx, c.Auth.Username, name, false)
+}
+
+func (c *Client) deleteFilter(
+	ctx context.Context,
+	owner string,
+	name string,
+	includeAccount bool,
+) error {
 	if err := validateFilterName(name); err != nil {
 		return err
 	}
 
 	response := filterMutationResponse{}
+	parameters := map[string]string{"filtername": name}
+	if includeAccount {
+		parameters["account"] = owner
+	}
 
 	return c.executeMutation(
 		ctx,
 		operationDeleteFilter,
-		map[string]string{
-			"account":    account,
-			"filtername": name,
-		},
+		parameters,
 		&response,
 	)
 }

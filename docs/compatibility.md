@@ -391,8 +391,13 @@ never deletes queued messages.
 User-level email filter operations use UAPI `Email::list_filters`,
 `Email::get_filter`, `Email::store_filter`, `Email::enable_filter`,
 `Email::disable_filter`, and `Email::delete_filter`. The mailbox must already
-exist. Account-level filters are intentionally outside the resource because
-omitting the `account` parameter changes cPanel's ownership scope.
+exist.
+
+Account-level email filters use the same UAPI operations but deliberately omit
+the `account` parameter from every request. Supplying the cPanel username on
+the certified cPanel 134 environment selects a different and incompatible
+scope. The computed `account` attribute records the cPanel username in
+Terraform state, while the filter name is the import identity.
 
 Raw access log settings use UAPI `LogManager::get_settings` and
 `LogManager::set_settings`. The resource owns the complete account-level
@@ -413,11 +418,12 @@ without taking ownership. cPanel expands `save` destinations in
 provider canonicalizes that known difference while continuing to verify both
 inventories.
 
-Each complete filter read or mutation sequence is serialized per mailbox.
-Creating a resource refuses an existing filter instead of taking ownership
-implicitly, and rollback deletion requires the complete definition and
-enabled state to match the attempted state. Import identifiers use
-`account|name`.
+Each complete filter read or mutation sequence is serialized per mailbox or
+for the complete account-level filter scope. Creating a resource refuses an
+existing filter instead of taking ownership implicitly, and rollback deletion
+requires the complete definition and enabled state to match the attempted
+state. Import identifiers use `account|name` for mailbox-level filters and
+`name` for account-level filters.
 
 Mailman mailing list operations use UAPI `Email::list_lists`,
 `Email::add_list`, `Email::passwd_list`,

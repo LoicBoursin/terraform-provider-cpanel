@@ -840,8 +840,42 @@ email_test_mailing_list_count="$(
     "${response_file}"
 )"
 
-email_filter_count=0
-email_test_filter_count=0
+request \
+  'execute/Email/list_filters' \
+  'Account-level email filter check'
+if ! jq -e \
+  '
+    (.data | type == "array")
+    and all(
+      .data[];
+      (.filtername? | type) == "string"
+      and (.rules? | type) == "array"
+      and (.actions? | type) == "array"
+      and (
+        .enabled? == 0
+        or .enabled? == "0"
+        or .enabled? == false
+        or .enabled? == "false"
+        or .enabled? == 1
+        or .enabled? == "1"
+        or .enabled? == true
+        or .enabled? == "true"
+      )
+    )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'Account-level email filter inventory is incomplete\n' >&2
+  exit 1
+fi
+account_email_filter_count="$(jq -r '.data | length' "${response_file}")"
+account_email_test_filter_count="$(
+  jq -r \
+    '[.data[].filtername
+      | select(startswith("tfcpanelfilter"))] | length' \
+    "${response_file}"
+)"
+email_filter_count="${account_email_filter_count}"
+email_test_filter_count="${account_email_test_filter_count}"
 while IFS= read -r address; do
   if [[ -z "${address}" ]]; then
     continue
@@ -1309,6 +1343,8 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     printf '  queued test BoxTrapper messages: %s\n' \
       "${boxtrapper_test_queued_message_count}" >&2
     printf '  test email filters: %s\n' "${email_test_filter_count}" >&2
+    printf '  test account-level email filters: %s\n' \
+      "${account_email_test_filter_count}" >&2
     printf '  test email mailing lists: %s\n' \
       "${email_test_mailing_list_count}" >&2
     printf '  test non-auto email routing domains: %s\n' \
@@ -1420,6 +1456,9 @@ printf '  BoxTrapper accounts: %s (%s enabled, %s test-managed, %s test-enabled,
 printf '  email filters: %s (%s test-managed)\n' \
   "${email_filter_count}" \
   "${email_test_filter_count}"
+printf '  account-level email filters: %s (%s test-managed)\n' \
+  "${account_email_filter_count}" \
+  "${account_email_test_filter_count}"
 printf '  email mailing lists: %s (%s test-managed)\n' \
   "${email_mailing_list_count}" \
   "${email_test_mailing_list_count}"

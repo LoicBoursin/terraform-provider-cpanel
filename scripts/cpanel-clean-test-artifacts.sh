@@ -299,6 +299,7 @@ deleted_mysql_users=0
 deleted_mysql_remote_hosts=0
 deleted_email_accounts=0
 deleted_calendar_delegates=0
+deleted_account_email_filters=0
 deleted_email_filters=0
 deleted_email_mailing_lists=0
 unsuspended_email_restrictions=0
@@ -1636,6 +1637,54 @@ if jq -e \
   exit 1
 fi
 
+get_request \
+  'execute/Email/list_filters' \
+  'Account-level email filter inventory'
+if ! jq -e \
+  '
+    (.data | type) == "array"
+    and (
+      ([.data[].filtername] | length)
+      == ([.data[].filtername] | unique | length)
+    )
+    and all(
+      .data[];
+      (.filtername? | type) == "string"
+      and (.rules? | type) == "array"
+      and (.actions? | type) == "array"
+    )
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'Refusing to clean ambiguous account-level email filter inventory\n' >&2
+  exit 1
+fi
+account_test_filter_names="$(
+  jq -r \
+    '.data[].filtername | select(startswith("tfcpanelfilter"))' \
+    "${response_file}"
+)"
+while IFS= read -r filter_name; do
+  if [[ -z "${filter_name}" ]]; then
+    continue
+  fi
+  uapi_post \
+    'Email' \
+    'delete_filter' \
+    "Delete test account-level email filter ${filter_name}" \
+    "filtername=${filter_name}"
+  deleted_account_email_filters=$((deleted_account_email_filters + 1))
+done <<<"${account_test_filter_names}"
+
+get_request \
+  'execute/Email/list_filters' \
+  'Account-level email filter inventory after cleanup'
+if jq -e \
+  '.data[].filtername | select(startswith("tfcpanelfilter"))' \
+  "${response_file}" >/dev/null; then
+  printf 'Test account-level email filter still exists after cleanup\n' >&2
+  exit 1
+fi
+
 while IFS= read -r address; do
   if [[ -z "${address}" ]]; then
     continue
@@ -2451,6 +2500,8 @@ printf '  BoxTrapper test accounts disabled: %d\n' \
   "${reset_boxtrapper_accounts}"
 printf '  calendar delegates deleted: %d\n' \
   "${deleted_calendar_delegates}"
+printf '  account-level email filters deleted: %d\n' \
+  "${deleted_account_email_filters}"
 printf '  email filters deleted: %d\n' "${deleted_email_filters}"
 printf '  email mailing lists deleted: %d\n' \
   "${deleted_email_mailing_lists}"

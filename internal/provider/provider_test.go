@@ -180,6 +180,9 @@ func testAccPreCheck(t *testing.T) {
 	if _, err := cpanelmail.NewClient(client).ListMailDomains(ctx); err != nil {
 		t.Fatalf("verify Email API access: %v", err)
 	}
+	if _, err := cpanelmail.NewClient(client).ListAccountFilters(ctx); err != nil {
+		t.Fatalf("verify account-level email filter API access: %v", err)
+	}
 	if routing, err := cpanelmail.NewClient(client).GetRouting(
 		ctx,
 		mainDomain,

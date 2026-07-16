@@ -84,6 +84,41 @@ func TestClientListsUserEmailFilters(t *testing.T) {
 	}
 }
 
+func TestClientListsAccountEmailFiltersWithoutAccountParameter(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(
+		response http.ResponseWriter,
+		request *http.Request,
+	) {
+		assertFilterRequest(
+			t,
+			request,
+			http.MethodGet,
+			"/execute/Email/list_filters",
+			url.Values{},
+		)
+		writeFilterJSON(t, response, map[string]any{
+			"status": 1,
+			"data": []map[string]any{
+				filterTestInventory(1),
+			},
+		})
+	}))
+	defer server.Close()
+
+	filters, err := newFilterTestClient(t, server.URL).ListAccountFilters(
+		t.Context(),
+	)
+	if err != nil {
+		t.Fatalf("ListAccountFilters() error: %v", err)
+	}
+	want := []Filter{filterTestDefinition("username", true)}
+	if !reflect.DeepEqual(filters, want) {
+		t.Fatalf("ListAccountFilters() = %#v, want %#v", filters, want)
+	}
+}
+
 func TestClientListFiltersRequiresAccount(t *testing.T) {
 	t.Parallel()
 
@@ -670,6 +705,65 @@ func TestClientGetsExactUserEmailFilter(t *testing.T) {
 	}
 }
 
+func TestClientGetsExactAccountEmailFilterWithoutAccountParameter(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(
+		response http.ResponseWriter,
+		request *http.Request,
+	) {
+		switch request.URL.Path {
+		case "/execute/Email/list_filters":
+			calls.Add(1)
+			assertFilterRequest(
+				t,
+				request,
+				http.MethodGet,
+				"/execute/Email/list_filters",
+				url.Values{},
+			)
+			writeFilterJSON(t, response, map[string]any{
+				"status": 1,
+				"data": []map[string]any{
+					filterTestInventory(true),
+				},
+			})
+		case "/execute/Email/get_filter":
+			calls.Add(1)
+			assertFilterRequest(
+				t,
+				request,
+				http.MethodGet,
+				"/execute/Email/get_filter",
+				url.Values{"filtername": {"routing"}},
+			)
+			writeFilterJSON(t, response, map[string]any{
+				"status": 1,
+				"data":   filterTestDetailOutOfOrder(),
+			})
+		default:
+			t.Errorf("unexpected path %s", request.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	filter, err := newFilterTestClient(t, server.URL).GetAccountFilter(
+		t.Context(),
+		"routing",
+	)
+	if err != nil {
+		t.Fatalf("GetAccountFilter() error: %v", err)
+	}
+	want := filterTestDefinition("username", true)
+	if filter == nil || !reflect.DeepEqual(*filter, want) {
+		t.Fatalf("GetAccountFilter() = %#v, want %#v", filter, want)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("calls = %d, want 2", calls.Load())
+	}
+}
+
 func TestClientSkipsFilterDetailWhenMissingFromInventory(t *testing.T) {
 	t.Parallel()
 
@@ -890,6 +984,53 @@ func TestClientStoresUserEmailFilterWithPOSTForm(t *testing.T) {
 	}
 }
 
+func TestClientStoresAccountEmailFilterWithoutAccountParameter(t *testing.T) {
+	t.Parallel()
+
+	filter := filterTestDefinition("username", false)
+	expectedForm := url.Values{
+		"filtername": {"routing"},
+		"part1":      {"$header_from:"},
+		"match1":     {"contains"},
+		"val1":       {"sender@example.test"},
+		"opt1":       {"and"},
+		"part2":      {"$header_subject:"},
+		"match2":     {"begins"},
+		"val2":       {"urgent"},
+		"action1":    {"deliver"},
+		"dest1":      {"archive@example.test"},
+		"action2":    {"save"},
+		"dest2":      {"/home/user/mail"},
+		"action3":    {"finish"},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(
+		response http.ResponseWriter,
+		request *http.Request,
+	) {
+		assertFilterRequest(
+			t,
+			request,
+			http.MethodPost,
+			"/execute/Email/store_filter",
+			expectedForm,
+		)
+		writeFilterJSON(t, response, map[string]any{
+			"status": 1,
+			"data":   nil,
+		})
+	}))
+	defer server.Close()
+
+	if err := newFilterTestClient(t, server.URL).StoreAccountFilter(
+		t.Context(),
+		"",
+		filter,
+	); err != nil {
+		t.Fatalf("StoreAccountFilter() error: %v", err)
+	}
+}
+
 func TestClientMutatesUserEmailFiltersWithPOST(t *testing.T) {
 	t.Parallel()
 
@@ -952,6 +1093,69 @@ func TestClientMutatesUserEmailFiltersWithPOST(t *testing.T) {
 						"account":    {filterTestAccount},
 						"filtername": {"routing"},
 					},
+				)
+				writeFilterJSON(t, response, map[string]any{
+					"status": 1,
+					"data":   nil,
+				})
+			}))
+			defer server.Close()
+
+			if err := testCase.mutation(
+				t.Context(),
+				newFilterTestClient(t, server.URL),
+			); err != nil {
+				t.Fatalf("mutation error: %v", err)
+			}
+		})
+	}
+}
+
+func TestClientMutatesAccountEmailFiltersWithoutAccountParameter(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name     string
+		path     string
+		mutation func(context.Context, *Client) error
+	}{
+		{
+			name: "enable",
+			path: "/execute/Email/enable_filter",
+			mutation: func(ctx context.Context, client *Client) error {
+				return client.SetAccountFilterEnabled(ctx, "routing", true)
+			},
+		},
+		{
+			name: "disable",
+			path: "/execute/Email/disable_filter",
+			mutation: func(ctx context.Context, client *Client) error {
+				return client.SetAccountFilterEnabled(ctx, "routing", false)
+			},
+		},
+		{
+			name: "delete",
+			path: "/execute/Email/delete_filter",
+			mutation: func(ctx context.Context, client *Client) error {
+				return client.DeleteAccountFilter(ctx, "routing")
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(
+				response http.ResponseWriter,
+				request *http.Request,
+			) {
+				assertFilterRequest(
+					t,
+					request,
+					http.MethodPost,
+					testCase.path,
+					url.Values{"filtername": {"routing"}},
 				)
 				writeFilterJSON(t, response, map[string]any{
 					"status": 1,
