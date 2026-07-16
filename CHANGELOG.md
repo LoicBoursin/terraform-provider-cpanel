@@ -96,6 +96,10 @@
 - Resource usage data source with strict mixed scalar decoding, stable metric
   ordering, omission of internal navigation URLs, localized descriptions, and
   raw metric errors, plus cPanel 134 acceptance coverage.
+- SpamAssassin preference resource and data source for `required_score`,
+  `score`, `whitelist_from`, and `blacklist_from`, with exact readback,
+  singleton restoration, concurrent-change protection, import, drift recovery,
+  and cPanel 134 acceptance coverage.
 - Stored SSL certificate signing request resource and data source with
   generation from an existing cPanel key, RSA and ECDSA public-key
   verification, in-place friendly-name updates, import, drift recovery,
@@ -118,6 +122,8 @@
   `EXIT` finalizer before cleaning prefix-addressable test artifacts.
 - Restore and verify the complete account notification preference baseline
   from the same acceptance finalizer.
+- Restore and verify the supported SpamAssassin preference baseline from the
+  same acceptance finalizer without changing unrelated custom preferences.
 - Validate cron expressions and cPanel-prefixed PostgreSQL names before API
   mutation.
 - Verify PostgreSQL privilege changes and require inspection and re-import

@@ -1,0 +1,1 @@
+terraform import cpanel_spam_preference.required_score required_score

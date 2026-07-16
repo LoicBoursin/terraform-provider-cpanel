@@ -72,6 +72,7 @@ CPANEL_EXPECTED_LOG_ARCHIVE=1
 CPANEL_EXPECTED_LOG_PRUNE=1
 CPANEL_EXPECTED_LOG_RETENTION=-1
 CPANEL_EXPECTED_NOTIFICATION_PREFERENCES='{"notify_account_authn_link":true,"notify_account_authn_link_notification_disabled":true,"notify_contact_address_change":true,"notify_contact_address_change_notification_disabled":true,"notify_disk_limit":true,"notify_password_change":true,"notify_password_change_notification_disabled":true,"notify_ssl_expiry":true,"notify_twofactorauth_change":true,"notify_twofactorauth_change_notification_disabled":true}'
+CPANEL_EXPECTED_SPAM_PREFERENCES='{}'
 CPANEL_EXPECTED_GPG_PUBLIC_COUNT=0
 CPANEL_EXPECTED_GPG_SECRET_COUNT=0
 CPANEL_ALLOW_GPG_KEYPAIR_DELETE=0
@@ -86,6 +87,12 @@ account map as JSON booleans. Read the account's current keys with
 `ContactInformation::get_notification_preferences`; the cPanel 134 example
 above contains the ten keys exposed by the certified account. The finalizer
 refuses a partial or malformed map.
+
+`CPANEL_EXPECTED_SPAM_PREFERENCES` contains the clean-account values for the
+four supported `SpamAssassin::get_user_preferences` keys. Each configured key
+maps to a non-empty JSON string array; `{}` means none of those preferences is
+configured. The finalizer ignores unrelated custom preferences and restores
+only `required_score`, `score`, `whitelist_from`, and `blacklist_from`.
 
 `CPANEL_ALLOW_GPG_KEYPAIR_DELETE` must remain `0` unless this is a dedicated
 disposable acceptance account whose expected secret-key count is explicitly
@@ -206,6 +213,8 @@ that follow the test naming contract:
   retention baseline before artifact cleanup;
 - account notification preferences are singleton values; the finalizer restores
   and verifies the complete persisted JSON map before artifact cleanup;
+- supported SpamAssassin preferences are singleton values; the finalizer
+  restores their exact presence and values from the persisted JSON map;
 - top-level test directories in `public_html` beginning with `tfcpanel-`;
 - cron commands containing `# terraform-provider-cpanel-`;
 - the empty `MAILTO` and default `SHELL=/bin/bash` lines that cPanel creates

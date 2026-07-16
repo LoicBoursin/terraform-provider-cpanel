@@ -24,7 +24,8 @@ for variable in \
   CPANEL_EXPECTED_LOG_ARCHIVE \
   CPANEL_EXPECTED_LOG_PRUNE \
   CPANEL_EXPECTED_LOG_RETENTION \
-  CPANEL_EXPECTED_NOTIFICATION_PREFERENCES; do
+  CPANEL_EXPECTED_NOTIFICATION_PREFERENCES \
+  CPANEL_EXPECTED_SPAM_PREFERENCES; do
   if [[ -z "${!variable:-}" ]]; then
     printf 'Missing required environment variable: %s\n' "${variable}" >&2
     exit 1

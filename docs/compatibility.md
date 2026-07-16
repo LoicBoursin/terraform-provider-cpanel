@@ -36,7 +36,8 @@ remote MySQL hosts, PostgreSQL databases and users, imports, drift detection,
 per-domain ModSecurity status, stored SSL certificates, email account
 suspension, stored SSL certificate signing requests, default-calendar
 delegation, user-level email filters, BoxTrapper settings, Mailman mailing
-lists, public OpenPGP keys, account notification preferences, and cleanup.
+lists, public OpenPGP keys, account notification preferences, documented
+SpamAssassin preferences, and cleanup.
 Certification also covers per-domain
 email routing transitions and restoration without changing DNS MX records.
 Certification also covers reading and changing the account display locale,
@@ -425,6 +426,18 @@ account inventory so a new or removed cPanel preference cannot be silently
 ignored. Removing the resource restores the complete bool map captured before
 Terraform management. The acceptance finalizer independently restores and
 verifies a persisted clean-account JSON baseline.
+
+SpamAssassin preference operations use UAPI
+`SpamAssassin::get_user_preferences` and
+`SpamAssassin::update_user_preference`. The provider deliberately exposes only
+the documented `required_score`, `score`, `whitelist_from`, and
+`blacklist_from` keys. It does not provide an arbitrary custom-configuration
+escape hatch. Configured values are represented as an unordered set and every
+mutation is followed by an exact readback. Removing the resource restores
+whether the preference existed and its complete prior value set. A guarded
+restore refuses to overwrite a value that no longer matches the Terraform
+transition. The acceptance finalizer independently restores the four-key
+clean-account baseline and leaves unrelated custom preferences unchanged.
 
 The resource preserves rule and action order, supports cPanel's string and
 numeric match operators, and limits actions to `deliver`, `fail`, and

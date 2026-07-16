@@ -2,6 +2,7 @@
 
 Terraform provider for managing account-level API tokens, cron jobs, DNS
 records, Dynamic DNS domains, account locale, account notification preferences,
+documented SpamAssassin preferences,
 web domains, HTTP redirects,
 email accounts, calendar delegations, account-level filters and mailbox-level
 filters, stored SSL certificates and
@@ -61,6 +62,7 @@ The supported versions and API policy are documented in
 - `cpanel_postgresql_database`
 - `cpanel_postgresql_user`
 - `cpanel_redirect`
+- `cpanel_spam_preference`
 - `cpanel_ssl_certificate`
 - `cpanel_ssl_csr`
 - `cpanel_subdomain`
@@ -81,6 +83,7 @@ Additional read-only account data sources:
   Apache Handlers, ModSecurity, Git Version Control, Passenger Applications,
   SSL Manager with an existing RSA key, File Manager, account locales, Raw
   Access log settings, Contact Information notification preferences,
+  SpamAssassin user preferences,
   public-key GPG import and inventory, email accounts,
   BoxTrapper, account-level and mailbox-level filters, forwarders and
   autoresponders, email routing, CalDAV

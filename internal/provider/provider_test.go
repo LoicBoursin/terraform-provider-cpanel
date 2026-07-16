@@ -48,6 +48,7 @@ import (
 	cpanelpassenger "terraform-provider-cpanel/internal/cpanel/passenger"
 	"terraform-provider-cpanel/internal/cpanel/postgresql"
 	cpanelredirect "terraform-provider-cpanel/internal/cpanel/redirect"
+	cpanelspam "terraform-provider-cpanel/internal/cpanel/spamassassin"
 	cpanelsslcertificate "terraform-provider-cpanel/internal/cpanel/sslcertificate"
 	cpanelsslcsr "terraform-provider-cpanel/internal/cpanel/sslcsr"
 	cpanelversioncontrol "terraform-provider-cpanel/internal/cpanel/versioncontrol"
@@ -216,6 +217,12 @@ func testAccPreCheck(t *testing.T) {
 	}
 	if _, err := cpanellogmanager.NewClient(client).Get(ctx); err != nil {
 		t.Fatalf("verify LogManager API access: %v", err)
+	}
+	if _, err := cpanelspam.NewClient(client).GetPreference(
+		ctx,
+		cpanelspam.PreferenceRequiredScore,
+	); err != nil {
+		t.Fatalf("verify SpamAssassin API access: %v", err)
 	}
 	if _, err := cpanelmimetype.NewClient(client).ListUser(ctx); err != nil {
 		t.Fatalf("verify MIME type API access: %v", err)

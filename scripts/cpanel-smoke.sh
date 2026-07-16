@@ -216,6 +216,106 @@ if [[ -n "${CPANEL_EXPECTED_NOTIFICATION_PREFERENCES:-}" ]]; then
   fi
 fi
 
+request \
+  'execute/SpamAssassin/get_user_preferences' \
+  'cPanel SpamAssassin preferences check'
+if ! jq -e \
+  '
+    (.data | type == "object")
+    and (.data as $data
+    | all(
+      [
+        "blacklist_from",
+        "required_score",
+        "score",
+        "whitelist_from"
+      ][];
+      (. as $name
+        | ($data[$name]? // null) as $values
+        | $values == null
+          or (
+            $values
+            | type == "array"
+            and length > 0
+            and all(
+              .[];
+              type == "string"
+              and length > 0
+              and (test("[\\r\\n\\u0000]") | not)
+            )
+          )
+      )
+    ))
+  ' \
+  "${response_file}" >/dev/null; then
+  printf 'cPanel returned invalid SpamAssassin preferences\n' >&2
+  exit 1
+fi
+spam_preferences="$(
+  jq -S -c \
+    '
+      .data as $data
+      | reduce [
+          "blacklist_from",
+          "required_score",
+          "score",
+          "whitelist_from"
+        ][] as $name (
+          {};
+          if ($data | has($name))
+          then .[$name] = ($data[$name] | sort)
+          else .
+          end
+        )
+    ' \
+    "${response_file}"
+)"
+spam_preference_count="$(jq -r 'length' <<<"${spam_preferences}")"
+if [[ -n "${CPANEL_EXPECTED_SPAM_PREFERENCES:-}" ]]; then
+  if ! jq -e \
+    '
+      type == "object"
+      and all(
+        to_entries[];
+        (.key as $key
+          | (
+            [
+            "blacklist_from",
+            "required_score",
+            "score",
+            "whitelist_from"
+            ]
+            | index($key)
+          ) != null
+          and (
+            .value
+            | type == "array"
+            and length > 0
+            and all(
+              .[];
+              type == "string"
+              and length > 0
+              and (test("[\\r\\n\\u0000]") | not)
+            )
+          )
+        )
+      )
+    ' <<<"${CPANEL_EXPECTED_SPAM_PREFERENCES}" >/dev/null; then
+    printf 'Invalid expected cPanel SpamAssassin preferences JSON\n' >&2
+    exit 1
+  fi
+  expected_spam_preferences="$(
+    jq -S -c \
+      'with_entries(.value |= sort)' \
+      <<<"${CPANEL_EXPECTED_SPAM_PREFERENCES}"
+  )"
+  if [[ "${spam_preferences}" != "${expected_spam_preferences}" ]]; then
+    printf 'cPanel SpamAssassin preferences do not match the restored baseline\n' \
+      >&2
+    exit 1
+  fi
+fi
+
 request 'execute/Features/list_features' 'feature check'
 for feature in addondomains apitokens blockers boxtrapper changemx cron dynamicdns ftpaccts handlers indexmanager lists mime modsecurity mysql parkeddomains passengerapps pgp popaccts postgres redirects sslmanager subdomains version_control webprotect zoneedit; do
   if [[ "$(jq -r --arg feature "${feature}" '.data[$feature] // 0' "${response_file}")" != "1" ]]; then
@@ -1456,6 +1556,8 @@ printf '  log archival: archive=%s prune=%s retention=%s (effective %s)\n' \
   "${log_effective_retention}"
 printf '  notification preferences: %s\n' \
   "${notification_preference_count}"
+printf '  SpamAssassin preferences: %s configured\n' \
+  "${spam_preference_count}"
 printf '  API tokens: %s (%s test-managed)\n' \
   "${api_token_count}" \
   "${api_test_token_count}"

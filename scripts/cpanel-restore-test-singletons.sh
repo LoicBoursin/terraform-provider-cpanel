@@ -22,7 +22,8 @@ for variable in \
   CPANEL_EXPECTED_LOG_ARCHIVE \
   CPANEL_EXPECTED_LOG_PRUNE \
   CPANEL_EXPECTED_LOG_RETENTION \
-  CPANEL_EXPECTED_NOTIFICATION_PREFERENCES; do
+  CPANEL_EXPECTED_NOTIFICATION_PREFERENCES \
+  CPANEL_EXPECTED_SPAM_PREFERENCES; do
   if [[ -z "${!variable:-}" ]]; then
     printf 'Missing required environment variable: %s\n' "${variable}" >&2
     exit 1
@@ -71,6 +72,44 @@ if ! jq -e \
 fi
 expected_notification_preferences="$(
   jq -S -c . <<<"${CPANEL_EXPECTED_NOTIFICATION_PREFERENCES}"
+)"
+if ! jq -e \
+  '
+    type == "object"
+    and all(
+      to_entries[];
+      (.key as $key
+        | (
+          [
+          "blacklist_from",
+          "required_score",
+          "score",
+          "whitelist_from"
+          ]
+          | index($key)
+        ) != null
+        and (
+          .value
+          | type == "array"
+          and length > 0
+          and all(
+            .[];
+            type == "string"
+            and length > 0
+            and (test("[\\r\\n\\u0000]") | not)
+          )
+        )
+      )
+    )
+  ' <<<"${CPANEL_EXPECTED_SPAM_PREFERENCES}" >/dev/null; then
+  printf 'Invalid expected cPanel SpamAssassin preferences JSON\n' >&2
+  exit 1
+fi
+expected_spam_preferences="$(
+  jq -S -c \
+    '
+      with_entries(.value |= sort)
+    ' <<<"${CPANEL_EXPECTED_SPAM_PREFERENCES}"
 )"
 
 host="${CPANEL_HOST%/}"
@@ -253,9 +292,70 @@ read_notification_preferences() {
   )"
 }
 
+read_spam_preferences() {
+  if ! get_request \
+    'execute/SpamAssassin/get_user_preferences' \
+    'cPanel SpamAssassin preferences inventory'; then
+    return 1
+  fi
+  if ! jq -e \
+    '
+      (.data | type == "object")
+      and (.data as $data
+      | all(
+        [
+          "blacklist_from",
+          "required_score",
+          "score",
+          "whitelist_from"
+        ][];
+        (. as $name
+          | ($data[$name]? // null) as $values
+          | $values == null
+            or (
+              $values
+              | type == "array"
+              and length > 0
+              and all(
+                .[];
+                type == "string"
+                and length > 0
+                and (test("[\\r\\n\\u0000]") | not)
+              )
+            )
+        )
+      ))
+    ' \
+    "${response_file}" >/dev/null; then
+    printf 'cPanel returned invalid SpamAssassin preferences\n' >&2
+    return 1
+  fi
+
+  current_spam_preferences="$(
+    jq -S -c \
+      '
+        .data as $data
+        | reduce [
+            "blacklist_from",
+            "required_score",
+            "score",
+            "whitelist_from"
+          ][] as $name (
+            {};
+            if ($data | has($name))
+            then .[$name] = ($data[$name] | sort)
+            else .
+            end
+          )
+      ' \
+      "${response_file}"
+  )"
+}
+
 restored_locale=0
 restored_log_settings=0
 restored_notification_preferences=0
+restored_spam_preferences=0
 
 restore_locale() {
   local current_locale
@@ -364,6 +464,81 @@ restore_notification_preferences() {
   fi
 }
 
+restore_spam_preferences() {
+  local current_present
+  local expected_present
+  local index
+  local name
+  local parameter
+  local -a parameters
+  local value
+  local -a values
+
+  if ! read_spam_preferences; then
+    return 1
+  fi
+  for name in \
+    blacklist_from \
+    required_score \
+    score \
+    whitelist_from; do
+    current_present="$(
+      jq -r --arg name "${name}" 'has($name)' \
+        <<<"${current_spam_preferences}"
+    )"
+    expected_present="$(
+      jq -r --arg name "${name}" 'has($name)' \
+        <<<"${expected_spam_preferences}"
+    )"
+    if [[
+      "${current_present}" == "${expected_present}"
+      && "$(
+        jq -S -c --arg name "${name}" '.[$name] // []' \
+          <<<"${current_spam_preferences}"
+      )" == "$(
+        jq -S -c --arg name "${name}" '.[$name] // []' \
+          <<<"${expected_spam_preferences}"
+      )"
+     ]]; then
+      continue
+    fi
+
+    parameters=("preference=${name}")
+    values=()
+    while IFS= read -r value; do
+      values+=("${value}")
+    done < <(
+      jq -r --arg name "${name}" '.[$name][]?' \
+        <<<"${expected_spam_preferences}"
+    )
+    if [[ "${#values[@]}" == "1" ]]; then
+      parameters+=("value=${values[0]}")
+    elif [[ "${#values[@]}" -gt "1" ]]; then
+      for index in "${!values[@]}"; do
+        parameter="value-${index}=${values[index]}"
+        parameters+=("${parameter}")
+      done
+    fi
+
+    if ! uapi_post \
+      'SpamAssassin' \
+      'update_user_preference' \
+      "Restore cPanel SpamAssassin preference ${name}" \
+      "${parameters[@]}"; then
+      return 1
+    fi
+    restored_spam_preferences=1
+  done
+
+  if ! read_spam_preferences; then
+    return 1
+  fi
+  if [[ "${current_spam_preferences}" != "${expected_spam_preferences}" ]]; then
+    printf 'cPanel SpamAssassin preferences were not restored exactly\n' >&2
+    return 1
+  fi
+}
+
 set +e
 restore_locale
 locale_status=$?
@@ -371,17 +546,21 @@ restore_log_settings
 log_settings_status=$?
 restore_notification_preferences
 notification_preferences_status=$?
+restore_spam_preferences
+spam_preferences_status=$?
 set -e
 
 if [[
   "${locale_status}" != "0"
   || "${log_settings_status}" != "0"
   || "${notification_preferences_status}" != "0"
+  || "${spam_preferences_status}" != "0"
  ]]; then
-  printf 'cPanel singleton restoration failed: locale=%d log_settings=%d notification_preferences=%d\n' \
+  printf 'cPanel singleton restoration failed: locale=%d log_settings=%d notification_preferences=%d spam_preferences=%d\n' \
     "${locale_status}" \
     "${log_settings_status}" \
-    "${notification_preferences_status}" >&2
+    "${notification_preferences_status}" \
+    "${spam_preferences_status}" >&2
   exit 1
 fi
 
@@ -390,3 +569,5 @@ printf '  locale restored: %d\n' "${restored_locale}"
 printf '  log settings restored: %d\n' "${restored_log_settings}"
 printf '  notification preferences restored: %d\n' \
   "${restored_notification_preferences}"
+printf '  SpamAssassin preferences restored: %d\n' \
+  "${restored_spam_preferences}"
