@@ -139,6 +139,9 @@
   document roots, and other internal or private material, certified on cPanel
   134 with Terraform `1.14.9` and `1.15.8`, including the dedicated-IP
   `SSL::installed_host` view.
+- Guarded cleanup for cPanel-generated SSL keys left behind by deleted test
+  subdomains and addon domains. Deletion requires an exact reserved name, an
+  absent domain, and no matching certificate, CSR, or installed host.
 - Import support for cron jobs by cPanel line key.
 - Stable drift and remote-deletion handling for every resource.
 - cPanel 134 acceptance coverage for CRUD, import, drift, recreation, and

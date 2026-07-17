@@ -187,6 +187,10 @@ that follow the test naming contract:
 - stored SSL CSR friendly names and common names both beginning with
   `tfcpanelcsr`; cleanup re-reads the CSR inventory and signed public PKCS#10
   request immediately before deleting the exact matching ID;
+- cPanel-generated RSA key names for deleted `tfcpanelsub*` and
+  `tfcpaneladdon*` domains; cleanup runs only after domain deletion and
+  requires the exact key identity and modulus to remain unreferenced by every
+  configured domain, stored certificate, CSR, and installed SSL host;
 - GPG public-key user IDs beginning with
   `Terraform cPanel acceptance <tfcpanelgpg-`; cleanup re-reads both public and
   secret inventories, requires the complete secret inventory to remain empty,

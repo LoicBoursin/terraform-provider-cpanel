@@ -463,6 +463,27 @@ if ! jq -e \
         .ecdsa_curve_name? == null
         or (.ecdsa_curve_name? | type) == "string"
       )
+      and (
+        (
+          .friendly_name
+          | startswith("Key for \u201ctfcpanel")
+          | not
+        )
+        or (
+          (
+            .friendly_name
+            | try capture(
+                "^Key for \u201c(?<domain>tfcpanel(?:sub|addon)[a-z0-9.-]+)\u201d$"
+              )
+              catch null
+            | type
+          ) == "object"
+          and .key_algorithm == "rsaEncryption"
+          and ((.modulus_length | tostring) == "2048")
+          and (.modulus? | type) == "string"
+          and (.modulus | test("^[0-9a-fA-F]{512}$"))
+        )
+      )
     )
     and (
       [.data[] | .id | tostring]
@@ -474,6 +495,22 @@ if ! jq -e \
   exit 1
 fi
 ssl_key_count="$(jq -r '.data | length' "${response_file}")"
+ssl_key_test_count="$(
+  jq -r \
+    '
+      [
+        .data[]
+        | select(
+            .friendly_name
+            | test(
+                "^Key for \u201ctfcpanel(?:sub|addon)[a-z0-9.-]+\u201d$"
+              )
+          )
+      ]
+      | length
+    ' \
+    "${response_file}"
+)"
 
 request 'execute/SSL/list_certs' 'stored SSL certificate check'
 if ! jq -e \
@@ -1995,6 +2032,7 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${passenger_application_test_count}" != "0"
     || "${ssl_csr_test_count}" != "0"
     || "${ssl_certificate_test_count}" != "0"
+    || "${ssl_key_test_count}" != "0"
     || "${gpg_public_test_key_count}" != "0"
     || "${gpg_secret_test_key_count}" != "0"
     || "${ssh_public_test_key_count}" != "0"
@@ -2047,6 +2085,8 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
       "${ssl_csr_test_count}" >&2
     printf '  test stored SSL certificates: %s\n' \
       "${ssl_certificate_test_count}" >&2
+    printf '  test stored SSL keys: %s\n' \
+      "${ssl_key_test_count}" >&2
     printf '  test GPG public keys: %s\n' \
       "${gpg_public_test_key_count}" >&2
     printf '  test GPG secret keys: %s\n' \
@@ -2153,7 +2193,9 @@ printf '  stored SSL CSRs: %s (%s test-managed)\n' \
 printf '  stored SSL certificates: %s (%s test-managed)\n' \
   "${ssl_certificate_count}" \
   "${ssl_certificate_test_count}"
-printf '  stored SSL keys: %s\n' "${ssl_key_count}"
+printf '  stored SSL keys: %s (%s test-managed)\n' \
+  "${ssl_key_count}" \
+  "${ssl_key_test_count}"
 printf '  installed SSL hosts: %s\n' "${ssl_installed_host_count}"
 printf '  GPG public keys: %s (%s test-managed)\n' \
   "${gpg_public_key_count}" \

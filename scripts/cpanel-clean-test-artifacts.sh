@@ -288,6 +288,7 @@ deleted_apache_handlers=0
 deleted_passenger_applications=0
 deleted_ssl_certificates=0
 deleted_ssl_csrs=0
+deleted_ssl_keys=0
 deleted_gpg_public_keys=0
 deleted_git_repositories=0
 deleted_git_repository_directories=0
@@ -755,6 +756,444 @@ cleanup_test_ssl_certificates() {
     ' \
     "${response_file}" >/dev/null; then
     printf 'Test SSL certificate still exists after cleanup\n' >&2
+    exit 1
+  fi
+}
+
+cleanup_test_ssl_keys() {
+  local configured_domain
+  local configured_domains
+  local domain
+  local domain_is_configured
+  local friendly_name
+  local key_id
+  local key_modulus
+  local main_domain
+  local ssl_key_candidates
+
+  get_request \
+    'execute/DomainInfo/list_domains' \
+    'Configured domain inventory before SSL key cleanup'
+  if ! jq -e \
+    '
+      ((.warnings // []) | length) == 0
+      and (.data | type) == "object"
+      and (.data.main_domain | type) == "string"
+      and (.data.main_domain | length) > 0
+      and (.data.sub_domains | type) == "array"
+      and all(.data.sub_domains[]; type == "string" and length > 0)
+      and (.data.addon_domains | type) == "array"
+      and all(.data.addon_domains[]; type == "string" and length > 0)
+      and (.data.parked_domains | type) == "array"
+      and all(.data.parked_domains[]; type == "string" and length > 0)
+    ' \
+    "${response_file}" >/dev/null; then
+    printf 'Configured domain inventory is incomplete before SSL key cleanup\n' >&2
+    exit 1
+  fi
+  main_domain="$(jq -r '.data.main_domain' "${response_file}")"
+  configured_domains="$(
+    jq -r \
+      '
+        (
+          [.data.main_domain]
+          + .data.sub_domains
+          + .data.addon_domains
+          + .data.parked_domains
+        )[]
+      ' \
+      "${response_file}"
+  )"
+
+  get_request \
+    "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=SubDomain&cpanel_jsonapi_func=listsubdomains" \
+    'Subdomain inventory before SSL key cleanup'
+  if ! jq -e \
+    '
+      (.cpanelresult.data | type) == "array"
+      and all(
+        .cpanelresult.data[];
+        (.domain | type) == "string"
+        and (.domain | length) > 0
+      )
+    ' \
+    "${response_file}" >/dev/null; then
+    printf 'Subdomain inventory is incomplete before SSL key cleanup\n' >&2
+    exit 1
+  fi
+  configured_domains="$(
+    printf '%s\n%s\n' \
+      "${configured_domains}" \
+      "$(jq -r '.cpanelresult.data[].domain' "${response_file}")"
+  )"
+
+  get_request \
+    "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=AddonDomain&cpanel_jsonapi_func=listaddondomains" \
+    'Addon domain inventory before SSL key cleanup'
+  if ! jq -e \
+    '
+      (.cpanelresult.data | type) == "array"
+      and all(
+        .cpanelresult.data[];
+        (.domain | type) == "string"
+        and (.domain | length) > 0
+        and (.fullsubdomain | type) == "string"
+        and (.fullsubdomain | length) > 0
+      )
+    ' \
+    "${response_file}" >/dev/null; then
+    printf 'Addon domain inventory is incomplete before SSL key cleanup\n' >&2
+    exit 1
+  fi
+  configured_domains="$(
+    printf '%s\n%s\n' \
+      "${configured_domains}" \
+      "$(
+        jq -r \
+          '.cpanelresult.data[] | .domain, .fullsubdomain' \
+          "${response_file}"
+      )"
+  )"
+
+  get_request \
+    "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=Park&cpanel_jsonapi_func=listparkeddomains" \
+    'Domain alias inventory before SSL key cleanup'
+  if ! jq -e \
+    '
+      (.cpanelresult.data | type) == "array"
+      and all(
+        .cpanelresult.data[];
+        (.domain | type) == "string"
+        and (.domain | length) > 0
+      )
+    ' \
+    "${response_file}" >/dev/null; then
+    printf 'Domain alias inventory is incomplete before SSL key cleanup\n' >&2
+    exit 1
+  fi
+  configured_domains="$(
+    printf '%s\n%s\n' \
+      "${configured_domains}" \
+      "$(jq -r '.cpanelresult.data[].domain' "${response_file}")"
+  )"
+
+  get_request 'execute/SSL/list_keys' 'stored SSL key inventory'
+  if ! jq -e \
+    --arg main_domain "${main_domain}" \
+    '
+      def test_key_match:
+        .friendly_name
+        | try capture(
+            "^Key for \u201c(?<domain>tfcpanel(?:sub|addon)[a-z0-9.-]+)\u201d$"
+          )
+          catch null;
+      (.data | type) == "array"
+      and (
+        [.data[] | .id | tostring]
+        | length == (unique | length)
+      )
+      and all(
+        .data[];
+        ((.id? | type) == "string" or (.id? | type) == "number")
+        and ((.id | tostring | length) > 0)
+        and ((.friendly_name? | type) == "string")
+        and (
+          (
+            .friendly_name
+            | startswith("Key for \u201ctfcpanel")
+            | not
+          )
+          or (
+            (test_key_match | type) == "object"
+            and (
+              (test_key_match).domain
+              | endswith("." + $main_domain)
+            )
+            and .key_algorithm? == "rsaEncryption"
+            and ((.modulus_length? | tostring) == "2048")
+            and (.modulus? | type) == "string"
+            and (.modulus | test("^[0-9a-fA-F]{512}$"))
+          )
+        )
+      )
+    ' \
+    "${response_file}" >/dev/null; then
+    printf 'Refusing to clean ambiguous test SSL key inventory\n' >&2
+    exit 1
+  fi
+  ssl_key_candidates="$(
+    jq -r \
+      --arg main_domain "${main_domain}" \
+      '
+        def test_key_match:
+          .friendly_name
+          | try capture(
+              "^Key for \u201c(?<domain>tfcpanel(?:sub|addon)[a-z0-9.-]+)\u201d$"
+            )
+            catch null;
+        .data[]
+        | (test_key_match) as $match
+        | select(
+            ($match | type) == "object"
+            and ($match.domain | endswith("." + $main_domain))
+          )
+        | [
+            (.id | tostring),
+            .friendly_name,
+            $match.domain,
+            .modulus
+          ]
+        | @tsv
+      ' \
+      "${response_file}"
+  )"
+
+  while IFS=$'\t' read -r key_id friendly_name domain key_modulus; do
+    if [[ -z "${key_id}" ]]; then
+      continue
+    fi
+
+    domain_is_configured=0
+    while IFS= read -r configured_domain; do
+      if [[
+        -n "${configured_domain}"
+        && "${configured_domain}" == "${domain}"
+      ]]; then
+        domain_is_configured=1
+        break
+      fi
+    done <<<"${configured_domains}"
+    if [[ "${domain_is_configured}" == "1" ]]; then
+      printf 'Refusing to delete SSL key for configured test domain: %s\n' \
+        "${domain}" >&2
+      exit 1
+    fi
+
+    get_request 'execute/SSL/list_certs' \
+      "Inspect certificates before deleting ${friendly_name}"
+    if ! jq -e \
+      '(.data | type) == "array"' \
+      "${response_file}" >/dev/null; then
+      printf 'Stored SSL certificate inventory is incomplete\n' >&2
+      exit 1
+    fi
+    if jq -e \
+      --arg domain "${domain}" \
+      --arg modulus "${key_modulus}" \
+      '
+        .data[]
+        | select(
+            .modulus? == $modulus
+            or .["subject.commonName"]? == $domain
+            or (
+              (.domains? | type) == "array"
+              and any(.domains[]; . == $domain)
+            )
+          )
+      ' \
+      "${response_file}" >/dev/null; then
+      printf 'Refusing to delete SSL key referenced by a certificate: %s\n' \
+        "${friendly_name}" >&2
+      exit 1
+    fi
+
+    get_request 'execute/SSL/list_csrs' \
+      "Inspect CSRs before deleting ${friendly_name}"
+    if ! jq -e \
+      '(.data | type) == "array"' \
+      "${response_file}" >/dev/null; then
+      printf 'Stored SSL CSR inventory is incomplete\n' >&2
+      exit 1
+    fi
+    if jq -e \
+      --arg domain "${domain}" \
+      --arg modulus "${key_modulus}" \
+      '
+        .data[]
+        | select(
+            .modulus? == $modulus
+            or .commonName? == $domain
+            or (
+              (.domains? | type) == "array"
+              and any(.domains[]; . == $domain)
+            )
+          )
+      ' \
+      "${response_file}" >/dev/null; then
+      printf 'Refusing to delete SSL key referenced by a CSR: %s\n' \
+        "${friendly_name}" >&2
+      exit 1
+    fi
+
+    get_request 'execute/SSL/installed_hosts' \
+      "Inspect installed hosts before deleting ${friendly_name}"
+    if ! jq -e \
+      '
+        (.data | type) == "array"
+        and all(
+          .data[];
+          (.servername | type) == "string"
+          and (.domains | type) == "array"
+          and (.fqdns | type) == "array"
+          and (.certificate | type) == "object"
+        )
+      ' \
+      "${response_file}" >/dev/null; then
+      printf 'Installed SSL host inventory is incomplete\n' >&2
+      exit 1
+    fi
+    if jq -e \
+      --arg domain "${domain}" \
+      --arg modulus "${key_modulus}" \
+      '
+        .data[]
+        | select(
+            .servername == $domain
+            or .certificate.modulus? == $modulus
+            or any(.domains[]?; . == $domain)
+            or any(.fqdns[]?; . == $domain)
+            or any(.certificate.domains[]?; . == $domain)
+          )
+      ' \
+      "${response_file}" >/dev/null; then
+      printf 'Refusing to delete SSL key referenced by an installed host: %s\n' \
+        "${friendly_name}" >&2
+      exit 1
+    fi
+
+    get_request 'execute/SSL/installed_host' \
+      "Inspect dedicated SSL host before deleting ${friendly_name}"
+    if ! jq -e \
+      '
+        (.data | type) == "object"
+        and (.data.host | type) == "string"
+        and (.data.certificate | type) == "object"
+      ' \
+      "${response_file}" >/dev/null; then
+      printf 'Dedicated SSL host inventory is incomplete\n' >&2
+      exit 1
+    fi
+    if jq -e \
+      --arg domain "${domain}" \
+      --arg modulus "${key_modulus}" \
+      '
+        .data
+        | select(
+            .host == $domain
+            or .certificate.modulus? == $modulus
+            or any(.certificate.domains[]?; . == $domain)
+          )
+      ' \
+      "${response_file}" >/dev/null; then
+      printf 'Refusing to delete SSL key referenced by the dedicated host: %s\n' \
+        "${friendly_name}" >&2
+      exit 1
+    fi
+
+    get_request \
+      'execute/DomainInfo/list_domains' \
+      "Re-read configured domains before deleting ${friendly_name}"
+    if ! jq -e \
+      --arg domain "${domain}" \
+      '
+        ((.warnings // []) | length) == 0
+        and (.data | type) == "object"
+        and (.data.main_domain | type) == "string"
+        and (.data.main_domain | length) > 0
+        and (.data.sub_domains | type) == "array"
+        and all(.data.sub_domains[]; type == "string" and length > 0)
+        and (.data.addon_domains | type) == "array"
+        and all(.data.addon_domains[]; type == "string" and length > 0)
+        and (.data.parked_domains | type) == "array"
+        and all(.data.parked_domains[]; type == "string" and length > 0)
+        and (
+          (
+            [.data.main_domain]
+            + .data.sub_domains
+            + .data.addon_domains
+            + .data.parked_domains
+          )
+          | index($domain)
+        ) == null
+      ' \
+      "${response_file}" >/dev/null; then
+      printf 'Refusing to delete SSL key for a newly configured domain: %s\n' \
+        "${domain}" >&2
+      exit 1
+    fi
+
+    get_request 'execute/SSL/list_keys' \
+      "Re-read test SSL key before deleting ${friendly_name}"
+    if ! jq -e \
+      --arg id "${key_id}" \
+      --arg friendly_name "${friendly_name}" \
+      --arg domain "${domain}" \
+      --arg modulus "${key_modulus}" \
+      '
+        def test_key_match:
+          .friendly_name
+          | try capture(
+              "^Key for \u201c(?<domain>tfcpanel(?:sub|addon)[a-z0-9.-]+)\u201d$"
+            )
+            catch null;
+        (.data | type) == "array"
+        and (
+          [
+            .data[]
+            | select((.id | tostring) == $id)
+          ] as $matches
+          | ($matches | length) == 1
+          and ($matches[0].friendly_name == $friendly_name)
+          and ($matches[0].modulus == $modulus)
+          and (($matches[0] | test_key_match).domain == $domain)
+        )
+      ' \
+      "${response_file}" >/dev/null; then
+      printf 'Refusing to delete changed or ambiguous test SSL key: %s\n' \
+        "${friendly_name}" >&2
+      exit 1
+    fi
+
+    uapi_post \
+      'SSL' \
+      'delete_key' \
+      "Delete orphaned test SSL key ${friendly_name}" \
+      "id=${key_id}" \
+      "friendly_name=${friendly_name}"
+    deleted_ssl_keys=$((deleted_ssl_keys + 1))
+
+    get_request 'execute/SSL/list_keys' \
+      "Verify deletion of test SSL key ${friendly_name}"
+    if jq -e \
+      --arg id "${key_id}" \
+      '.data[] | select((.id | tostring) == $id)' \
+      "${response_file}" >/dev/null; then
+      printf 'Test SSL key still exists after deletion: %s\n' \
+        "${friendly_name}" >&2
+      exit 1
+    fi
+  done <<<"${ssl_key_candidates}"
+
+  get_request \
+    'execute/SSL/list_keys' \
+    'stored SSL key inventory after cleanup'
+  if ! jq -e \
+    '
+      (.data | type) == "array"
+      and all(
+        .data[];
+        (
+          (.friendly_name? | type) != "string"
+          or (
+            .friendly_name
+            | startswith("Key for \u201ctfcpanel")
+            | not
+          )
+        )
+      )
+    ' \
+    "${response_file}" >/dev/null; then
+    printf 'Test SSL key still exists after cleanup\n' >&2
     exit 1
   fi
 }
@@ -2168,6 +2607,7 @@ while IFS=$'\t' read -r domain domain_key; do
 done <<<"${test_addon_domains}"
 
 cleanup_test_ssl_certificates 1
+cleanup_test_ssl_keys
 
 get_request \
   'execute/Fileman/list_files?dir=public_html&show_hidden=1&limit=1000' \
@@ -2558,6 +2998,7 @@ printf '  Passenger applications unregistered: %d\n' \
 printf '  stored SSL CSRs deleted: %d\n' "${deleted_ssl_csrs}"
 printf '  stored SSL certificates deleted: %d\n' \
   "${deleted_ssl_certificates}"
+printf '  stored SSL keys deleted: %d\n' "${deleted_ssl_keys}"
 printf '  GPG public keys deleted: %d\n' "${deleted_gpg_public_keys}"
 printf '  Git repositories deleted: %d\n' "${deleted_git_repositories}"
 printf '  Git repository directories deleted: %d\n' \
