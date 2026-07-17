@@ -1,12 +1,12 @@
 # Development
 
-## Toolchain
+## Requirements
 
 Use the Go and Terraform versions listed in
-[`compatibility.md`](compatibility.md). The validation scripts use tools from
-`PATH` and fail early when a required tool is unavailable.
+[`compatibility.md`](compatibility.md). The validation scripts resolve their
+tools from `PATH`.
 
-The CI and release configuration currently pins:
+The CI and release configuration pins:
 
 - actionlint `1.7.12`;
 - golangci-lint `2.12.2`;
@@ -14,55 +14,48 @@ The CI and release configuration currently pins:
 - GoReleaser `2.17.0`;
 - Syft `1.42.3`.
 
+The repository uses the golangci-lint version 2 configuration schema.
+
+## Local validation
+
+Run the complete repository validation with:
+
+```shell
+make verify
+```
+
+This verifies Go modules, runs race-enabled tests, vet, lint, vulnerability
+scanning, workflow and shell validation, documentation generation, generated
+file checks, and GoReleaser configuration validation.
+
+Generate Registry documentation separately with:
+
+```shell
+make generate-documentation
+```
+
+Build release artifacts without publishing them with:
+
+```shell
+make release-snapshot
+```
+
+Syft must be available on `PATH` for release snapshots.
+
 ## cPanel acceptance environment
 
-Acceptance tests create and delete real API tokens, cron jobs, DNS records,
-Dynamic DNS domains, web domains, HTTP redirects, custom MIME types, email
-accounts, Apache handlers, directory indexes and privacy, Git repositories,
-Passenger applications, stored public SSL certificates, email filters,
-stored public SSL certificate signing requests, calendar delegations,
-public-only OpenPGP keys, forwarders and autoresponders, BoxTrapper settings,
-FTP accounts, MySQL or MariaDB users and databases and remote hosts,
-PostgreSQL users and databases, filesystem directories and UTF-8 text files,
-and database grants. They also read the complete DAV user, DAV collection,
-calendar delegation, domain, SSL metadata, public OpenSSH key, email, and
-MySQL inventories without mutating them. The MySQL inventory coverage compares
-the complete database-name, user-name, normalized remote-host, and account
-naming-restriction state, while excluding disk usage, grants, passwords,
-notes, and server metadata. The email inventories cover mailbox
-addresses, mail domains, routing domain and mode pairs, domain forwarder
-domain and destination pairs, Mailman list addresses, and autoresponder
-addresses. They deliberately exclude quota, suspension, message or list
-content, and detailed MX metadata. Autoresponder coverage first reads
-`Email::list_mail_domains`, then reads `Email::list_auto_responders` once per
-normalized domain so a missing domain response cannot silently produce partial
-state. The combined inventory test also creates one disposable mailbox,
-Mailman list, autoresponder, and main-domain forwarder, verifies that each
-appears in the complete state, destroys them, and compares every inventory
-with the captured baseline. GPG acceptance tests generate public-only RSA
-fixtures locally, verify that the cPanel secret-key inventory never changes,
-and preserve remote public keys when Terraform destroys the resource.
-Dedicated-account cleanup refuses pair deletion unless the account explicitly
-opts in and its persisted baseline declares zero secret keys. BoxTrapper tests
-use disposable mailboxes without sending messages and restore the captured
-settings before mailbox deletion.
-They verify that configuration changes are rejected while cPanel reports a
-null sender name, then establish a non-null fixture name explicitly for the
-complete lifecycle. Locale acceptance tests temporarily change the account
-display locale and restore the persisted test-account baseline. Log settings
-tests temporarily change archive, pruning, and retention preferences and
-restore the same durable baseline. Notification preference tests temporarily
-change account alerts and restore the complete persisted preference map. Use a
-dedicated cPanel test account.
+Acceptance tests create, update, import, and delete real cPanel objects. Use a
+dedicated test account.
 
-The scripts load credentials from the file specified by `CPANEL_ENV_FILE`. When
-that variable is unset, they use:
+Credentials are loaded from the file named by `CPANEL_ENV_FILE`. When the
+variable is unset, the default path is:
 
 ```text
 ~/.config/terraform-provider-cpanel/acceptance.env
 ```
 
-The file format matches [`.env.acceptance.example`](../.env.acceptance.example):
+The file format matches
+[`.env.acceptance.example`](../.env.acceptance.example):
 
 ```text
 CPANEL_HOST=https://cpanel.example.com:2083
@@ -71,66 +64,22 @@ CPANEL_API_TOKEN=token
 CPANEL_TEST_SSL_KEY_ID=
 ```
 
-Set its permissions to `0600`. Never commit a populated credentials file.
-`CPANEL_TEST_SSL_KEY_ID` is optional. When omitted, CSR acceptance tests select
-the first usable RSA key returned by `SSL::list_keys`; when set, it must name a
-usable existing RSA key. Tests read only public key metadata.
+Set the file permissions to `0600`. Never commit populated credentials.
+`CPANEL_TEST_SSL_KEY_ID` is optional and identifies an existing RSA key used
+only through its public metadata by CSR tests.
 
-Destructive tests and cleanup also require a persistent singleton baseline.
-The scripts load it from `CPANEL_BASELINE_FILE`; when that variable is unset,
-they derive `terraform-provider-cpanel-baseline.env` next to the default
-credentials file. Its format matches
-[`.env.acceptance-baseline.example`](../.env.acceptance-baseline.example):
+Acceptance cleanup also requires the known clean values of singleton account
+settings. They are loaded from `CPANEL_BASELINE_FILE`, or from
+`terraform-provider-cpanel-baseline.env` next to the default credentials file.
+The format is documented in
+[`.env.acceptance-baseline.example`](../.env.acceptance-baseline.example).
+Keep this file at `0600` and populate it from the dedicated account's clean
+configuration, not from values discovered during a test run.
 
-```text
-CPANEL_EXPECTED_LOCALE=en
-CPANEL_EXPECTED_LOG_ARCHIVE=1
-CPANEL_EXPECTED_LOG_PRUNE=1
-CPANEL_EXPECTED_LOG_RETENTION=-1
-CPANEL_EXPECTED_NOTIFICATION_PREFERENCES='{"notify_account_authn_link":true,"notify_account_authn_link_notification_disabled":true,"notify_contact_address_change":true,"notify_contact_address_change_notification_disabled":true,"notify_disk_limit":true,"notify_password_change":true,"notify_password_change_notification_disabled":true,"notify_ssl_expiry":true,"notify_twofactorauth_change":true,"notify_twofactorauth_change_notification_disabled":true}'
-CPANEL_EXPECTED_SPAM_PREFERENCES='{}'
-CPANEL_EXPECTED_GPG_PUBLIC_COUNT=0
-CPANEL_EXPECTED_GPG_SECRET_COUNT=0
-CPANEL_EXPECTED_SSH_PUBLIC_COUNT=0
-CPANEL_ALLOW_GPG_KEYPAIR_DELETE=0
-```
-
-`CPANEL_EXPECTED_LOG_RETENTION=-1` means the server default. Keep this file at
-`0600` and set it from the known clean account configuration, not from a test
-run. The persisted values let a later run recover the account even when an
-earlier Terraform or shell process was interrupted after mutation.
-`CPANEL_EXPECTED_NOTIFICATION_PREFERENCES` must contain the complete clean
-account map as JSON booleans. Read the account's current keys with
-`ContactInformation::get_notification_preferences`; the cPanel 134 example
-above contains the ten keys exposed by the certified account. The finalizer
-refuses a partial or malformed map.
-
-`CPANEL_EXPECTED_SPAM_PREFERENCES` contains the clean-account values for the
-four supported `SpamAssassin::get_user_preferences` keys. Each configured key
-maps to a non-empty JSON string array; `{}` means none of those preferences is
-configured. The finalizer ignores unrelated custom preferences and restores
-only `required_score`, `score`, `whitelist_from`, and `blacklist_from`.
-
-`CPANEL_ALLOW_GPG_KEYPAIR_DELETE` must remain `0` unless this is a dedicated
-disposable acceptance account whose expected secret-key count is explicitly
-`0`. Set it to `1` only to run the destructive GPG acceptance lifecycle and
-cleanup. cPanel exposes no public-only deletion function.
-
-`CPANEL_EXPECTED_SSH_PUBLIC_COUNT` is the exact clean-account public SSH-key
-count. SSH cleanup is read-only: it never reads private-key inventory and
-fails for manual review if a name begins with the reserved `tfcpanelssh`
-prefix, because cPanel's SSH mutations are name-only and non-atomic.
-
-Run the non-destructive API and capability checks with:
+Run non-destructive account and capability checks with:
 
 ```shell
 make smoke-test
-```
-
-Run the Go tests that do not require cPanel with:
-
-```shell
-make test
 ```
 
 Run the destructive acceptance suite with:
@@ -139,159 +88,19 @@ Run the destructive acceptance suite with:
 make test-acceptance
 ```
 
-The acceptance entry point first restores the persisted singleton baseline,
-then performs cleanup and the smoke test. An `EXIT` finalizer repeats singleton
-restoration before artifact cleanup and final inventory verification,
-including when the test command fails. It refuses to run when any credential
-or baseline value is missing, or when the server does not expose API Tokens,
-Cron, DNS Zone Editor, Dynamic DNS, domains, Redirects, MIME Types, email and
-FTP accounts, Directory Privacy, Git Version Control, MySQL or MariaDB, and
-PostgreSQL, plus ModSecurity, Passenger Applications, and SSL Manager.
-
-Before and after the suite, the acceptance entry point removes only resources
-that follow the test naming contract:
-
-- PostgreSQL databases and users beginning with `${CPANEL_USERNAME}_tf`;
-- MySQL or MariaDB databases and users beginning with
-  `${CPANEL_USERNAME}_tf`;
-- remote MySQL hosts limited to `198.51.100.245` through
-  `198.51.100.250`;
-- API token names beginning with `tfcpaneltoken`;
-- Dynamic DNS domains beginning with `tfcpanelddns`;
-- HTTP redirect source paths beginning with `/tfcpanelredirect-`;
-- custom MIME types beginning with `application/x-tfcpanel-`;
-- Apache handler extensions beginning with `.tfcpanelhandler`;
-- directory index settings on top-level `public_html` directories beginning
-  with `tfcpanel-index-`;
-- filesystem directory resources beginning with `tfcpanel-fs-dir-` below
-  `public_html`; provider-created fixtures contain only the reserved
-  `.terraform-cpanel-directory` ownership marker;
-- filesystem text file resources beginning with `tfcpanel-fs-file-` below
-  `public_html`; cleanup deletes a target only when its canonical hidden
-  `.terraform-cpanel-text-file-*` sidecar names the exact path and its stored
-  size and SHA-256 digest still match, and safely removes valid orphaned test
-  sidecars left after an interrupted delete;
-- Directory Privacy settings on top-level `public_html` directories beginning
-  with `tfcpanel-privacy-`, plus only their matching password directories
-  below `.htpasswds/public_html`; Directory Privacy user tests use only these
-  isolated directories;
-- Git repositories and top-level account-home directories beginning with
-  `tfcpanel-git-`, plus only matching Git deletion markers in the account home
-  or cPanel trash;
-- Passenger applications beginning with `tfcpanelpassenger`; cleanup
-  unregisters them before removing their matching Git fixture directories;
-- stored SSL certificate friendly names beginning with `tfcpanelsslcert`;
-  cleanup refuses to delete a matching certificate that cPanel reports as
-  configured or installed, and re-reads both inventories immediately before
-  each deletion;
-- stored SSL CSR friendly names and common names both beginning with
-  `tfcpanelcsr`; cleanup re-reads the CSR inventory and signed public PKCS#10
-  request immediately before deleting the exact matching ID;
-- cPanel-generated RSA key names for deleted `tfcpanelsub*` and
-  `tfcpaneladdon*` domains; cleanup runs only after domain deletion and
-  requires the exact key identity and modulus to remain unreferenced by every
-  configured domain, stored certificate, CSR, and installed SSL host;
-- GPG public-key user IDs beginning with
-  `Terraform cPanel acceptance <tfcpanelgpg-`; cleanup re-reads both public and
-  secret inventories, requires the complete secret inventory to remain empty,
-  verifies two byte-stable public exports, and requires the explicit
-  `CPANEL_ALLOW_GPG_KEYPAIR_DELETE=1` opt-in before calling cPanel's only
-  deletion function, `GPG::delete_keypair`, once. Ambiguous responses are
-  reconciled by read-only inventories without replaying the POST;
-- SSH public-key base names beginning with `tfcpanelssh`; cleanup refuses
-  automatic mutation and fails for manual review, while the final smoke test
-  verifies the exact total from `CPANEL_EXPECTED_SSH_PUBLIC_COUNT`;
-- email account local parts beginning with `tfcpanel`;
-- BoxTrapper test mailbox local parts beginning with
-  `tfcpanelboxtrapper`; cleanup verifies that the challenge queue is empty,
-  disables BoxTrapper, rechecks the queue immediately before deletion, and
-  never deletes queued messages before deleting the disposable mailbox;
-- CalDAV calendar delegations whose delegator or delegatee local part begins
-  with `tfcpanelcal`; cleanup removes these relationships before deleting
-  either mailbox;
-- login, incoming-mail, and outgoing-mail restrictions on those test email
-  accounts; cleanup refuses to delete a test mailbox with held outgoing mail;
-- user-level email filter names beginning with `tfcpanelfilter`, only on test
-  mailboxes whose local parts begin with `tfcpanelfilter`; cleanup deletes
-  these filters before deleting their mailboxes;
-- account-level email filter names beginning with `tfcpanelfilter`; cleanup
-  reads the global inventory without an `account` parameter and deletes only
-  exact reserved names in that same scope;
-- Mailman mailing list local parts beginning with `tfcpanellist`; cleanup
-  re-reads the exact complete address and internal list identifier before
-  deletion;
-- email forwarder source local parts beginning with `tfcpanelfwd`;
-- email domain forwarder destinations beginning with `tfcpaneldomainfwd`;
-- email autoresponder local parts beginning with `tfcpanelauto`;
-- FTP account names beginning with `tfcpanelftp`;
-- IP blocks limited to `198.51.100.253`, `198.51.100.254`,
-  `198.51.100.240-198.51.100.242`, `203.0.113.248/30`, and the
-  `2001:db8:ffff::/48` documentation prefix;
-- DNS record names beginning with `tfcpaneldns`;
-- addon domains beginning with `tfcpaneladdon`;
-- domain aliases beginning with `tfcpanelalias`;
-- web subdomains beginning with `tfcpanelsub`;
-- disabled ModSecurity domains beginning with
-  `tfcpanelsubmodsecurity`; cleanup re-enables them before subdomain removal;
-- the account locale is not prefix-addressable, so each locale acceptance test
-  captures and restores its original value with an independent Go test cleanup;
-  the acceptance finalizer independently restores and verifies the persisted
-  locale baseline before artifact cleanup;
-- account log settings are also singleton values; the finalizer restores and
-  verifies the persisted `archive_logs`, `prune_archive`, and configured
-  retention baseline before artifact cleanup;
-- account notification preferences are singleton values; the finalizer restores
-  and verifies the complete persisted JSON map before artifact cleanup;
-- supported SpamAssassin preferences are singleton values; the finalizer
-  restores their exact presence and values from the persisted JSON map;
-- top-level test directories in `public_html` beginning with `tfcpanel-`;
-- cron commands containing `# terraform-provider-cpanel-`;
-- the empty `MAILTO` and default `SHELL=/bin/bash` lines that cPanel creates
-  automatically when the test account has no remaining cron command.
-
-It then requires the test-managed inventory to be empty. Resources on the
-account that do not match the test naming contract are preserved. Run the
-cleanup without the test suite with:
+Run cleanup and require an empty test-artifact inventory with:
 
 ```shell
 make clean-acceptance
 ```
 
-## Acceptance test naming
+The acceptance entry point restores the persisted singleton baseline before
+the suite. An `EXIT` finalizer restores it again, removes only artifacts using
+the provider's reserved test naming conventions, and requires the final
+test-artifact inventory to be empty.
 
-Tests must derive resource names from `CPANEL_USERNAME` and append a unique,
-short suffix. Tests must not depend on resources created outside the current
-test case, and every test case must verify remote cleanup.
+Tests preserve unrelated account objects. Cleanup refuses ambiguous or unsafe
+deletions and reports them for manual review.
 
-## Complete local validation
-
-With the pinned tools available on `PATH`, run:
-
-```shell
-make verify
-```
-
-This verifies modules, runs race-enabled tests, vet, lint, vulnerability
-scanning, documentation generation, generated-file checks, and GoReleaser
-configuration validation.
-
-Run both supported Terraform acceptance matrices by placing each Terraform
-binary on `PATH` in turn:
-
-```shell
-make test-acceptance
-```
-
-## Release snapshot
-
-Syft must be available on `PATH` before GoReleaser can create SBOMs. A local
-snapshot builds every advertised platform, archives the provider, generates an
-SBOM for each archive, and calculates checksums without publishing:
-
-```shell
-make release-snapshot
-```
-
-The snapshot intentionally skips GPG signing. Tagged releases import the
-configured GPG key, sign the checksum file, and publish only after quality and
-both Terraform acceptance jobs succeed.
+Run the acceptance suite once with each supported Terraform minor version on
+`PATH` before a release.
