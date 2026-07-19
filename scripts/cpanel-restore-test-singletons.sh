@@ -2,17 +2,41 @@
 
 set -euo pipefail
 
+script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 env_file="${CPANEL_ENV_FILE:-${HOME}/.config/terraform-provider-cpanel/acceptance.env}"
 baseline_file="${CPANEL_BASELINE_FILE:-${env_file%.env}-baseline.env}"
 
-for file in "${env_file}" "${baseline_file}"; do
-  if [[ -f "${file}" ]]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "${file}"
-    set +a
-  fi
-done
+source "${script_directory}/cpanel-common.sh"
+
+if [[ -f "${env_file}" ]]; then
+  cpanel_load_environment_file \
+    "${env_file}" \
+    'Acceptance environment file' \
+    CPANEL_HOST \
+    CPANEL_USERNAME \
+    CPANEL_API_TOKEN \
+    CPANEL_API_TOKEN_NAME \
+    CPANEL_EXPECTED_TEST_HOST \
+    CPANEL_EXPECTED_TEST_USERNAME \
+    CPANEL_EXPECTED_VERSION \
+    CPANEL_ACCEPT_DESTRUCTIVE \
+    CPANEL_TEST_SSL_KEY_ID
+fi
+if [[ -f "${baseline_file}" ]]; then
+  cpanel_load_environment_file \
+    "${baseline_file}" \
+    'Acceptance baseline file' \
+    CPANEL_EXPECTED_LOCALE \
+    CPANEL_EXPECTED_LOG_ARCHIVE \
+    CPANEL_EXPECTED_LOG_PRUNE \
+    CPANEL_EXPECTED_LOG_RETENTION \
+    CPANEL_EXPECTED_NOTIFICATION_PREFERENCES \
+    CPANEL_EXPECTED_SPAM_PREFERENCES \
+    CPANEL_EXPECTED_GPG_PUBLIC_COUNT \
+    CPANEL_EXPECTED_GPG_SECRET_COUNT \
+    CPANEL_EXPECTED_SSH_PUBLIC_COUNT \
+    CPANEL_ALLOW_GPG_KEYPAIR_DELETE
+fi
 
 for variable in \
   CPANEL_HOST \
@@ -29,6 +53,8 @@ for variable in \
     exit 1
   fi
 done
+
+"${script_directory}/cpanel-verify-test-account.sh"
 
 for command in curl jq; do
   if ! command -v "${command}" >/dev/null 2>&1; then
@@ -113,7 +139,6 @@ expected_spam_preferences="$(
 )"
 
 host="${CPANEL_HOST%/}"
-authorization="Authorization: cpanel ${CPANEL_USERNAME}:${CPANEL_API_TOKEN}"
 response_file="$(mktemp)"
 
 cleanup() {
@@ -129,13 +154,12 @@ get_request() {
   local status
 
   http_code="$(
-    curl \
+    cpanel_curl \
       --silent \
       --show-error \
       --max-time 90 \
       --output "${response_file}" \
       --write-out '%{http_code}' \
-      --header "${authorization}" \
       "${host}/${endpoint}"
   )"
 
@@ -167,7 +191,6 @@ uapi_post() {
     --request POST
     --output "${response_file}"
     --write-out '%{http_code}'
-    --header "${authorization}"
     --header 'Content-Type: application/x-www-form-urlencoded'
   )
 
@@ -176,7 +199,7 @@ uapi_post() {
     curl_arguments+=(--data-urlencode "${parameter}")
   done
 
-  http_code="$(curl "${curl_arguments[@]}" "${host}/execute/${module}/${function}")"
+  http_code="$(cpanel_curl "${curl_arguments[@]}" "${host}/execute/${module}/${function}")"
 
   if [[ "${http_code}" != "200" ]]; then
     printf '%s failed with HTTP %s\n' "${label}" "${http_code}" >&2
@@ -201,14 +224,13 @@ uapi_json_post() {
   local status
 
   http_code="$(
-    curl \
+    cpanel_curl \
       --silent \
       --show-error \
       --max-time 90 \
       --request POST \
       --output "${response_file}" \
       --write-out '%{http_code}' \
-      --header "${authorization}" \
       --header 'Content-Type: application/json' \
       --data-binary "${payload}" \
       "${host}/execute/${module}/${function}"

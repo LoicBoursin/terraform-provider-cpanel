@@ -37,6 +37,7 @@ verify:
 	govulncheck ./...
 	actionlint .github/workflows/*.yml
 	bash -n scripts/*.sh
+	./scripts/test-cpanel-clean-api-tokens.sh
 	go generate ./...
 	git diff --compact-summary --exit-code
 	goreleaser check

@@ -2,23 +2,53 @@
 
 set -euo pipefail
 
+script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 env_file="${CPANEL_ENV_FILE:-${HOME}/.config/terraform-provider-cpanel/acceptance.env}"
+artifact_manifest="${CPANEL_TEST_ARTIFACT_MANIFEST:-${env_file%.env}-artifacts.txt}"
+remote_artifact_manifest="${CPANEL_TEST_REMOTE_ARTIFACT_MANIFEST:-.terraform-provider-cpanel-acceptance-artifacts}"
+
+source "${script_directory}/cpanel-common.sh"
 
 if [[ -f "${env_file}" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "${env_file}"
-  set +a
+  cpanel_load_environment_file \
+    "${env_file}" \
+    'Acceptance environment file' \
+    CPANEL_HOST \
+    CPANEL_USERNAME \
+    CPANEL_API_TOKEN \
+    CPANEL_API_TOKEN_NAME \
+    CPANEL_EXPECTED_TEST_HOST \
+    CPANEL_EXPECTED_TEST_USERNAME \
+    CPANEL_EXPECTED_VERSION \
+    CPANEL_ACCEPT_DESTRUCTIVE \
+    CPANEL_TEST_SSL_KEY_ID
 fi
 
-for variable in CPANEL_HOST CPANEL_USERNAME CPANEL_API_TOKEN; do
+for variable in \
+  CPANEL_HOST \
+  CPANEL_USERNAME \
+  CPANEL_API_TOKEN \
+  CPANEL_API_TOKEN_NAME; do
   if [[ -z "${!variable:-}" ]]; then
     printf 'Missing required environment variable: %s\n' "${variable}" >&2
     exit 1
   fi
 done
 
-for command in curl jq; do
+"${script_directory}/cpanel-verify-test-account.sh"
+
+if [[ "${CPANEL_API_TOKEN_NAME}" == tfcpaneltoken* ]]; then
+  printf '%s\n' \
+    'Refusing cleanup: the active provider token uses the reserved tfcpaneltoken prefix.' >&2
+  exit 1
+fi
+if [[ "${remote_artifact_manifest}" != ".terraform-provider-cpanel-acceptance-artifacts" ]]; then
+  printf 'Invalid remote acceptance artifact manifest name: %s\n' \
+    "${remote_artifact_manifest}" >&2
+  exit 1
+fi
+
+for command in curl grep jq; do
   if ! command -v "${command}" >/dev/null 2>&1; then
     printf 'Missing required command: %s\n' "${command}" >&2
     exit 1
@@ -35,7 +65,6 @@ else
 fi
 
 host="${CPANEL_HOST%/}"
-authorization="Authorization: cpanel ${CPANEL_USERNAME}:${CPANEL_API_TOKEN}"
 response_file="$(mktemp)"
 
 cleanup() {
@@ -44,6 +73,34 @@ cleanup() {
 
 trap cleanup EXIT
 
+artifact_registered() {
+  local value="$1"
+
+  cpanel_artifact_registered "${artifact_manifest}" "${value}"
+}
+
+require_registered_artifact() {
+  local value="$1"
+
+  if ! artifact_registered "${value}"; then
+    printf 'Refusing cleanup of unregistered test artifact: %s\n' \
+      "${value}" >&2
+    exit 1
+  fi
+}
+
+require_registered_dns_record() {
+  local record_identity="$1"
+
+  if ! cpanel_dns_record_artifact_registered \
+    "${artifact_manifest}" \
+    "${record_identity}"; then
+    printf 'Refusing cleanup of unregistered test DNS record: %s\n' \
+      "$(jq -r '.name' <<<"${record_identity}")" >&2
+    exit 1
+  fi
+}
+
 get_request() {
   local endpoint="$1"
   local label="$2"
@@ -51,13 +108,12 @@ get_request() {
   local status
 
   http_code="$(
-    curl \
+    cpanel_curl \
       --silent \
       --show-error \
       --max-time 90 \
       --output "${response_file}" \
       --write-out '%{http_code}' \
-      --header "${authorization}" \
       "${host}/${endpoint}"
   )"
 
@@ -89,7 +145,6 @@ uapi_post() {
     --request POST
     --output "${response_file}"
     --write-out '%{http_code}'
-    --header "${authorization}"
     --header 'Content-Type: application/x-www-form-urlencoded'
   )
 
@@ -98,7 +153,7 @@ uapi_post() {
     curl_arguments+=(--data-urlencode "${parameter}")
   done
 
-  http_code="$(curl "${curl_arguments[@]}" "${host}/execute/${module}/${function}")"
+  http_code="$(cpanel_curl "${curl_arguments[@]}" "${host}/execute/${module}/${function}")"
 
   if [[ "${http_code}" != "200" ]]; then
     printf '%s failed with HTTP %s\n' "${label}" "${http_code}" >&2
@@ -128,7 +183,6 @@ api2_post() {
     --request POST
     --output "${response_file}"
     --write-out '%{http_code}'
-    --header "${authorization}"
     --header 'Content-Type: application/x-www-form-urlencoded'
     --data-urlencode 'cpanel_jsonapi_apiversion=2'
     --data-urlencode "cpanel_jsonapi_user=${CPANEL_USERNAME}"
@@ -141,7 +195,7 @@ api2_post() {
     curl_arguments+=(--data-urlencode "${parameter}")
   done
 
-  http_code="$(curl "${curl_arguments[@]}" "${host}/json-api/cpanel")"
+  http_code="$(cpanel_curl "${curl_arguments[@]}" "${host}/json-api/cpanel")"
 
   if [[ "${http_code}" != "200" ]]; then
     printf '%s failed with HTTP %s\n' "${label}" "${http_code}" >&2
@@ -149,12 +203,81 @@ api2_post() {
   fi
 
   status="$(jq -r '.cpanelresult.event.result // empty' "${response_file}")"
-  if [[ "${status}" != "1" ]]; then
+  if [[ "${status}" != "1" ]] || ! jq -e \
+    '
+      (.cpanelresult.data // []) as $data
+      | ($data | type) == "array"
+      and all(
+        $data[]?;
+        ((has("result") | not) or ((.result | tostring) == "1"))
+        and ((has("status") | not) or ((.status | tostring) == "1"))
+        and (
+          (has("reason") | not)
+          or has("result")
+          or has("status")
+        )
+      )
+    ' \
+    "${response_file}" >/dev/null; then
     printf '%s failed: %s\n' \
       "${label}" \
       "$(jq -c '{cpanelresult}' "${response_file}")" >&2
     exit 1
   fi
+}
+
+delete_test_git_repository() {
+  local repository_root="$1"
+  local attempt
+  local http_code
+  local status
+
+  for ((attempt = 1; attempt <= 31; attempt++)); do
+    http_code="$(
+      cpanel_curl \
+        --silent \
+        --show-error \
+        --max-time 90 \
+        --request POST \
+        --output "${response_file}" \
+        --write-out '%{http_code}' \
+        --header 'Content-Type: application/x-www-form-urlencoded' \
+        --data-urlencode "repository_root=${repository_root}" \
+        "${host}/execute/VersionControl/delete"
+    )"
+
+    if [[ "${http_code}" != "200" ]]; then
+      printf 'Delete test Git repository failed with HTTP %s\n' \
+        "${http_code}" >&2
+      exit 1
+    fi
+
+    status="$(jq -r '.status // empty' "${response_file}")"
+    if [[ "${status}" == "1" ]]; then
+      return
+    fi
+    if ((attempt < 31)) &&
+      jq -e \
+        '
+          [.errors[]?, .messages[]?] as $messages
+          | ($messages | length) > 0
+          and all(
+            $messages[];
+            type == "string"
+            and endswith(
+              " can not be deleted because there are tasks pending."
+            )
+          )
+        ' \
+        "${response_file}" >/dev/null; then
+      sleep 2
+      continue
+    fi
+
+    printf 'Delete test Git repository failed: %s\n' \
+      "$(jq -c '{errors, messages}' "${response_file}")" >&2
+    exit 1
+  done
 }
 
 sha256_stream() {
@@ -172,6 +295,12 @@ sha256_stream() {
 delete_test_filesystem_path() {
   local managed_path="$1"
   local label="$2"
+  local parent_directory="${managed_path%/*}"
+  local entry_name="${managed_path##*/}"
+
+  if [[ "${parent_directory}" == "${managed_path}" ]]; then
+    parent_directory=""
+  fi
 
   api2_post \
     'Fileman' \
@@ -193,6 +322,46 @@ delete_test_filesystem_path() {
       "$(jq -c '.cpanelresult.data' "${response_file}")" >&2
     exit 1
   fi
+
+  get_request \
+    "execute/Fileman/list_files?dir=${parent_directory}&show_hidden=1&limit=1000" \
+    "Verify ${label}"
+  if jq -e \
+    --arg name "${entry_name}" \
+    '.data[] | select(.file == $name)' \
+    "${response_file}" >/dev/null; then
+    printf '%s still exists after deletion: %s\n' \
+      "${label}" \
+      "${managed_path}" >&2
+    exit 1
+  fi
+}
+
+delete_safe_test_ftp_home_directory() {
+  local home_directory="$1"
+
+  get_request \
+    "execute/Fileman/list_files?dir=${home_directory}&show_hidden=1&limit=1000" \
+    "Verify FTP home directory ${home_directory} before deletion"
+  if ! cpanel_ftp_home_inventory_is_safe_to_delete "${response_file}"; then
+    printf 'Refusing to delete FTP home directory with user content: %s\n' \
+      "${home_directory}" >&2
+    exit 1
+  fi
+  if jq -e '.data | length == 1' "${response_file}" >/dev/null; then
+    get_request \
+      "execute/Fileman/get_file_content?dir=${home_directory}&file=.ftpquota&from_charset=UTF-8&to_charset=UTF-8&update_html_document_encoding=0" \
+      "Verify FTP quota file ${home_directory}/.ftpquota before deletion"
+    if ! cpanel_ftp_quota_file_is_empty "${response_file}"; then
+      printf 'Refusing to delete FTP home directory with a non-empty quota file: %s\n' \
+        "${home_directory}" >&2
+      exit 1
+    fi
+  fi
+  delete_test_filesystem_path \
+    "${home_directory}" \
+    "Delete safe test FTP home directory ${home_directory}"
+  deleted_ftp_home_directories=$((deleted_ftp_home_directories + 1))
 }
 
 purge_test_git_directory() {
@@ -242,42 +411,135 @@ purge_test_git_directory() {
 }
 
 remove_cron_line() {
-  local linekey="$1"
+  local expected_job="$1"
   local label="$2"
-  local http_code
-  local status
+  local command_number
+  local linekey
+  local observed_job
 
-  http_code="$(
-    curl \
-      --silent \
-      --show-error \
-      --max-time 90 \
-      --request POST \
-      --output "${response_file}" \
-      --write-out '%{http_code}' \
-      --header "${authorization}" \
-      --header 'Content-Type: application/x-www-form-urlencoded' \
-      --data-urlencode 'cpanel_jsonapi_apiversion=2' \
-      --data-urlencode "cpanel_jsonapi_user=${CPANEL_USERNAME}" \
-      --data-urlencode 'cpanel_jsonapi_module=Cron' \
-      --data-urlencode 'cpanel_jsonapi_func=remove_line' \
-      --data-urlencode "linekey=${linekey}" \
-      "${host}/json-api/cpanel"
-  )"
+  linekey="$(jq -r '.linekey' <<<"${expected_job}")"
+  command_number="$(jq -r '.commandnumber' <<<"${expected_job}")"
 
-  if [[ "${http_code}" != "200" ]]; then
-    printf '%s failed with HTTP %s\n' "${label}" "${http_code}" >&2
+  if [[ ! "${command_number}" =~ ^[1-9][0-9]*$ ]]; then
+    printf 'Refusing to delete cron entry %s with invalid command number %s\n' \
+      "${linekey}" \
+      "${command_number}" >&2
     exit 1
   fi
 
-  status="$(jq -r '.cpanelresult.event.result // empty' "${response_file}")"
-  if [[ "${status}" != "1" ]]; then
-    printf '%s failed: %s\n' \
-      "${label}" \
-      "$(jq -c '{cpanelresult}' "${response_file}")" >&2
+  get_request \
+    "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=Cron&cpanel_jsonapi_func=fetchcron" \
+    "Revalidate cron entry ${linekey} before deletion"
+  observed_job="$(
+    jq -c \
+      --arg linekey "${linekey}" \
+      '
+        [
+          .cpanelresult.data[]
+          | select(
+              .type == "command"
+              and (.linekey | tostring) == $linekey
+            )
+          | {
+              linekey: (.linekey | tostring),
+              line: (.line | tonumber),
+              commandnumber: (.commandnumber | tonumber),
+              command: (.command | tostring),
+              minute: (.minute | tostring),
+              hour: (.hour | tostring),
+              day: (.day | tostring),
+              weekday: (.weekday | tostring),
+              month: (.month | tostring)
+            }
+        ]
+        | if length == 1 then .[0] else null end
+      ' \
+      "${response_file}"
+  )"
+  if [[ "${observed_job}" != "${expected_job}" ]]; then
+    printf 'Refusing to delete changed cron entry: %s\n' "${linekey}" >&2
+    exit 1
+  fi
+
+  api2_post \
+    'Cron' \
+    'remove_line' \
+    "${label}" \
+    "line=${command_number}"
+
+  get_request \
+    "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=Cron&cpanel_jsonapi_func=fetchcron" \
+    "Verify cron deletion ${linekey}"
+  if jq -e \
+    --arg linekey "${linekey}" \
+    '.cpanelresult.data[] | select((.linekey | tostring) == $linekey)' \
+    "${response_file}" >/dev/null; then
+    printf 'Cron entry still exists after deletion: %s\n' "${linekey}" >&2
     exit 1
   fi
 }
+
+recover_remote_artifact_manifest() {
+  local content
+  local manifest_directory
+  local merged_manifest
+  local remote_manifest
+
+  get_request \
+    'execute/Fileman/list_files?dir=&show_hidden=1&limit=1000' \
+    'Remote acceptance artifact manifest inventory'
+  if ! jq -e \
+    --arg file "${remote_artifact_manifest}" \
+    '.data[] | select(.type == "file" and .file == $file)' \
+    "${response_file}" >/dev/null; then
+    return
+  fi
+
+  get_request \
+    "execute/Fileman/get_file_content?dir=&file=${remote_artifact_manifest}&from_charset=UTF-8&to_charset=UTF-8&update_html_document_encoding=0" \
+    'Read remote acceptance artifact manifest'
+  if ! jq -e \
+    '.data.content | type == "string" and utf8bytelength <= 1048576' \
+    "${response_file}" >/dev/null; then
+    printf 'Remote acceptance artifact manifest content is invalid\n' >&2
+    exit 1
+  fi
+  content="$(jq -r '.data.content' "${response_file}")"
+
+  manifest_directory="$(dirname "${artifact_manifest}")"
+  umask 077
+  mkdir -p "${manifest_directory}"
+  merged_manifest="$(mktemp "${manifest_directory}/acceptance-artifacts.XXXXXX")"
+  if [[ -f "${artifact_manifest}" ]]; then
+    cpanel_require_private_file \
+      "${artifact_manifest}" \
+      'Acceptance artifact manifest'
+    cpanel_validate_artifact_manifest \
+      "${artifact_manifest}" \
+      'Local acceptance artifact manifest'
+    cat "${artifact_manifest}" >>"${merged_manifest}"
+  fi
+  if [[ -n "${content}" ]]; then
+    remote_manifest="$(mktemp "${manifest_directory}/remote-acceptance-artifacts.XXXXXX")"
+    printf '%s\n' "${content}" >"${remote_manifest}"
+    chmod 0600 "${remote_manifest}"
+    cpanel_validate_artifact_manifest \
+      "${remote_manifest}" \
+      'Remote acceptance artifact manifest'
+    cat "${remote_manifest}" >>"${merged_manifest}"
+    rm -f "${remote_manifest}"
+  fi
+  awk 'length($0) > 0 && !seen[$0]++' \
+    "${merged_manifest}" >"${merged_manifest}.deduplicated"
+  chmod 0600 "${merged_manifest}.deduplicated"
+  cpanel_validate_artifact_manifest \
+    "${merged_manifest}.deduplicated" \
+    'Merged acceptance artifact manifest'
+  mv "${merged_manifest}.deduplicated" "${artifact_manifest}"
+  rm -f "${merged_manifest}"
+}
+
+recover_remote_artifact_manifest
 
 test_prefix="${CPANEL_USERNAME}_tf"
 deleted_api_tokens=0
@@ -310,6 +572,7 @@ deleted_email_domain_forwarders=0
 deleted_email_auto_responders=0
 reset_email_routings=0
 deleted_ftp_accounts=0
+deleted_ftp_home_directories=0
 deleted_ip_blocks=0
 deleted_dns_records=0
 deleted_addon_domains=0
@@ -339,6 +602,7 @@ while IFS= read -r domain; do
   if [[ -z "${domain}" ]]; then
     continue
   fi
+  require_registered_artifact "${domain}"
   uapi_post \
     'Email' \
     'set_always_accept' \
@@ -368,18 +632,10 @@ while IFS= read -r domain; do
   reset_email_routings=$((reset_email_routings + 1))
 done <<<"${test_non_auto_routing_domains}"
 
-get_request 'execute/Tokens/list' 'API token inventory'
-while IFS= read -r token_name; do
-  if [[ -z "${token_name}" ]]; then
-    continue
-  fi
-  uapi_post 'Tokens' 'revoke' "Revoke test API token ${token_name}" "name=${token_name}"
-  deleted_api_tokens=$((deleted_api_tokens + 1))
-done < <(
-  jq -r \
-    '.data[].name | select(startswith("tfcpaneltoken"))' \
-  "${response_file}"
-)
+deleted_api_tokens="$(cpanel_cleanup_test_api_tokens \
+  "${artifact_manifest}" \
+  "${CPANEL_API_TOKEN_NAME}" \
+  "${response_file}")"
 
 get_request \
   'execute/PassengerApps/list_applications' \
@@ -388,6 +644,7 @@ while IFS= read -r application_name; do
   if [[ -z "${application_name}" ]]; then
     continue
   fi
+  require_registered_artifact "${application_name}"
   uapi_post \
     'PassengerApps' \
     'unregister_application' \
@@ -454,6 +711,7 @@ while IFS=$'\t' read -r csr_id friendly_name common_name; do
   if [[ -z "${csr_id}" ]]; then
     continue
   fi
+  require_registered_artifact "${friendly_name}"
 
   get_request 'execute/SSL/list_csrs' \
     "Re-read test SSL CSR ${friendly_name}"
@@ -542,6 +800,7 @@ fi
 
 cleanup_test_ssl_certificates() {
   local require_empty="${1:-0}"
+  local cleanup_artifact
 
   get_request 'execute/SSL/list_certs' 'stored SSL certificate inventory'
   if ! jq -e \
@@ -599,6 +858,16 @@ cleanup_test_ssl_certificates() {
     fi
     get_request 'execute/SSL/list_certs' \
       "Re-read test SSL certificate ${friendly_name}"
+    if ! cleanup_artifact="$(
+      cpanel_ssl_certificate_cleanup_artifact \
+        "${response_file}" \
+        "${certificate_id}"
+    )"; then
+      printf 'Refusing to attribute test SSL certificate safely: %s\n' \
+        "${friendly_name}" >&2
+      exit 1
+    fi
+    require_registered_artifact "${cleanup_artifact}"
     if jq -e \
       --arg id "${certificate_id}" \
       '
@@ -622,8 +891,15 @@ cleanup_test_ssl_certificates() {
     fi
     if ! jq -e \
       --arg id "${certificate_id}" \
+      --arg cleanup_artifact "${cleanup_artifact}" \
       --arg friendly_name "${friendly_name}" \
       '
+        def automatic_test_certificate:
+          .friendly_name
+          | try capture(
+              "^Cert for \u201c(?<domain>tfcpanel(?:sub|addon)[a-z0-9.-]+)\u201d$"
+            )
+            catch null;
         (.data | type == "array")
         and (
           [
@@ -635,6 +911,20 @@ cleanup_test_ssl_certificates() {
           ] as $matches
           | ($matches | length) == 1
           and ($matches[0].friendly_name? == $friendly_name)
+          and (
+            (
+              ($matches[0].friendly_name? | type) == "string"
+              and ($matches[0].friendly_name == $cleanup_artifact)
+            )
+            or (
+              (($matches[0] | automatic_test_certificate) | type) == "object"
+              and (
+                ($matches[0] | automatic_test_certificate).domain
+                == $cleanup_artifact
+              )
+            )
+            or (($matches[0].id | tostring) == $cleanup_artifact)
+          )
           and (
             (
               ($matches[0].friendly_name? | type) == "string"
@@ -952,6 +1242,7 @@ cleanup_test_ssl_keys() {
     if [[ -z "${key_id}" ]]; then
       continue
     fi
+    require_registered_artifact "${domain}"
 
     domain_is_configured=0
     while IFS= read -r configured_domain; do
@@ -1287,13 +1578,12 @@ delete_test_gpg_keypair_once() {
     --request POST
     --output "${response_file}"
     --write-out '%{http_code}'
-    --header "${authorization}"
     --header 'Content-Type: application/x-www-form-urlencoded'
     --data-urlencode "key_id=${key_id}"
   )
 
   if http_code="$(
-    curl \
+    cpanel_curl \
       "${curl_arguments[@]}" \
       "${host}/execute/GPG/delete_keypair"
   )"; then
@@ -1367,6 +1657,7 @@ cleanup_test_gpg_public_keys() {
     if [[ -z "${key_id}" || -z "${user_id}" ]]; then
       continue
     fi
+    require_registered_artifact "${user_id}"
     key_id="$(
       printf '%s' "${key_id}" | tr '[:lower:]' '[:upper:]'
     )"
@@ -1656,16 +1947,34 @@ cleanup_test_ssl_certificates 0
 cleanup_test_gpg_public_keys
 cleanup_test_ssh_public_keys
 
+get_request \
+  'execute/Variables/get_user_information' \
+  'cPanel account home inventory'
+account_home="$(jq -r '.data.home // empty' "${response_file}")"
+if [[ -z "${account_home}" || "${account_home}" != /* ]]; then
+  printf 'cPanel account home inventory is invalid: %s\n' \
+    "${account_home}" >&2
+  exit 1
+fi
+
 get_request 'execute/VersionControl/retrieve' 'Git repository inventory'
 while IFS= read -r repository_root; do
   if [[ -z "${repository_root}" ]]; then
     continue
   fi
-  uapi_post \
-    'VersionControl' \
-    'delete' \
-    "Delete test Git repository ${repository_root}" \
-    "repository_root=${repository_root}"
+  if [[ "${repository_root}" != "${account_home}/"* ]]; then
+    printf 'Refusing to delete test Git repository outside the account home root: %s\n' \
+      "${repository_root}" >&2
+    exit 1
+  fi
+  repository_relative="${repository_root#"${account_home}/"}"
+  if [[ -z "${repository_relative}" || "${repository_relative}" == *'/../'* ]]; then
+    printf 'Refusing to delete test Git repository with invalid relative path: %s\n' \
+      "${repository_root}" >&2
+    exit 1
+  fi
+  require_registered_artifact "${repository_relative}"
+  delete_test_git_repository "${repository_root}"
   deleted_git_repositories=$((deleted_git_repositories + 1))
 done < <(
   jq -r \
@@ -1685,6 +1994,7 @@ while IFS=$'\t' read -r domain id; do
   if [[ -z "${domain}" || -z "${id}" ]]; then
     continue
   fi
+  require_registered_artifact "${domain}"
   uapi_post \
     'DynamicDNS' \
     'delete' \
@@ -1705,6 +2015,7 @@ while IFS=$'\t' read -r domain source; do
   if [[ -z "${domain}" || -z "${source}" ]]; then
     continue
   fi
+  require_registered_artifact "${source}"
   uapi_post \
     'Mime' \
     'delete_redirect' \
@@ -1726,6 +2037,7 @@ while IFS= read -r mime_type; do
   if [[ -z "${mime_type}" ]]; then
     continue
   fi
+  require_registered_artifact "${mime_type}"
   uapi_post \
     'Mime' \
     'delete_mime' \
@@ -1743,6 +2055,7 @@ while IFS= read -r extension; do
   if [[ -z "${extension}" ]]; then
     continue
   fi
+  require_registered_artifact "${extension}"
   uapi_post \
     'Mime' \
     'delete_handler' \
@@ -1760,6 +2073,7 @@ while IFS= read -r database; do
   if [[ -z "${database}" ]]; then
     continue
   fi
+  require_registered_artifact "${database}"
   uapi_post 'Postgresql' 'delete_database' "Delete test database ${database}" "name=${database}"
   deleted_databases=$((deleted_databases + 1))
 done < <(
@@ -1774,6 +2088,7 @@ while IFS= read -r user; do
   if [[ -z "${user}" ]]; then
     continue
   fi
+  require_registered_artifact "${user}"
   uapi_post 'Postgresql' 'delete_user' "Delete test user ${user}" "name=${user}"
   deleted_users=$((deleted_users + 1))
 done < <(
@@ -1788,6 +2103,7 @@ while IFS= read -r database; do
   if [[ -z "${database}" ]]; then
     continue
   fi
+  require_registered_artifact "${database}"
   uapi_post 'Mysql' 'delete_database' "Delete test MySQL database ${database}" "name=${database}"
   deleted_mysql_databases=$((deleted_mysql_databases + 1))
 done < <(
@@ -1802,6 +2118,7 @@ while IFS= read -r user; do
   if [[ -z "${user}" ]]; then
     continue
   fi
+  require_registered_artifact "${user}"
   uapi_post 'Mysql' 'delete_user' "Delete test MySQL user ${user}" "name=${user}"
   deleted_mysql_users=$((deleted_mysql_users + 1))
 done < <(
@@ -1818,6 +2135,7 @@ while IFS= read -r remote_host; do
   if [[ -z "${remote_host}" ]]; then
     continue
   fi
+  require_registered_artifact "${remote_host}"
   uapi_post \
     'Mysql' \
     'delete_host' \
@@ -1828,12 +2146,10 @@ done < <(
   jq -r \
     '.cpanelresult.data[].host
       | select(
-          . == "198.51.100.245"
+          . == "198.51.100.244"
+          or . == "198.51.100.245"
           or . == "198.51.100.246"
           or . == "198.51.100.247"
-          or . == "198.51.100.248"
-          or . == "198.51.100.249"
-          or . == "198.51.100.250"
         )' \
     "${response_file}"
 )
@@ -1947,6 +2263,7 @@ while IFS=$'\t' read -r address enabled; do
   if [[ -z "${address}" ]]; then
     continue
   fi
+  require_registered_artifact "${address}"
   account_candidate_found=0
   while IFS=$'\t' read -r candidate_address _; do
     if [[ "${candidate_address}" == "${address}" ]]; then
@@ -2045,6 +2362,8 @@ while IFS=$'\t' read -r delegator calendar delegatee; do
   ]]; then
     continue
   fi
+  require_registered_artifact "${delegator}"
+  require_registered_artifact "${delegatee}"
   uapi_post \
     'CPDAVD' \
     'remove_delegate' \
@@ -2110,6 +2429,7 @@ while IFS=$'\t' read -r address list_id; do
   if [[ -z "${address}" || -z "${list_id}" ]]; then
     continue
   fi
+  require_registered_artifact "${address}"
 
   get_request 'execute/Email/list_lists' \
     "Re-read test email mailing list ${address}"
@@ -2181,6 +2501,7 @@ while IFS= read -r filter_name; do
   if [[ -z "${filter_name}" ]]; then
     continue
   fi
+  require_registered_artifact "${filter_name}"
   uapi_post \
     'Email' \
     'delete_filter' \
@@ -2203,6 +2524,7 @@ while IFS= read -r address; do
   if [[ -z "${address}" ]]; then
     continue
   fi
+  require_registered_artifact "${address}"
 
   get_request \
     "execute/Email/list_filters?account=${address}" \
@@ -2242,6 +2564,7 @@ while IFS= read -r address; do
     if [[ -z "${filter_name}" ]]; then
       continue
     fi
+    require_registered_artifact "${filter_name}"
     uapi_post \
       'Email' \
       'delete_filter' \
@@ -2266,6 +2589,7 @@ while IFS=$'\t' read -r address login incoming outgoing held; do
   if [[ -z "${address}" ]]; then
     continue
   fi
+  require_registered_artifact "${address}"
   if [[ "${held}" == "1" ]]; then
     printf 'Refusing to delete test email account with held outgoing mail: %s\n' \
       "${address}" >&2
@@ -2344,6 +2668,7 @@ while IFS= read -r domain; do
     if [[ -z "${address}" || -z "${destination}" ]]; then
       continue
     fi
+    require_registered_artifact "${address}"
     uapi_post \
       'Email' \
       'delete_forwarder' \
@@ -2373,6 +2698,7 @@ while IFS= read -r domain; do
     if [[ -z "${address}" ]]; then
       continue
     fi
+    require_registered_artifact "${address}"
     uapi_post \
       'Email' \
       'delete_auto_responder' \
@@ -2387,10 +2713,11 @@ while IFS= read -r domain; do
 done <<<"${mail_domains}"
 
 get_request 'execute/Email/list_domain_forwarders' 'Email domain forwarder inventory'
-while IFS= read -r domain; do
-  if [[ -z "${domain}" ]]; then
+while IFS=$'\t' read -r domain destination; do
+  if [[ -z "${domain}" || -z "${destination}" ]]; then
     continue
   fi
+  require_registered_artifact "${destination}"
   uapi_post \
     'Email' \
     'delete_domain_forwarder' \
@@ -2401,14 +2728,64 @@ done < <(
   jq -r \
     '.data[]
       | select(.forward | startswith("tfcpaneldomainfwd"))
-      | .dest' \
+      | [.dest, .forward]
+      | @tsv' \
     "${response_file}"
 )
 
 get_request 'execute/Ftp/list_ftp_with_disk?include_acct_types=sub' 'FTP account inventory'
-while IFS= read -r login; do
-  if [[ -z "${login}" ]]; then
+test_ftp_accounts="$(
+  jq -r \
+    '
+      .data[]
+      | select(.accttype == "sub")
+      | (.login // "") as $login
+      | (.reldir // "") as $home
+      | (
+          try (
+            ($login | split("@")[0])
+            | capture(
+                "^tfcpanelftp(?<kind>account|replacement|datasource)[a-z0-9]{6}$"
+              )
+          ) catch null
+        ) as $identity
+      | (
+          try (
+            $home
+            | capture(
+                "^tfcpanel-ftp-(?<kind>account|replacement|datasource)-[a-z0-9]{8}(-updated)?$"
+              )
+          ) catch null
+        ) as $directory
+      | select(
+          ($identity | type) == "object"
+          and ($directory | type) == "object"
+          and $identity.kind == $directory.kind
+        )
+      | [$login, $home]
+      | @tsv
+    ' \
+    "${response_file}"
+)"
+while IFS=$'\t' read -r login home_directory; do
+  if [[ -z "${login}" || -z "${home_directory}" ]]; then
     continue
+  fi
+  require_registered_artifact "${login}"
+  require_registered_artifact "${home_directory}"
+  get_request \
+    'execute/Ftp/list_ftp_with_disk?include_acct_types=sub' \
+    "Revalidate FTP account ${login} before deletion"
+  if ! jq -e \
+    --arg login "${login}" \
+    --arg home "${home_directory}" \
+    '
+      [.data[] | select(.login == $login and .reldir == $home)]
+      | length == 1
+    ' \
+    "${response_file}" >/dev/null; then
+    printf 'Refusing to delete changed FTP account: %s\n' "${login}" >&2
+    exit 1
   fi
   user="${login%@*}"
   domain="${login#*@}"
@@ -2418,13 +2795,59 @@ while IFS= read -r login; do
     "Delete test FTP account ${login}" \
     "user=${user}" \
     "domain=${domain}" \
-    'destroy=1'
+    'destroy=0'
   deleted_ftp_accounts=$((deleted_ftp_accounts + 1))
-done < <(
+
+  get_request \
+    'execute/Ftp/list_ftp_with_disk?include_acct_types=sub' \
+    "Verify FTP account deletion ${login}"
+  if jq -e \
+    --arg login "${login}" \
+    '.data[] | select(.login == $login)' \
+    "${response_file}" >/dev/null; then
+    printf 'Test FTP account still exists after deletion: %s\n' \
+      "${login}" >&2
+    exit 1
+  fi
+
+  delete_safe_test_ftp_home_directory "${home_directory}"
+done <<<"${test_ftp_accounts}"
+
+get_request \
+  'execute/Fileman/list_files?dir=&show_hidden=1&limit=1000' \
+  'Orphaned FTP home directory inventory'
+orphaned_ftp_home_directories="$(
   jq -r \
-    '.data[].login | select(startswith("tfcpanelftp"))' \
+    '
+      .data[]
+      | select(.type == "dir")
+      | .file
+      | select(
+          test(
+            "^tfcpanel-ftp-(account|replacement|datasource)-[a-z0-9]{8}(-updated)?$"
+          )
+        )
+    ' \
     "${response_file}"
-)
+)"
+while IFS= read -r home_directory; do
+  if [[ -z "${home_directory}" ]]; then
+    continue
+  fi
+  require_registered_artifact "${home_directory}"
+  get_request \
+    'execute/Ftp/list_ftp_with_disk?include_acct_types=sub' \
+    "Verify no FTP account owns orphaned home ${home_directory}"
+  if jq -e \
+    --arg home "${home_directory}" \
+    '.data[] | select(.accttype == "sub" and .reldir == $home)' \
+    "${response_file}" >/dev/null; then
+    printf 'Refusing to delete FTP home directory still used by an account: %s\n' \
+      "${home_directory}" >&2
+    exit 1
+  fi
+  delete_safe_test_ftp_home_directory "${home_directory}"
+done <<<"${orphaned_ftp_home_directories}"
 
 get_request \
   "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=DenyIp&cpanel_jsonapi_func=listdenyips" \
@@ -2433,6 +2856,7 @@ while IFS= read -r address; do
   if [[ -z "${address}" ]]; then
     continue
   fi
+  require_registered_artifact "${address}"
   uapi_post \
     'BlockIP' \
     'remove_ip' \
@@ -2449,6 +2873,7 @@ done < <(
           or .ip == "198.51.100.240/31"
           or .ip == "198.51.100.242"
           or .ip == "203.0.113.248/30"
+          or (.ip | startswith("2001:db8:ffff:"))
           or (.ip | startswith("2001:0db8:ffff:"))
         )
       | .ip' \
@@ -2468,22 +2893,50 @@ while IFS= read -r zone; do
 
   while true; do
     get_request "execute/DNS/parse_zone?zone=${zone}" "DNS record inventory for ${zone}"
-    line_index="$(
+    dns_record_candidate="$(
       jq -r \
+        --arg zone "${zone}" \
         'first(
           .data[]
           | select(.record_type != null)
-          | select(
-              (try (.dname_b64 | @base64d) catch "")
-              | startswith("tfcpaneldns")
-            )
-          | .line_index
+          | (try (.dname_b64 | @base64d) catch "") as $raw_name
+          | (
+              $raw_name
+              | gsub("^\\s+|\\s+$"; "")
+              | rtrimstr(".")
+            ) as $absolute_name
+          | (
+              if $absolute_name == $zone then
+                "@"
+              elif ($absolute_name | endswith("." + $zone)) then
+                ($absolute_name | rtrimstr("." + $zone))
+              else
+                $absolute_name
+              end
+            ) as $record_name
+          | select($record_name | startswith("tfcpaneldns"))
+          | [
+              ({
+                version: 1,
+                kind: "dns_record",
+                zone: $zone,
+                name: $record_name,
+                type: (.record_type | ascii_upcase),
+                ttl: .ttl,
+                data: [.data_b64[] | @base64d]
+              } | tojson),
+              (.line_index | tostring)
+            ]
+          | @tsv
         ) // empty' \
         "${response_file}"
     )"
+    record_identity="${dns_record_candidate%%$'\t'*}"
+    line_index="${dns_record_candidate#*$'\t'}"
     if [[ -z "${line_index}" ]]; then
       break
     fi
+    require_registered_dns_record "${record_identity}"
 
     serial="$(
       jq -r \
@@ -2517,6 +2970,7 @@ while IFS= read -r domain; do
   if [[ -z "${domain}" ]]; then
     continue
   fi
+  require_registered_artifact "${domain}"
   api2_post \
     'Park' \
     'unpark' \
@@ -2536,6 +2990,7 @@ while IFS= read -r domain; do
   if [[ -z "${domain}" ]]; then
     continue
   fi
+  require_registered_artifact "${domain}"
   uapi_post \
     'ModSecurity' \
     'enable_domains' \
@@ -2574,6 +3029,7 @@ while IFS= read -r domain; do
   if [[ -z "${domain}" ]]; then
     continue
   fi
+  require_registered_artifact "${domain}"
   api2_post \
     'SubDomain' \
     'delsubdomain' \
@@ -2597,6 +3053,8 @@ while IFS=$'\t' read -r domain domain_key; do
   if [[ -z "${domain}" || -z "${domain_key}" ]]; then
     continue
   fi
+  require_registered_artifact "${domain}"
+  require_registered_artifact "${domain_key}"
   api2_post \
     'AddonDomain' \
     'deladdondomain' \
@@ -2634,6 +3092,7 @@ while IFS= read -r file_name; do
   fi
 
   managed_path="public_html/${file_name}"
+  require_registered_artifact "${managed_path}"
   marker_digest="$(printf '%s' "${managed_path}" | sha256_stream)"
   marker_name=".terraform-cpanel-text-file-${marker_digest}"
   marker_found=0
@@ -2644,10 +3103,13 @@ while IFS= read -r file_name; do
     fi
   done <<<"${filesystem_text_file_marker_names}"
   if [[ "${marker_found}" != "1" ]]; then
-    printf 'Refusing to delete unowned test filesystem text file: %s\n' \
-      "${managed_path}" >&2
-    exit 1
+    delete_test_filesystem_path \
+      "${managed_path}" \
+      "Delete registered unmarked test filesystem text file ${managed_path}"
+    deleted_filesystem_text_files=$((deleted_filesystem_text_files + 1))
+    continue
   fi
+  require_registered_artifact "${marker_name}"
 
   get_request \
     "execute/Fileman/get_file_content?dir=public_html&file=${marker_name}&from_charset=UTF-8&to_charset=UTF-8&update_html_document_encoding=0" \
@@ -2696,10 +3158,15 @@ while IFS= read -r file_name; do
       )
     ' \
     "${response_file}" >/dev/null; then
-    printf 'Refusing to delete %s because marker %s is invalid\n' \
+    delete_test_filesystem_path \
       "${managed_path}" \
-      "${marker_name}" >&2
-    exit 1
+      "Delete registered test filesystem text file with invalid marker ${managed_path}"
+    deleted_filesystem_text_files=$((deleted_filesystem_text_files + 1))
+    delete_test_filesystem_path \
+      "public_html/${marker_name}" \
+      "Delete invalid registered ownership marker for ${managed_path}"
+    deleted_filesystem_text_file_markers=$((deleted_filesystem_text_file_markers + 1))
+    continue
   fi
   marker_content="$(jq -r '.data.content' "${response_file}")"
   marker_content_sha256="$(
@@ -2718,9 +3185,15 @@ while IFS= read -r file_name; do
     "${actual_content_sha256}" != "${marker_content_sha256}"
     || "${actual_size_bytes}" != "${marker_size_bytes}"
   ]]; then
-    printf 'Refusing to delete drifted test filesystem text file: %s\n' \
-      "${managed_path}" >&2
-    exit 1
+    delete_test_filesystem_path \
+      "${managed_path}" \
+      "Delete registered drifted test filesystem text file ${managed_path}"
+    deleted_filesystem_text_files=$((deleted_filesystem_text_files + 1))
+    delete_test_filesystem_path \
+      "public_html/${marker_name}" \
+      "Delete ownership marker for registered drifted file ${managed_path}"
+    deleted_filesystem_text_file_markers=$((deleted_filesystem_text_file_markers + 1))
+    continue
   fi
 
   get_request \
@@ -2773,6 +3246,7 @@ while IFS= read -r marker_name; do
   if [[ -z "${marker_name}" ]]; then
     continue
   fi
+  require_registered_artifact "${marker_name}"
 
   get_request \
     "execute/Fileman/get_file_content?dir=public_html&file=${marker_name}&from_charset=UTF-8&to_charset=UTF-8&update_html_document_encoding=0" \
@@ -2791,15 +3265,21 @@ while IFS= read -r marker_name; do
       )
     ' \
     "${response_file}" >/dev/null; then
+    delete_test_filesystem_path \
+      "public_html/${marker_name}" \
+      "Delete invalid registered orphaned filesystem text file marker ${marker_name}"
+    deleted_filesystem_text_file_markers=$((deleted_filesystem_text_file_markers + 1))
     continue
   fi
 
   orphaned_path="$(jq -r '.data.content | fromjson | .path' "${response_file}")"
   expected_marker_digest="$(printf '%s' "${orphaned_path}" | sha256_stream)"
   if [[ "${marker_name}" != ".terraform-cpanel-text-file-${expected_marker_digest}" ]]; then
-    printf 'Refusing to delete mismatched filesystem text file marker: %s\n' \
-      "${marker_name}" >&2
-    exit 1
+    delete_test_filesystem_path \
+      "public_html/${marker_name}" \
+      "Delete mismatched registered filesystem text file marker ${marker_name}"
+    deleted_filesystem_text_file_markers=$((deleted_filesystem_text_file_markers + 1))
+    continue
   fi
 
   orphaned_file_name="${orphaned_path##*/}"
@@ -2838,13 +3318,12 @@ while IFS= read -r directory; do
   if [[ -z "${directory}" ]]; then
     continue
   fi
-  api2_post \
-    'Fileman' \
-    'fileop' \
-    "Delete test domain directory public_html/${directory}" \
-    'op=unlink' \
-    "sourcefiles=public_html/${directory}" \
-    'doubledecode=0'
+
+  managed_path="public_html/${directory}"
+  require_registered_artifact "${managed_path}"
+  delete_test_filesystem_path \
+    "${managed_path}" \
+    "Delete registered test directory ${managed_path}"
   deleted_domain_directories=$((deleted_domain_directories + 1))
 done <<<"${test_domain_directories}"
 
@@ -2886,6 +3365,7 @@ if [[ "${home_has_trash}" != "0" ]]; then
     if [[ -z "${trash_entry}" ]]; then
       continue
     fi
+    require_registered_artifact "${trash_entry}"
     uapi_post \
       'Fileman' \
       'empty_trash' \
@@ -2898,6 +3378,7 @@ while IFS= read -r directory; do
   if [[ -z "${directory}" ]]; then
     continue
   fi
+  require_registered_artifact "${directory}"
   purge_test_git_directory "${directory}"
   deleted_git_repository_directories=$((deleted_git_repository_directories + 1))
 done <<<"${test_git_repository_directories}"
@@ -2929,6 +3410,7 @@ if jq -e \
       if [[ -z "${directory}" ]]; then
         continue
       fi
+      require_registered_artifact "public_html/${directory}"
       api2_post \
         'Fileman' \
         'fileop' \
@@ -2944,47 +3426,40 @@ fi
 get_request \
   "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=Cron&cpanel_jsonapi_func=fetchcron" \
   'Cron inventory'
-while IFS= read -r linekey; do
-  if [[ -z "${linekey}" ]]; then
-    continue
-  fi
-  remove_cron_line "${linekey}" "Delete test cron line ${linekey}"
-  deleted_cron_lines=$((deleted_cron_lines + 1))
-done < <(
+test_cron_jobs="$(
   jq -r \
     '.cpanelresult.data[]
       | select(.type == "command")
       | select((.command // "") | contains("# terraform-provider-cpanel-"))
-      | .linekey' \
+      | {
+          linekey: (.linekey | tostring),
+          line: (.line | tonumber),
+          commandnumber: (.commandnumber | tonumber),
+          command: (.command | tostring),
+          minute: (.minute | tostring),
+          hour: (.hour | tostring),
+          day: (.day | tostring),
+          weekday: (.weekday | tostring),
+          month: (.month | tostring)
+        }
+      | @json' \
     "${response_file}"
-)
+)"
+while IFS= read -r cron_job; do
+  if [[ -z "${cron_job}" ]]; then
+    continue
+  fi
+  command="$(jq -r '.command' <<<"${cron_job}")"
+  require_registered_artifact "${command}"
+  remove_cron_line \
+    "${cron_job}" \
+    "Delete test cron line $(jq -r '.linekey' <<<"${cron_job}")"
+  deleted_cron_lines=$((deleted_cron_lines + 1))
+done <<<"${test_cron_jobs}"
 
 get_request \
   "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=Cron&cpanel_jsonapi_func=fetchcron" \
   'Cron inventory after test cleanup'
-cron_command_count="$(
-  jq -r '[.cpanelresult.data[] | select(.type == "command")] | length' "${response_file}"
-)"
-
-if [[ "${cron_command_count}" == "0" ]]; then
-  while IFS= read -r linekey; do
-    if [[ -z "${linekey}" ]]; then
-      continue
-    fi
-    remove_cron_line "${linekey}" "Delete generated cron variable ${linekey}"
-    deleted_cron_lines=$((deleted_cron_lines + 1))
-  done < <(
-    jq -r \
-      '.cpanelresult.data[]
-        | select(.type == "variable")
-        | select(
-            (.key == "MAILTO" and (.value // "") == "")
-            or (.key == "SHELL" and (.value // "") == "/bin/bash")
-          )
-        | .linekey' \
-      "${response_file}"
-  )
-fi
 
 printf 'cPanel test cleanup passed\n'
 printf '  API tokens revoked: %d\n' "${deleted_api_tokens}"
@@ -3030,6 +3505,8 @@ printf '  email autoresponders deleted: %d\n' \
 printf '  email routing domains reset: %d\n' \
   "${reset_email_routings}"
 printf '  FTP accounts deleted: %d\n' "${deleted_ftp_accounts}"
+printf '  FTP home directories deleted: %d\n' \
+  "${deleted_ftp_home_directories}"
 printf '  IP blocks deleted: %d\n' "${deleted_ip_blocks}"
 printf '  DNS records deleted: %d\n' "${deleted_dns_records}"
 printf '  addon domains deleted: %d\n' "${deleted_addon_domains}"

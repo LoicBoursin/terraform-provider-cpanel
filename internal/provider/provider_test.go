@@ -5,7 +5,9 @@ package provider
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -68,10 +70,8 @@ var testAccProtoV6ProviderFactories = map[string]func() (tfprotov6.ProviderServe
 func testAccPreCheck(t *testing.T) {
 	t.Helper()
 
-	for _, variable := range []string{"CPANEL_HOST", "CPANEL_USERNAME", "CPANEL_API_TOKEN"} {
-		if os.Getenv(variable) == "" {
-			t.Fatalf("%s must be set for acceptance tests", variable)
-		}
+	if err := validateAcceptanceEnvironment(); err != nil {
+		t.Fatal(err)
 	}
 
 	client, err := testAccClient()
@@ -263,6 +263,46 @@ func testAccPreCheck(t *testing.T) {
 	}
 }
 
+func validateAcceptanceEnvironment() error {
+	for _, variable := range []string{
+		"CPANEL_HOST",
+		"CPANEL_USERNAME",
+		"CPANEL_API_TOKEN",
+		"CPANEL_API_TOKEN_NAME",
+		"CPANEL_EXPECTED_TEST_HOST",
+		"CPANEL_EXPECTED_TEST_USERNAME",
+	} {
+		if os.Getenv(variable) == "" {
+			return fmt.Errorf("%s must be set for acceptance tests", variable)
+		}
+	}
+
+	if os.Getenv("CPANEL_ACCEPT_DESTRUCTIVE") != "1" {
+		return errors.New(
+			"CPANEL_ACCEPT_DESTRUCTIVE must be set to 1 for acceptance tests on a dedicated account",
+		)
+	}
+
+	host := strings.TrimRight(os.Getenv("CPANEL_HOST"), "/")
+	expectedHost := strings.TrimRight(
+		os.Getenv("CPANEL_EXPECTED_TEST_HOST"),
+		"/",
+	)
+	if host != expectedHost {
+		return errors.New(
+			"CPANEL_HOST must match CPANEL_EXPECTED_TEST_HOST for acceptance tests",
+		)
+	}
+	if os.Getenv("CPANEL_USERNAME") !=
+		os.Getenv("CPANEL_EXPECTED_TEST_USERNAME") {
+		return errors.New(
+			"CPANEL_USERNAME must match CPANEL_EXPECTED_TEST_USERNAME for acceptance tests",
+		)
+	}
+
+	return nil
+}
+
 func testAccClient() (*cpanel.Client, error) {
 	return cpanel.NewClient(
 		os.Getenv("CPANEL_HOST"),
@@ -272,21 +312,21 @@ func testAccClient() (*cpanel.Client, error) {
 }
 
 func testAccPostgreSQLName(kind string) string {
-	return fmt.Sprintf(
+	return testAccRegisterArtifact(fmt.Sprintf(
 		"%s_tf%s%s",
 		os.Getenv("CPANEL_USERNAME"),
 		kind,
 		acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum),
-	)
+	))
 }
 
 func testAccMySQLName(kind string) string {
-	return fmt.Sprintf(
+	return testAccRegisterArtifact(fmt.Sprintf(
 		"%s_tf%s%s",
 		os.Getenv("CPANEL_USERNAME"),
 		kind,
 		acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum),
-	)
+	))
 }
 
 func testAccAPITokenName(kind string) string {
@@ -296,7 +336,11 @@ func testAccAPITokenName(kind string) string {
 		strings.ToLower(acctest.RandStringFromCharSet(12, acctest.CharSetAlphaNum)),
 	)
 
-	testAccRegisterAPITokenCandidate(name, time.Now().Add(-5*time.Minute).Unix())
+	testAccRegisterAPITokenCandidate(
+		name,
+		time.Now().Add(-5*time.Minute).Unix(),
+		time.Now().Add(5*time.Minute).Unix(),
+	)
 
 	return name
 }
@@ -308,20 +352,20 @@ func testAccDynamicDNSDomain(t *testing.T, kind string) string {
 		t.Skip("TF_ACC must be set for acceptance tests")
 	}
 
-	return fmt.Sprintf(
+	return testAccRegisterArtifact(fmt.Sprintf(
 		"tfcpanelddns%s%s.%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
 		testAccMainDomain(t),
-	)
+	))
 }
 
 func testAccRedirectSource(kind string) string {
-	return fmt.Sprintf(
+	return testAccRegisterArtifact(fmt.Sprintf(
 		"/tfcpanelredirect-%s-%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
-	)
+	))
 }
 
 func testAccRedirectDestination(kind string) string {
@@ -333,11 +377,11 @@ func testAccRedirectDestination(kind string) string {
 }
 
 func testAccMIMEType(kind string) string {
-	return fmt.Sprintf(
+	return testAccRegisterArtifact(fmt.Sprintf(
 		"application/x-tfcpanel-%s-%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
-	)
+	))
 }
 
 func testAccMIMEExtension(kind string) string {
@@ -349,11 +393,11 @@ func testAccMIMEExtension(kind string) string {
 }
 
 func testAccApacheHandlerExtension(kind string) string {
-	return fmt.Sprintf(
+	return testAccRegisterArtifact(fmt.Sprintf(
 		".tfcpanelhandler%s%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
-	)
+	))
 }
 
 func testAccApacheHandlerName(kind string) string {
@@ -365,51 +409,57 @@ func testAccApacheHandlerName(kind string) string {
 }
 
 func testAccDirectoryIndexDirectory(kind string) string {
-	return fmt.Sprintf(
+	return testAccRegisterArtifact(fmt.Sprintf(
 		"public_html/tfcpanel-index-%s-%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
-	)
+	))
 }
 
 func testAccFilesystemDirectoryPath(kind string) string {
-	return fmt.Sprintf(
+	return testAccRegisterArtifact(fmt.Sprintf(
 		"public_html/tfcpanel-fs-dir-%s-%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
-	)
+	))
 }
 
 func testAccFilesystemTextFilePath(kind string) string {
-	return fmt.Sprintf(
+	filePath := testAccRegisterArtifact(fmt.Sprintf(
 		"public_html/tfcpanel-fs-file-%s-%s.txt",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
+	))
+	digest := sha256.Sum256([]byte(filePath))
+	testAccRegisterArtifact(
+		fmt.Sprintf(".terraform-cpanel-text-file-%x", digest[:]),
 	)
+
+	return filePath
 }
 
 func testAccDirectoryPrivacyDirectory(kind string) string {
-	return fmt.Sprintf(
+	return testAccRegisterArtifact(fmt.Sprintf(
 		"public_html/tfcpanel-privacy-%s-%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
-	)
+	))
 }
 
 func testAccDirectoryPrivacyUsername(kind string) string {
-	return fmt.Sprintf(
+	return testAccRegisterArtifact(fmt.Sprintf(
 		"tfcpanelprivacy%s%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
-	)
+	))
 }
 
 func testAccGitRepositoryRoot(kind string) string {
-	return fmt.Sprintf(
+	return testAccRegisterGitRepositoryRoot(fmt.Sprintf(
 		"tfcpanel-git-%s-%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
-	)
+	))
 }
 
 func testAccEmailAddress(t *testing.T, kind string) string {
@@ -419,12 +469,12 @@ func testAccEmailAddress(t *testing.T, kind string) string {
 		t.Skip("TF_ACC must be set for acceptance tests")
 	}
 
-	return fmt.Sprintf(
+	return testAccRegisterArtifact(fmt.Sprintf(
 		"tfcpanel%s%s@%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
 		testAccMainDomain(t),
-	)
+	))
 }
 
 func testAccEmailForwarderAddress(t *testing.T, kind string) string {
@@ -434,12 +484,12 @@ func testAccEmailForwarderAddress(t *testing.T, kind string) string {
 		t.Skip("TF_ACC must be set for acceptance tests")
 	}
 
-	return fmt.Sprintf(
+	return testAccRegisterArtifact(fmt.Sprintf(
 		"tfcpanelfwd%s%s@%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
 		testAccMainDomain(t),
-	)
+	))
 }
 
 func testAccEmailForwarderDestination(kind string) string {
@@ -451,11 +501,11 @@ func testAccEmailForwarderDestination(kind string) string {
 }
 
 func testAccEmailDomainForwarderDestination(kind string) string {
-	return fmt.Sprintf(
+	return testAccRegisterArtifact(fmt.Sprintf(
 		"tfcpaneldomainfwd%s%s.example.net",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
-	)
+	))
 }
 
 func testAccEmailAutoResponderAddress(t *testing.T, kind string) string {
@@ -465,12 +515,12 @@ func testAccEmailAutoResponderAddress(t *testing.T, kind string) string {
 		t.Skip("TF_ACC must be set for acceptance tests")
 	}
 
-	return fmt.Sprintf(
+	return testAccRegisterArtifact(fmt.Sprintf(
 		"tfcpanelauto%s%s@%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
 		testAccMainDomain(t),
-	)
+	))
 }
 
 func testAccEmailFilterAddress(t *testing.T, kind string) string {
@@ -480,20 +530,20 @@ func testAccEmailFilterAddress(t *testing.T, kind string) string {
 		t.Skip("TF_ACC must be set for acceptance tests")
 	}
 
-	return fmt.Sprintf(
+	return testAccRegisterArtifact(fmt.Sprintf(
 		"tfcpanelfilter%s%s@%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
 		testAccMainDomain(t),
-	)
+	))
 }
 
 func testAccEmailFilterName(kind string) string {
-	return fmt.Sprintf(
+	return testAccRegisterArtifact(fmt.Sprintf(
 		"tfcpanelfilter%s%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
-	)
+	))
 }
 
 func testAccEmailMailingListAddress(t *testing.T, kind string) string {
@@ -503,12 +553,12 @@ func testAccEmailMailingListAddress(t *testing.T, kind string) string {
 		t.Skip("TF_ACC must be set for acceptance tests")
 	}
 
-	return fmt.Sprintf(
+	return testAccRegisterArtifact(fmt.Sprintf(
 		"tfcpanellist%s%s@%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
 		testAccMainDomain(t),
-	)
+	))
 }
 
 func testAccFTPUsername(t *testing.T, kind string) string {
@@ -518,20 +568,20 @@ func testAccFTPUsername(t *testing.T, kind string) string {
 		t.Skip("TF_ACC must be set for acceptance tests")
 	}
 
-	return fmt.Sprintf(
+	return testAccRegisterArtifact(fmt.Sprintf(
 		"tfcpanelftp%s%s@%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
 		testAccMainDomain(t),
-	)
+	))
 }
 
 func testAccFTPHomeDirectory(kind string) string {
-	return fmt.Sprintf(
+	return testAccRegisterArtifact(fmt.Sprintf(
 		"tfcpanel-ftp-%s-%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
-	)
+	))
 }
 
 func testAccSubdomain(t *testing.T, kind string) string {
@@ -541,20 +591,20 @@ func testAccSubdomain(t *testing.T, kind string) string {
 		t.Skip("TF_ACC must be set for acceptance tests")
 	}
 
-	return fmt.Sprintf(
+	return testAccRegisterArtifact(fmt.Sprintf(
 		"tfcpanelsub%s%s.%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
 		testAccMainDomain(t),
-	)
+	))
 }
 
 func testAccDomainDocumentRoot(kind string) string {
-	return fmt.Sprintf(
+	return testAccRegisterArtifact(fmt.Sprintf(
 		"public_html/tfcpanel-%s-%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum)),
-	)
+	))
 }
 
 func testAccAddonDomain(t *testing.T, kind string) (string, string) {
@@ -570,7 +620,15 @@ func testAccAddonDomain(t *testing.T, kind string) (string, string) {
 		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
 	)
 
-	return internalSubdomain + ".example.test", internalSubdomain
+	domain := testAccRegisterArtifact(
+		internalSubdomain + ".example.test",
+	)
+	testAccRegisterArtifact(internalSubdomain)
+	mainDomain := testAccMainDomain(t)
+	testAccRegisterArtifact(internalSubdomain + "_" + mainDomain)
+	testAccRegisterArtifact(internalSubdomain + "." + mainDomain)
+
+	return domain, internalSubdomain
 }
 
 func testAccDomainAlias(t *testing.T, kind string) string {
@@ -580,11 +638,11 @@ func testAccDomainAlias(t *testing.T, kind string) string {
 		t.Skip("TF_ACC must be set for acceptance tests")
 	}
 
-	return fmt.Sprintf(
+	return testAccRegisterArtifact(fmt.Sprintf(
 		"tfcpanelalias%s%s.example.test",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
-	)
+	))
 }
 
 func testAccDNSRecordName(t *testing.T, kind string) string {
@@ -594,11 +652,11 @@ func testAccDNSRecordName(t *testing.T, kind string) string {
 		t.Skip("TF_ACC must be set for acceptance tests")
 	}
 
-	return fmt.Sprintf(
+	return testAccRegisterArtifact(fmt.Sprintf(
 		"tfcpaneldns%s%s",
 		strings.ToLower(kind),
 		strings.ToLower(acctest.RandStringFromCharSet(6, acctest.CharSetAlphaNum)),
-	)
+	))
 }
 
 func testAccDNSRecordData(kind string) string {
@@ -640,6 +698,7 @@ func testAccCheckAPITokenExists(
 		if token.HasFullAccess != 1 {
 			return fmt.Errorf("API token %q does not have full access", name)
 		}
+		testAccRegisterAPITokenIdentity(token)
 
 		return nil
 	}
@@ -1498,7 +1557,7 @@ func testAccWriteFilesystemDirectoryMarker(
 ) {
 	t.Helper()
 
-	const token = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+	const token = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789" // gitleaks:allow
 
 	content, err := filesystemDirectoryMarkerContent(directoryPath, token)
 	if err != nil {
@@ -1848,7 +1907,7 @@ func testAccWriteFilesystemTextFileMarker(
 ) {
 	t.Helper()
 
-	const token = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+	const token = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789" // gitleaks:allow
 
 	marker, err := newFilesystemTextFileMarker(filePath, token, content)
 	if err != nil {
@@ -2726,11 +2785,11 @@ func testAccMainDomain(t *testing.T) string {
 }
 
 func testAccCronCommand(kind string) string {
-	return fmt.Sprintf(
+	return testAccRegisterArtifact(fmt.Sprintf(
 		"/bin/true # terraform-provider-cpanel-%s-%s",
 		kind,
 		acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum),
-	)
+	))
 }
 
 func testAccImportStateIDFromAttribute(resourceName, attribute string) resource.ImportStateIdFunc {

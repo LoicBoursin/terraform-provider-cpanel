@@ -61,12 +61,26 @@ The file format matches
 CPANEL_HOST=https://cpanel.example.com:2083
 CPANEL_USERNAME=account
 CPANEL_API_TOKEN=token
+CPANEL_API_TOKEN_NAME=terraform-provider-acceptance
+CPANEL_EXPECTED_TEST_HOST=https://cpanel.example.com:2083
+CPANEL_EXPECTED_TEST_USERNAME=account
+CPANEL_EXPECTED_VERSION='134.0 (build 45)'
+CPANEL_ACCEPT_DESTRUCTIVE=1
 CPANEL_TEST_SSL_KEY_ID=
 ```
 
 Set the file permissions to `0600`. Never commit populated credentials.
 `CPANEL_TEST_SSL_KEY_ID` is optional and identifies an existing RSA key used
 only through its public metadata by CSR tests.
+
+The destructive scripts refuse to run unless `CPANEL_ACCEPT_DESTRUCTIVE=1`
+and the configured host and username exactly match
+`CPANEL_EXPECTED_TEST_HOST` and `CPANEL_EXPECTED_TEST_USERNAME`.
+They also require the exact `CPANEL_EXPECTED_VERSION` value returned by the
+cPanel StatsBar API, so a server upgrade cannot silently run a destructive
+suite against an unvalidated release.
+`CPANEL_API_TOKEN_NAME` identifies the provider authentication token so
+imported API token resources cannot revoke it.
 
 Acceptance cleanup also requires the known clean values of singleton account
 settings. They are loaded from `CPANEL_BASELINE_FILE`, or from
@@ -75,6 +89,9 @@ The format is documented in
 [`.env.acceptance-baseline.example`](../.env.acceptance-baseline.example).
 Keep this file at `0600` and populate it from the dedicated account's clean
 configuration, not from values discovered during a test run.
+The complete suite requires `CPANEL_ALLOW_GPG_KEYPAIR_DELETE=1` and an explicit
+zero secret-key baseline because its GPG resource tests clean up generated key
+pairs.
 
 Run non-destructive account and capability checks with:
 

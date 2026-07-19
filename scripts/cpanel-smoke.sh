@@ -2,17 +2,41 @@
 
 set -euo pipefail
 
+script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 env_file="${CPANEL_ENV_FILE:-${HOME}/.config/terraform-provider-cpanel/acceptance.env}"
 baseline_file="${CPANEL_BASELINE_FILE:-${env_file%.env}-baseline.env}"
 
-for file in "${env_file}" "${baseline_file}"; do
-  if [[ -f "${file}" ]]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "${file}"
-    set +a
-  fi
-done
+source "${script_directory}/cpanel-common.sh"
+
+if [[ -f "${env_file}" ]]; then
+  cpanel_load_environment_file \
+    "${env_file}" \
+    'Acceptance environment file' \
+    CPANEL_HOST \
+    CPANEL_USERNAME \
+    CPANEL_API_TOKEN \
+    CPANEL_API_TOKEN_NAME \
+    CPANEL_EXPECTED_TEST_HOST \
+    CPANEL_EXPECTED_TEST_USERNAME \
+    CPANEL_EXPECTED_VERSION \
+    CPANEL_ACCEPT_DESTRUCTIVE \
+    CPANEL_TEST_SSL_KEY_ID
+fi
+if [[ -f "${baseline_file}" ]]; then
+  cpanel_load_environment_file \
+    "${baseline_file}" \
+    'Acceptance baseline file' \
+    CPANEL_EXPECTED_LOCALE \
+    CPANEL_EXPECTED_LOG_ARCHIVE \
+    CPANEL_EXPECTED_LOG_PRUNE \
+    CPANEL_EXPECTED_LOG_RETENTION \
+    CPANEL_EXPECTED_NOTIFICATION_PREFERENCES \
+    CPANEL_EXPECTED_SPAM_PREFERENCES \
+    CPANEL_EXPECTED_GPG_PUBLIC_COUNT \
+    CPANEL_EXPECTED_GPG_SECRET_COUNT \
+    CPANEL_EXPECTED_SSH_PUBLIC_COUNT \
+    CPANEL_ALLOW_GPG_KEYPAIR_DELETE
+fi
 
 for variable in CPANEL_HOST CPANEL_USERNAME CPANEL_API_TOKEN; do
   if [[ -z "${!variable:-}" ]]; then
@@ -20,6 +44,8 @@ for variable in CPANEL_HOST CPANEL_USERNAME CPANEL_API_TOKEN; do
     exit 1
   fi
 done
+
+cpanel_validate_host "${CPANEL_HOST}"
 
 for command in curl jq; do
   if ! command -v "${command}" >/dev/null 2>&1; then
@@ -29,7 +55,6 @@ for command in curl jq; do
 done
 
 host="${CPANEL_HOST%/}"
-authorization="Authorization: cpanel ${CPANEL_USERNAME}:${CPANEL_API_TOKEN}"
 response_file="$(mktemp)"
 
 cleanup() {
@@ -45,13 +70,12 @@ request() {
   local http_code
 
   http_code="$(
-    curl \
+    cpanel_curl \
       --silent \
       --show-error \
       --max-time 90 \
       --output "${response_file}" \
       --write-out '%{http_code}' \
-      --header "${authorization}" \
       "${host}/${endpoint}"
   )"
 
@@ -75,6 +99,15 @@ request \
 cpanel_version="$(
   jq -r '.data[] | select(.name == "cpanelversion") | .value' "${response_file}"
 )"
+if [[
+  -n "${CPANEL_EXPECTED_VERSION:-}"
+  && "${cpanel_version}" != "${CPANEL_EXPECTED_VERSION}"
+ ]]; then
+  printf 'cPanel version is %s; expected %s\n' \
+    "${cpanel_version}" \
+    "${CPANEL_EXPECTED_VERSION}" >&2
+  exit 1
+fi
 
 request 'execute/Locale/get_attributes' 'cPanel locale check'
 account_locale="$(jq -r '.data.locale // empty' "${response_file}")"
@@ -940,13 +973,23 @@ if [[
   exit 1
 fi
 
+test_prefix="${CPANEL_USERNAME}_tf"
+
 request 'execute/Postgresql/list_databases' 'PostgreSQL database check'
 database_count="$(jq -r '.data | length' "${response_file}")"
+postgresql_test_database_count="$(
+  jq -r --arg prefix "${test_prefix}" \
+    '[.data[].database | select(startswith($prefix))] | length' \
+    "${response_file}"
+)"
 
 request 'execute/Postgresql/list_users' 'PostgreSQL user check'
 user_count="$(jq -r '.data | length' "${response_file}")"
-
-test_prefix="${CPANEL_USERNAME}_tf"
+postgresql_test_user_count="$(
+  jq -r --arg prefix "${test_prefix}" \
+    '[.data[].user | select(startswith($prefix))] | length' \
+    "${response_file}"
+)"
 
 request 'execute/Mysql/list_databases' 'MySQL database check'
 if ! jq -e \
@@ -1113,7 +1156,8 @@ mysql_test_remote_host_count="$(
   jq -r \
     '[.cpanelresult.data[].host
       | select(
-          . == "198.51.100.245"
+          . == "198.51.100.244"
+          or . == "198.51.100.245"
           or . == "198.51.100.246"
           or . == "198.51.100.247"
           or . == "198.51.100.248"
@@ -1788,6 +1832,7 @@ ip_test_block_count="$(
           or .ip == "198.51.100.240/31"
           or .ip == "198.51.100.242"
           or .ip == "203.0.113.248/30"
+          or (.ip | startswith("2001:db8:ffff:"))
           or (.ip | startswith("2001:0db8:ffff:"))
         )] | length' \
     "${response_file}"
@@ -1962,6 +2007,14 @@ git_repository_test_directory_count="$(
         )] | length' \
     "${response_file}"
 )"
+ftp_test_home_directory_count="$(
+  jq -r \
+    '[.data[]
+      | select(.type == "dir")
+      | .file
+      | select(startswith("tfcpanel-ftp-"))] | length' \
+    "${response_file}"
+)"
 home_has_trash="$(
   jq -r \
     '[.data[] | select(.type == "dir" and .file == ".trash")] | length' \
@@ -2013,12 +2066,19 @@ fi
 request \
   "json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USERNAME}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=Cron&cpanel_jsonapi_func=fetchcron" \
   'cron check'
-cron_count="$(jq -r '.cpanelresult.data | length' "${response_file}")"
 cron_command_count="$(
   jq -r '[.cpanelresult.data[] | select(.type == "command")] | length' "${response_file}"
 )"
 cron_variable_count="$(
   jq -r '[.cpanelresult.data[] | select(.type == "variable")] | length' "${response_file}"
+)"
+cron_test_count="$(
+  jq -r \
+    '[.cpanelresult.data[]
+      | select(.type == "command")
+      | select((.command // "") | contains("# terraform-provider-cpanel-"))]
+      | length' \
+    "${response_file}"
 )"
 
 if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
@@ -2036,8 +2096,8 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${gpg_public_test_key_count}" != "0"
     || "${gpg_secret_test_key_count}" != "0"
     || "${ssh_public_test_key_count}" != "0"
-    || "${database_count}" != "0"
-    || "${user_count}" != "0"
+    || "${postgresql_test_database_count}" != "0"
+    || "${postgresql_test_user_count}" != "0"
     || "${mysql_test_database_count}" != "0"
     || "${mysql_test_user_count}" != "0"
     || "${mysql_test_remote_host_count}" != "0"
@@ -2066,8 +2126,9 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
     || "${filesystem_text_file_marker_count}" != "0"
     || "${git_repository_test_directory_count}" != "0"
     || "${git_repository_test_trash_count}" != "0"
+    || "${ftp_test_home_directory_count}" != "0"
     || "${directory_privacy_test_directory_count}" != "0"
-    || "${cron_count}" != "0"
+    || "${cron_test_count}" != "0"
   ]]; then
     printf 'cPanel test-managed inventory is not empty\n' >&2
     printf '  test API tokens: %s\n' "${api_test_token_count}" >&2
@@ -2093,8 +2154,10 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
       "${gpg_secret_test_key_count}" >&2
     printf '  test SSH public keys: %s\n' \
       "${ssh_public_test_key_count}" >&2
-    printf '  PostgreSQL databases: %s\n' "${database_count}" >&2
-    printf '  PostgreSQL users: %s\n' "${user_count}" >&2
+    printf '  PostgreSQL test databases: %s\n' \
+      "${postgresql_test_database_count}" >&2
+    printf '  PostgreSQL test users: %s\n' \
+      "${postgresql_test_user_count}" >&2
     printf '  MySQL test databases: %s\n' "${mysql_test_database_count}" >&2
     printf '  MySQL test users: %s\n' "${mysql_test_user_count}" >&2
     printf '  test remote MySQL hosts: %s\n' \
@@ -2140,10 +2203,11 @@ if [[ "${CPANEL_REQUIRE_EMPTY:-0}" == "1" ]]; then
       "${git_repository_test_directory_count}" >&2
     printf '  test Git trash entries: %s\n' \
       "${git_repository_test_trash_count}" >&2
+    printf '  FTP test home directories: %s\n' \
+      "${ftp_test_home_directory_count}" >&2
     printf '  test Directory Privacy password directories: %s\n' \
       "${directory_privacy_test_directory_count}" >&2
-    printf '  cron commands: %s\n' "${cron_command_count}" >&2
-    printf '  cron variables: %s\n' "${cron_variable_count}" >&2
+    printf '  test cron commands: %s\n' "${cron_test_count}" >&2
     exit 1
   fi
 fi

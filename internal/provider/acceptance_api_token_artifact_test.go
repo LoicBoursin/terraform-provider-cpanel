@@ -11,7 +11,7 @@ import (
 	cpanelapitoken "terraform-provider-cpanel/internal/cpanel/apitoken"
 )
 
-func testAccRegisterAPITokenCandidate(name string, notBefore int64) {
+func testAccRegisterAPITokenCandidate(name string, notBefore, notAfter int64) {
 	if os.Getenv("TF_ACC") == "" {
 		return
 	}
@@ -21,11 +21,13 @@ func testAccRegisterAPITokenCandidate(name string, notBefore int64) {
 		Kind      string `json:"kind"`
 		Name      string `json:"name"`
 		NotBefore int64  `json:"not_before"`
+		NotAfter  int64  `json:"not_after"`
 	}{
 		Version:   1,
 		Kind:      "api_token_candidate",
 		Name:      name,
 		NotBefore: notBefore,
+		NotAfter:  notAfter,
 	})
 	if err != nil {
 		panic(fmt.Sprintf("encode API token candidate artifact: %v", err))
@@ -94,13 +96,13 @@ func TestTestAccRegisterAPITokenCandidate(t *testing.T) {
 	t.Setenv("CPANEL_TEST_ARTIFACT_MANIFEST", manifestPath)
 	t.Setenv("CPANEL_TEST_REMOTE_ARTIFACT_MANIFEST", "")
 
-	testAccRegisterAPITokenCandidate("tfcpaneltokencandidate", 42)
+	testAccRegisterAPITokenCandidate("tfcpaneltokencandidate", 42, 84)
 
 	content, err := os.ReadFile(manifestPath)
 	if err != nil {
 		t.Fatalf("read API token candidate manifest: %v", err)
 	}
-	const want = `{"version":1,"kind":"api_token_candidate","name":"tfcpaneltokencandidate","not_before":42}` + "\n"
+	const want = `{"version":1,"kind":"api_token_candidate","name":"tfcpaneltokencandidate","not_before":42,"not_after":84}` + "\n"
 	if got := string(content); got != want {
 		t.Fatalf("API token candidate manifest = %q; want %q", got, want)
 	}
