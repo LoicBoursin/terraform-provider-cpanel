@@ -3,18 +3,41 @@
 ## Requirements
 
 Use the Go and Terraform versions listed in
-[`compatibility.md`](compatibility.md). The validation scripts resolve their
-tools from `PATH`.
+[`compatibility.md`](compatibility.md).
 
 The CI and release configuration pins:
 
 - actionlint `1.7.12`;
+- Gitleaks `8.30.1`;
 - golangci-lint `2.12.2`;
 - govulncheck `1.6.0`;
 - GoReleaser `2.17.0`;
-- Syft `1.42.3`.
+- ShellCheck `0.11.0`;
+- Syft `1.48.0`.
 
 The repository uses the golangci-lint version 2 configuration schema.
+Install the exact validation tools into the Git-local, untracked
+`.git/tools` directory with:
+
+```shell
+make tools
+```
+
+The Makefile invokes those pinned binaries directly and refuses complete
+validation when they are missing.
+
+Install either tested Terraform version into the Git-local, untracked
+`.git/tools` directory with:
+
+```shell
+./scripts/install-terraform.sh 1.14.9
+./scripts/install-terraform.sh 1.15.8
+```
+
+The installer accepts only the versions declared in
+[`scripts/tool-versions.sh`](../scripts/tool-versions.sh), verifies the pinned
+archive checksum for the current platform, and prints the directory to prepend
+to `PATH`.
 
 ## Local validation
 
@@ -24,9 +47,10 @@ Run the complete repository validation with:
 make verify
 ```
 
-This verifies Go modules, runs race-enabled tests, vet, lint, vulnerability
-scanning, workflow and shell validation, documentation generation, generated
-file checks, and GoReleaser configuration validation.
+This verifies that Go module files are tidy and their downloads match recorded
+checksums, then runs race-enabled tests, vet, lint, vulnerability scanning,
+workflow and shell validation, documentation generation, generated file
+checks, and GoReleaser configuration validation.
 
 Generate Registry documentation separately with:
 
@@ -40,7 +64,24 @@ Build release artifacts without publishing them with:
 make release-snapshot
 ```
 
-Syft must be available on `PATH` for release snapshots.
+The pinned Syft binary installed by `make tools` is used for release snapshots.
+The target also materializes the standalone Terraform Registry manifest and
+verifies all archive, SBOM, manifest, and checksum artifacts before returning.
+
+Verify that two clean builds produce identical provider archives and Terraform
+Registry manifests with:
+
+```shell
+make release-reproducibility
+```
+
+Syft SBOMs and GoReleaser metadata contain generation timestamps and are
+validated for structure and checksums rather than byte-for-byte
+reproducibility.
+
+The release workflow also downloads every published asset, verifies the exact
+archive, SBOM, manifest, checksum, and signature inventory, and validates the
+detached GPG signature before completing.
 
 ## cPanel acceptance environment
 
@@ -82,6 +123,19 @@ suite against an unvalidated release.
 `CPANEL_API_TOKEN_NAME` identifies the provider authentication token so
 imported API token resources cannot revoke it.
 
+Initialize the dedicated account once, and again whenever the host, username,
+or active API token changes:
+
+```shell
+CPANEL_INITIALIZE_TEST_ACCOUNT=1 \
+  ./scripts/cpanel-initialize-test-account.sh
+```
+
+This writes a private marker to the account and immediately verifies that the
+configured active token name exists exactly once. Every destructive entry
+point requires the marker to match the configured host, username, and active
+token.
+
 Acceptance cleanup also requires the known clean values of singleton account
 settings. They are loaded from `CPANEL_BASELINE_FILE`, or from
 `terraform-provider-cpanel-baseline.env` next to the default credentials file.
@@ -112,12 +166,24 @@ make clean-acceptance
 ```
 
 The acceptance entry point restores the persisted singleton baseline before
-the suite. An `EXIT` finalizer restores it again, removes only artifacts using
-the provider's reserved test naming conventions, and requires the final
-test-artifact inventory to be empty.
+the suite. Each generated remote identity is synchronously recorded in the
+private artifact manifest next to the credentials file before Terraform can
+create it. An `EXIT` finalizer restores the baseline again, removes only
+exactly manifested identities, and requires the final test-artifact inventory
+to be empty. Filesystem ownership markers are verified as a secondary
+consistency check; they never authorize deletion of an unregistered path. The
+manifest is kept when a command or cleanup fails so the next run can safely
+recover the interrupted suite, and is deleted only after a successful
+empty-inventory check.
 
 Tests preserve unrelated account objects. Cleanup refuses ambiguous or unsafe
-deletions and reports them for manual review.
+deletions, never removes FTP home directories by name alone, and reports
+unattributed paths for manual review.
 
-Run the acceptance suite once with each supported Terraform minor version on
-`PATH` before a release.
+Run the acceptance suite once with each supported Terraform patch version
+declared in `scripts/tool-versions.sh` before a release. For example:
+
+```shell
+PATH="$PWD/.git/tools/terraform-1.14.9:$PATH" make test-acceptance
+PATH="$PWD/.git/tools/terraform-1.15.8:$PATH" make test-acceptance
+```

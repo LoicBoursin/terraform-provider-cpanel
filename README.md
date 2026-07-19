@@ -145,8 +145,8 @@ Build and run the local test suite:
 
 ```shell
 go install
-make test
-make lint
+make tools
+make verify
 ```
 
 Generate Registry documentation:

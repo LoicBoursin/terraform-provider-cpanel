@@ -40,7 +40,7 @@ operations are outside its scope.
 
 ## Tested environment
 
-On July 17, 2026, the complete acceptance suite passed on the o2switch test
+On July 19, 2026, the complete acceptance suite passed on the o2switch test
 account running cPanel `134.0` build `45` with Terraform `1.14.9` and `1.15.8`.
 
 The test matrix covered:

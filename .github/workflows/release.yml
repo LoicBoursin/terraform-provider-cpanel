@@ -6,45 +6,60 @@ on:
       - "v*"
 
 permissions:
-  contents: write
-
-env:
-  ACTIONLINT_VERSION: v1.7.12
-  GOVULNCHECK_VERSION: v1.6.0
-  GOTOOLCHAIN: go1.26.5
-  TERRAFORM_CURRENT_VERSION: 1.15.8
-  SYFT_VERSION: v1.42.3
+  contents: read
 
 jobs:
+  versions:
+    name: Load supported versions
+    runs-on: ubuntu-latest
+    outputs:
+      terraform: ${{ steps.versions.outputs.terraform }}
+      terraform_current: ${{ steps.versions.outputs.terraform_current }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: versions
+        run: |
+          source scripts/tool-versions.sh
+          {
+            echo "terraform=${terraform_test_versions_json}"
+            echo "terraform_current=${terraform_current_version}"
+          } >> "${GITHUB_OUTPUT}"
+
   quality:
     name: Validate release source
+    needs: versions
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Validate release tag
+        run: ./scripts/validate-release-tag.sh "${GITHUB_REF_NAME}"
+      - name: Require a tag reachable from main
+        run: |
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "${GITHUB_SHA}" origin/main
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
-          terraform_version: ${{ env.TERRAFORM_CURRENT_VERSION }}
+          terraform_version: ${{ needs.versions.outputs.terraform_current }}
           terraform_wrapper: false
       - run: go mod download
-      - run: go mod verify
-      - run: go build -v .
-      - run: go test -race ./...
-      - run: go vet ./...
-      - run: go run github.com/rhysd/actionlint/cmd/actionlint@${{ env.ACTIONLINT_VERSION }}
-      - run: go run golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }} ./...
-      - run: go generate ./...
-      - name: Check generated files
-        run: git diff --compact-summary --exit-code
+      - run: make tools
+      - run: make verify
+      - run: make release-reproducibility
 
   acceptance:
     name: Acceptance tests (Terraform ${{ matrix.terraform }})
-    needs: quality
+    needs:
+      - quality
+      - versions
     runs-on: ubuntu-latest
+    environment: cpanel-acceptance
     timeout-minutes: 120
     concurrency:
       group: cpanel-acceptance
@@ -53,12 +68,10 @@ jobs:
       fail-fast: false
       max-parallel: 1
       matrix:
-        terraform:
-          - 1.14.9
-          - 1.15.8
+        terraform: ${{ fromJSON(needs.versions.outputs.terraform) }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
@@ -92,13 +105,24 @@ jobs:
     needs:
       - quality
       - acceptance
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
+    environment: release
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+      - name: Load pinned tool versions
+        id: tool_versions
+        run: |
+          source scripts/tool-versions.sh
+          {
+            echo "goreleaser=v${goreleaser_version}"
+            echo "syft=v${syft_version}"
+          } >> "${GITHUB_OUTPUT}"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
@@ -106,7 +130,7 @@ jobs:
         id: syft
         uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
-          syft-version: ${{ env.SYFT_VERSION }}
+          syft-version: ${{ steps.tool_versions.outputs.syft }}
       - name: Add Syft to PATH
         run: |
           mkdir -p "${RUNNER_TEMP}/bin"
@@ -122,8 +146,12 @@ jobs:
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
-          version: v2.17.0
+          version: ${{ steps.tool_versions.outputs.goreleaser }}
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
+      - name: Verify published release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/verify-published-release.sh "${GITHUB_REF_NAME}"

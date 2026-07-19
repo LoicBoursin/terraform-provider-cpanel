@@ -12,48 +12,59 @@ on:
 permissions:
   contents: read
 
-env:
-  ACTIONLINT_VERSION: v1.7.12
-  GOLANGCI_LINT_VERSION: v2.12.2
-  GOVULNCHECK_VERSION: v1.6.0
-  GOTOOLCHAIN: go1.26.5
-  TERRAFORM_CURRENT_VERSION: 1.15.8
-
 jobs:
+  versions:
+    name: Load supported versions
+    runs-on: ubuntu-latest
+    outputs:
+      terraform: ${{ steps.versions.outputs.terraform }}
+      terraform_current: ${{ steps.versions.outputs.terraform_current }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: versions
+        run: |
+          source scripts/tool-versions.sh
+          {
+            echo "terraform=${terraform_test_versions_json}"
+            echo "terraform_current=${terraform_current_version}"
+          } >> "${GITHUB_OUTPUT}"
+
   quality:
     name: Build, test, and scan
+    needs: versions
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          go-version-file: go.mod
-          cache: true
-      - run: go mod download
-      - run: go mod verify
-      - run: go build -v .
-      - run: go test -race ./...
-      - run: go vet ./...
-      - run: go run github.com/rhysd/actionlint/cmd/actionlint@${{ env.ACTIONLINT_VERSION }}
-      - uses: golangci/golangci-lint-action@d583c34f0599d37dbac4a198b9c83201be380893 # v9.3.0
-        with:
-          version: ${{ env.GOLANGCI_LINT_VERSION }}
-      - run: go run golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }} ./...
-
-  generate:
-    name: Generated files
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
-          terraform_version: ${{ env.TERRAFORM_CURRENT_VERSION }}
+          terraform_version: ${{ needs.versions.outputs.terraform_current }}
+          terraform_wrapper: false
+      - run: go mod download
+      - run: make tools
+      - run: make verify
+      - run: make release-reproducibility
+
+  generate:
+    name: Generated files
+    needs: versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ needs.versions.outputs.terraform_current }}
           terraform_wrapper: false
       - run: go generate ./...
       - name: Check generated files
@@ -62,7 +73,12 @@ jobs:
   acceptance:
     name: Acceptance tests (Terraform ${{ matrix.terraform }})
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    needs:
+      - quality
+      - generate
+      - versions
     runs-on: ubuntu-latest
+    environment: cpanel-acceptance
     timeout-minutes: 120
     concurrency:
       group: cpanel-acceptance
@@ -71,12 +87,15 @@ jobs:
       fail-fast: false
       max-parallel: 1
       matrix:
-        terraform:
-          - 1.14.9
-          - 1.15.8
+        terraform: ${{ fromJSON(needs.versions.outputs.terraform) }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Require main for manual acceptance
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        run: |
+          echo "Manual acceptance tests must run from main." >&2
+          exit 1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true

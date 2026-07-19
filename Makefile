@@ -1,3 +1,7 @@
+.DEFAULT_GOAL := test
+
+TOOLS_DIR ?= $(CURDIR)/.git/tools
+
 .PHONY: test
 test:
 	CGO_ENABLED=0 go test ./... $(TESTARGS)
@@ -24,27 +28,55 @@ test-acceptance:
 generate-documentation:
 	go generate ./...
 
+.PHONY: tools
+tools:
+	TOOLS_DIR="$(TOOLS_DIR)" ./scripts/install-tools.sh
+
+.PHONY: check-tools
+check-tools:
+	@TOOLS_DIR="$(TOOLS_DIR)" ./scripts/check-tools.sh
+
+.PHONY: check-release-tools
+check-release-tools:
+	@TOOLS_DIR="$(TOOLS_DIR)" ./scripts/check-tools.sh --release
+
 .PHONY: lint
-lint:
-	golangci-lint run ./...
+lint: check-tools
+	$(TOOLS_DIR)/golangci-lint run ./...
 
 .PHONY: verify
-verify:
+verify: check-tools
+	go mod tidy -diff
 	go mod verify
+	CGO_ENABLED=0 go build ./...
 	CGO_ENABLED=0 go test -race ./...
 	go vet ./...
-	golangci-lint run ./...
-	govulncheck ./...
-	actionlint .github/workflows/*.yml
+	$(TOOLS_DIR)/golangci-lint run ./...
+	$(TOOLS_DIR)/govulncheck ./...
+	$(TOOLS_DIR)/actionlint .github/workflows/*.yml
 	bash -n scripts/*.sh
+	$(TOOLS_DIR)/shellcheck -x -P scripts scripts/*.sh
+	./scripts/test-cpanel-common.sh
 	./scripts/test-cpanel-clean-api-tokens.sh
+	./scripts/test-cpanel-verify-test-account.sh
+	./scripts/test-validate-release-tag.sh
+	./scripts/test-materialize-release-manifest.sh
+	./scripts/test-verify-published-release.sh
+	$(TOOLS_DIR)/gitleaks dir --no-banner --redact .
+	$(TOOLS_DIR)/gitleaks git --no-banner --redact .
 	go generate ./...
 	git diff --compact-summary --exit-code
-	goreleaser check
+	$(TOOLS_DIR)/goreleaser check
 
 .PHONY: release-snapshot
-release-snapshot:
-	goreleaser release --snapshot --clean --skip=sign
+release-snapshot: check-release-tools
+	PATH="$(TOOLS_DIR):$$PATH" $(TOOLS_DIR)/goreleaser release --snapshot --clean --skip=sign
+	./scripts/materialize-release-manifest.sh
+	./scripts/verify-release-snapshot.sh
+
+.PHONY: release-reproducibility
+release-reproducibility: check-release-tools
+	TOOLS_DIR="$(TOOLS_DIR)" ./scripts/verify-release-reproducibility.sh
 
 .PHONY: plan
 plan:

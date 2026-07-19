@@ -1,0 +1,10 @@
+# Historical test fixtures and generated provider examples.
+84e84d83d61e662be22ca98452c79deae963276b:docs/index.md:generic-api-key:19
+84e84d83d61e662be22ca98452c79deae963276b:examples/provider/provider.tf:generic-api-key:4
+84e84d83d61e662be22ca98452c79deae963276b:examples/data-sources/postgresql_user/data-source.tf:hashicorp-tf-password:3
+84e84d83d61e662be22ca98452c79deae963276b:examples/resources/postgresql_user/resource.tf:hashicorp-tf-password:3
+84e84d83d61e662be22ca98452c79deae963276b:internal/provider/postgresql_database_resource_test.go:generic-api-key:50
+84e84d83d61e662be22ca98452c79deae963276b:internal/provider/postgresql_user_resource_test.go:generic-api-key:10
+84e84d83d61e662be22ca98452c79deae963276b:internal/provider/postgresql_user_resource_test.go:generic-api-key:11
+134a0ee9d83b06e369e4b4b71d09988c93e63be7:internal/provider/provider_test.go:generic-api-key:1423
+5e1897a34d12c6130a8bdd7257633ea877b88c09:internal/provider/provider_test.go:generic-api-key:1781
