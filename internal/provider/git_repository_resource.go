@@ -19,6 +19,7 @@ var (
 	_ resource.Resource                = &gitRepositoryResource{}
 	_ resource.ResourceWithConfigure   = &gitRepositoryResource{}
 	_ resource.ResourceWithImportState = &gitRepositoryResource{}
+	_ resource.ResourceWithModifyPlan  = &gitRepositoryResource{}
 )
 
 func NewGitRepositoryResource() resource.Resource {
@@ -65,8 +66,8 @@ func (r *gitRepositoryResource) Schema(
 				Optional:            true,
 				Computed:            true,
 				Sensitive:           true,
-				Description:         "The HTTPS or SSH URL cloned when cPanel creates the repository.",
-				MarkdownDescription: "The HTTPS or SSH URL cloned when cPanel creates the repository. Changing it replaces the repository.",
+				Description:         "The HTTPS or SSH URL cloned when cPanel creates the repository. Changing it at the same repository root requires delete_contents_on_destroy to already be enabled in state.",
+				MarkdownDescription: "The HTTPS or SSH URL cloned when cPanel creates the repository. Changing it at the same `repository_root` requires `delete_contents_on_destroy` to already be enabled in state.",
 				Validators:          gitSourceRepositoryURLValidators(),
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
@@ -125,6 +126,69 @@ func (r *gitRepositoryResource) Schema(
 			},
 		},
 	}
+}
+
+func (r *gitRepositoryResource) ModifyPlan(
+	ctx context.Context,
+	req resource.ModifyPlanRequest,
+	resp *resource.ModifyPlanResponse,
+) {
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+
+	var state GitRepositoryResourceModel
+	var plan GitRepositoryResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if !gitSourceReplacementRequiresDeletion(state, plan) {
+		return
+	}
+	if state.DeleteContentsOnDestroy.IsUnknown() ||
+		state.DeleteContentsOnDestroy.IsNull() ||
+		!state.DeleteContentsOnDestroy.ValueBool() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("source_repository_url"),
+			"Git source replacement requires prior destructive deletion",
+			"cPanel cannot change a registered repository source URL in place. Set delete_contents_on_destroy = true and apply that change first, then change source_repository_url in a second apply so Terraform can remove the old repository directory before cloning the replacement.",
+		)
+	}
+}
+
+func gitSourceReplacementRequiresDeletion(
+	state GitRepositoryResourceModel,
+	plan GitRepositoryResourceModel,
+) bool {
+	return gitSourceRepositoryURLChanged(state, plan) &&
+		!gitRepositoryRootChanged(state, plan)
+}
+
+func gitSourceRepositoryURLChanged(
+	state GitRepositoryResourceModel,
+	plan GitRepositoryResourceModel,
+) bool {
+	if state.SourceRepositoryURL.IsUnknown() ||
+		plan.SourceRepositoryURL.IsUnknown() {
+		return false
+	}
+
+	return !state.SourceRepositoryURL.Equal(plan.SourceRepositoryURL)
+}
+
+func gitRepositoryRootChanged(
+	state GitRepositoryResourceModel,
+	plan GitRepositoryResourceModel,
+) bool {
+	if state.RepositoryRoot.IsUnknown() ||
+		plan.RepositoryRoot.IsUnknown() {
+		return false
+	}
+
+	return !state.RepositoryRoot.Equal(plan.RepositoryRoot)
 }
 
 func (r *gitRepositoryResource) Read(
