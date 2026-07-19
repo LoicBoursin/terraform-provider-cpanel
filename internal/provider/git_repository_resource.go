@@ -283,7 +283,10 @@ func (r *gitRepositoryResource) Create(
 	if _, err := r.client.Create(ctx, definition); err != nil {
 		resp.Diagnostics.AddError(
 			"Unable to create Git repository",
-			err.Error(),
+			gitRepositoryCreationError(
+				err,
+				definition.SourceRepositoryURL,
+			).Error(),
 		)
 		return
 	}
@@ -579,5 +582,19 @@ func gitRepositoryMutationErrorDetail(
 		"%v. Automatic rollback also failed: %v",
 		mutationErr,
 		rollbackErr,
+	)
+}
+
+func gitRepositoryCreationError(
+	err error,
+	sourceRepositoryURL string,
+) error {
+	if sourceRepositoryURL == "" {
+		return err
+	}
+
+	return sensitiveMutationError(
+		err,
+		"Git repository source clone",
 	)
 }

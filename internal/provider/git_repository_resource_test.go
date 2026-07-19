@@ -1,9 +1,11 @@
 package provider
 
 import (
+	"errors"
 	"fmt"
 	"path"
 	"regexp"
+	"strings"
 	"testing"
 
 	frameworkresource "github.com/hashicorp/terraform-plugin-framework/resource"
@@ -167,6 +169,31 @@ func TestGitSourceReplacementRequiresDeletion(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestGitRepositoryCreationErrorRedactsSensitiveSourceURL(t *testing.T) {
+	t.Parallel()
+
+	const secret = "private-repository-name"
+
+	remoteErr := errors.New("clone failed for " + secret)
+	got := gitRepositoryCreationError(
+		remoteErr,
+		"https://example.test/"+secret+".git",
+	)
+	if got == nil {
+		t.Fatal("gitRepositoryCreationError() = nil, want error")
+	}
+	if strings.Contains(got.Error(), secret) {
+		t.Fatalf("gitRepositoryCreationError() leaked %q", secret)
+	}
+
+	if got = gitRepositoryCreationError(remoteErr, ""); got != remoteErr {
+		t.Fatalf(
+			"gitRepositoryCreationError() without a source URL = %v, want original error",
+			got,
+		)
 	}
 }
 

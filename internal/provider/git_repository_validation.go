@@ -67,7 +67,7 @@ func validateGitRepositoryDefinition(
 	}
 	parsedURL, err := url.Parse(definition.SourceRepositoryURL)
 	if err != nil {
-		return fmt.Errorf("parse Git source repository URL: %w", err)
+		return fmt.Errorf("git source repository URL is invalid")
 	}
 	if parsedURL.Scheme != "https" && parsedURL.Scheme != "ssh" {
 		return fmt.Errorf(

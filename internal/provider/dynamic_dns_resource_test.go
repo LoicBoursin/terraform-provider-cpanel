@@ -1,7 +1,9 @@
 package provider
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	frameworkresource "github.com/hashicorp/terraform-plugin-framework/resource"
@@ -35,6 +37,41 @@ func TestDynamicDNSResourceSchemaProtectsWebcallCredentials(t *testing.T) {
 		if !attribute.Sensitive || !attribute.Computed {
 			t.Fatalf("%s must be sensitive and computed", attributeName)
 		}
+	}
+}
+
+func TestDynamicDNSMutationErrorsRedactWebcallCredentials(t *testing.T) {
+	t.Parallel()
+
+	const secret = "dynamic-dns-secret-id"
+
+	mutationErr := dynamicDNSCredentialMutationError(
+		errors.New("request failed after sending "+secret),
+		"description update",
+	)
+	if mutationErr == nil {
+		t.Fatal("dynamicDNSCredentialMutationError() = nil, want error")
+	}
+	if strings.Contains(mutationErr.Error(), secret) {
+		t.Fatalf(
+			"dynamicDNSCredentialMutationError() leaked %q",
+			secret,
+		)
+	}
+
+	detail := dynamicDNSMutationErrorDetail(
+		errors.New("verification failed"),
+		errors.New("rollback failed after sending "+secret),
+	)
+	if strings.Contains(detail, secret) {
+		t.Fatalf("dynamicDNSMutationErrorDetail() leaked %q", secret)
+	}
+	if !strings.Contains(detail, "verification failed") ||
+		!strings.Contains(detail, "Dynamic DNS rollback") {
+		t.Fatalf(
+			"dynamicDNSMutationErrorDetail() = %q, want primary and redacted rollback errors",
+			detail,
+		)
 	}
 }
 

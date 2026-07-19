@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"strings"
 	"testing"
 
 	"terraform-provider-cpanel/internal/cpanel/versioncontrol"
@@ -94,5 +95,26 @@ func TestValidateGitRepositoryDefinition(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestValidateGitRepositoryDefinitionRedactsInvalidSourceURL(t *testing.T) {
+	t.Parallel()
+
+	const secret = "private-repository-name"
+
+	err := validateGitRepositoryDefinition(versioncontrol.Definition{
+		Name:                "Website",
+		RepositoryRoot:      "repositories/site",
+		SourceRepositoryURL: "https://example.test/" + secret + "%zz.git",
+	})
+	if err == nil {
+		t.Fatal("validateGitRepositoryDefinition() returned no error")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf(
+			"validateGitRepositoryDefinition() leaked %q",
+			secret,
+		)
 	}
 }
