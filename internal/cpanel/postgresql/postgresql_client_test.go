@@ -19,6 +19,12 @@ type postgreSQLRequestExpectation struct {
 	secrets    []string
 }
 
+type postgreSQLRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f postgreSQLRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
 func newPostgreSQLTestServer(
 	t *testing.T,
 	expectation postgreSQLRequestExpectation,

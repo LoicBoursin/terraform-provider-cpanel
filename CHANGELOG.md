@@ -163,6 +163,9 @@
   same acceptance finalizer without changing unrelated custom preferences.
 - Validate cron expressions and cPanel-prefixed PostgreSQL names before API
   mutation.
+- Make PostgreSQL user names replacement-only, keep passwords write-only and
+  versioned, preserve remote users by default, and verify lifecycle mutations
+  with follow-up reads.
 - Verify PostgreSQL privilege changes and require inspection and re-import
   after partial non-atomic failures instead of attempting automatic rollback.
 - Complete the full cPanel 134.0 build 45 acceptance matrix with

@@ -3,6 +3,7 @@ package postgresql
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"slices"
 	"strings"
@@ -136,6 +137,61 @@ func TestClientPostgreSQLUserMutationsUsePOST(t *testing.T) {
 				t.Errorf("data = %v, want [mutation-result]", response.Data)
 			}
 		})
+	}
+}
+
+func TestClientRenamePostgreSQLUserReturnsAmbiguousMutationWithoutRecovery(
+	t *testing.T,
+) {
+	t.Parallel()
+
+	const password = "rename-password-&=?"
+	var postRequests, getRequests int
+	client := newPostgreSQLTestClient(t, "https://cpanel.test")
+	client.HTTPClient.Transport = postgreSQLRoundTripFunc(func(
+		request *http.Request,
+	) (*http.Response, error) {
+		switch request.Method {
+		case http.MethodPost:
+			postRequests++
+			assertPostgreSQLRequest(t, request, postgreSQLRequestExpectation{
+				method: http.MethodPost,
+				path:   "/execute/Postgresql/" + OperationRenameUser,
+				parameters: postgreSQLValues(map[string]string{
+					"newname":  "account_editor",
+					"oldname":  "account_writer",
+					"password": password,
+				}),
+				secrets: []string{password},
+			})
+
+			return nil, io.EOF
+		case http.MethodGet:
+			getRequests++
+			t.Fatal("RenameUser() performed implicit recovery inventory")
+		default:
+			t.Fatalf("unexpected request method: %s", request.Method)
+		}
+
+		return nil, nil
+	})
+
+	response, err := client.RenameUser(context.Background(), UserRenameModel{
+		NewName:  "account_editor",
+		OldName:  "account_writer",
+		Password: password,
+	})
+	if response != nil {
+		t.Fatalf("RenameUser() response = %#v, want nil", response)
+	}
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("RenameUser() error = %v, want wrapping io.EOF", err)
+	}
+	if postRequests != 1 {
+		t.Fatalf("POST request count = %d, want 1", postRequests)
+	}
+	if getRequests != 0 {
+		t.Fatalf("GET request count = %d, want 0", getRequests)
 	}
 }
 

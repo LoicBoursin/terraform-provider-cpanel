@@ -494,6 +494,20 @@ func TestPostgreSQLDatabaseAPIToModelUsesSet(t *testing.T) {
 		t.Fatalf("users count = %d, want 2", len(users))
 	}
 
+	data.Data[0].Users = nil
+	model, diagnostics = PostgreSQLDatabaseAPIToModel(
+		ctx,
+		data,
+		"account1234_database",
+	)
+	if diagnostics.HasError() {
+		t.Fatalf("nil users returned diagnostics: %v", diagnostics)
+	}
+	if model.Users.IsNull() || model.Users.IsUnknown() ||
+		len(model.Users.Elements()) != 0 {
+		t.Fatalf("nil users produced %#v, want a known empty set", model.Users)
+	}
+
 	missing, diagnostics := PostgreSQLDatabaseAPIToModel(ctx, data, "account1234_missing")
 	if diagnostics.HasError() {
 		t.Fatalf("missing database returned diagnostics: %v", diagnostics)
@@ -766,6 +780,10 @@ func TestPostgreSQLDatabaseUsersAreASet(t *testing.T) {
 
 	if _, ok := response.Schema.Attributes["users"].(resourceschema.SetAttribute); !ok {
 		t.Fatalf("users has type %T, want schema.SetAttribute", response.Schema.Attributes["users"])
+	}
+	deleteOnDestroy, ok := response.Schema.Attributes["delete_on_destroy"].(resourceschema.BoolAttribute)
+	if !ok || deleteOnDestroy.Default == nil {
+		t.Fatal("delete_on_destroy must be a defaulted boolean")
 	}
 }
 
