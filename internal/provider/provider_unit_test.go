@@ -594,6 +594,17 @@ func TestProviderSchemaProtectsAPIToken(t *testing.T) {
 	if !apiToken.Sensitive {
 		t.Fatal("api_token is not marked sensitive")
 	}
+
+	apiTokenName, ok := response.Schema.Attributes["api_token_name"].(providerschema.StringAttribute)
+	if !ok {
+		t.Fatalf(
+			"api_token_name has type %T, want schema.StringAttribute",
+			response.Schema.Attributes["api_token_name"],
+		)
+	}
+	if !apiTokenName.Optional || apiTokenName.Sensitive {
+		t.Fatal("api_token_name must be optional and non-sensitive")
+	}
 }
 
 func TestPostgreSQLUserDataSourceSchemaDoesNotExposePassword(t *testing.T) {

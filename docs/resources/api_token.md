@@ -23,7 +23,7 @@ resource "cpanel_api_token" "automation" {
 
 ### Required
 
-- `name` (String) The API token name. Renaming updates the existing token without rotating its secret.
+- `name` (String) The API token name. Renaming updates a non-active token without rotating its secret.
 
 ### Optional
 

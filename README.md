@@ -119,6 +119,7 @@ Keep credentials outside Terraform configuration:
 export CPANEL_HOST="https://cpanel.example.com:2083"
 export CPANEL_USERNAME="account"
 export CPANEL_API_TOKEN="token"
+export CPANEL_API_TOKEN_NAME="terraform-provider"
 ```
 
 Then configure the provider without embedding secrets:
@@ -127,9 +128,12 @@ Then configure the provider without embedding secrets:
 provider "cpanel" {}
 ```
 
-The same values can be supplied through the `host`, `username`, and
-`api_token` provider attributes when required. `api_token` is sensitive, but
-Terraform configuration and state must still be protected.
+The same values can be supplied through the `host`, `username`, `api_token`,
+and `api_token_name` provider attributes when required. `api_token` is
+sensitive, but Terraform configuration and state must still be protected.
+`api_token_name` lets the provider refuse to rename or revoke its own
+authentication token and is required before renaming or destroying an imported
+`cpanel_api_token` resource.
 
 The provider serializes cPanel requests internally. Standard `terraform plan`
 and `terraform apply` commands are supported; no manual `-parallelism=1` flag

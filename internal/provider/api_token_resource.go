@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -28,7 +29,8 @@ func NewAPITokenResource() resource.Resource {
 }
 
 type apiTokenResource struct {
-	client *apitoken.Client
+	client          *apitoken.Client
+	activeTokenName string
 }
 
 func (r *apiTokenResource) Metadata(
@@ -50,8 +52,8 @@ func (r *apiTokenResource) Schema(
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Required:            true,
-				Description:         "The API token name. Renaming updates the existing token without rotating its secret.",
-				MarkdownDescription: "The API token name. Renaming updates the existing token without rotating its secret.",
+				Description:         "The API token name. Renaming updates a non-active token without rotating its secret.",
+				MarkdownDescription: "The API token name. Renaming updates a non-active token without rotating its secret.",
 				Validators:          apiTokenNameValidators(),
 			},
 			"expires_at": schema.Int64Attribute{
@@ -164,6 +166,49 @@ func (r *apiTokenResource) Create(
 
 	created, err := r.client.Create(ctx, name, expiresAt)
 	if err != nil {
+		if created != nil && created.CreateTime != 0 {
+			rollbackErr := r.rollbackCreatedToken(
+				ctx,
+				name,
+				created.CreateTime,
+			)
+			resp.Diagnostics.AddError(
+				"Unable to create API token",
+				apiTokenMutationErrorDetail(
+					err,
+					rollbackErr,
+				),
+			)
+			return
+		}
+		if !cPanelMutationErrorIsDeterministic(err) {
+			token, recoveryErr := r.client.Get(ctx, name)
+			switch {
+			case recoveryErr != nil:
+				resp.Diagnostics.AddError(
+					"Unable to reconcile API token creation",
+					fmt.Sprintf(
+						"%v. Terraform could not determine whether cPanel created the token because the follow-up inventory read also failed: %v",
+						err,
+						recoveryErr,
+					),
+				)
+			case token != nil:
+				resp.Diagnostics.AddError(
+					"API token secret is unavailable",
+					fmt.Sprintf(
+						"cPanel may have created API token %q, but the creation response did not return a usable secret. Terraform refuses to adopt a token whose secret cannot be recovered. Revoke the token in cPanel before retrying.",
+						name,
+					),
+				)
+			default:
+				resp.Diagnostics.AddError(
+					"Unable to create API token",
+					"Could not create API token: "+err.Error(),
+				)
+			}
+			return
+		}
 		resp.Diagnostics.AddError(
 			"Unable to create API token",
 			"Could not create API token: "+err.Error(),
@@ -173,7 +218,11 @@ func (r *apiTokenResource) Create(
 
 	token, err := r.verifyToken(ctx, name, expiresAt, true)
 	if err != nil {
-		rollbackErr := r.client.Revoke(ctx, name)
+		rollbackErr := r.rollbackCreatedToken(
+			ctx,
+			name,
+			created.CreateTime,
+		)
 		resp.Diagnostics.AddError(
 			"Unable to verify API token",
 			apiTokenMutationErrorDetail(err, rollbackErr),
@@ -185,7 +234,11 @@ func (r *apiTokenResource) Create(
 	metadataDiagnostics := applyAPITokenToResourceModel(ctx, &plan, *token)
 	resp.Diagnostics.Append(metadataDiagnostics...)
 	if resp.Diagnostics.HasError() {
-		rollbackErr := r.client.Revoke(ctx, name)
+		rollbackErr := r.rollbackCreatedToken(
+			ctx,
+			name,
+			created.CreateTime,
+		)
 		resp.Diagnostics.AddError(
 			"Unable to decode API token",
 			apiTokenMutationErrorDetail(
@@ -220,6 +273,17 @@ func (r *apiTokenResource) Update(
 		)
 		return
 	}
+	if err := validateAPITokenRename(
+		state,
+		r.client.Auth.APIToken,
+		r.activeTokenName,
+	); err != nil {
+		resp.Diagnostics.AddError(
+			"Refusing to rename active provider token",
+			err.Error(),
+		)
+		return
+	}
 
 	current, err := r.client.Get(ctx, oldName)
 	if err != nil {
@@ -230,6 +294,24 @@ func (r *apiTokenResource) Update(
 		resp.Diagnostics.AddError(
 			"API token no longer exists",
 			"Refresh the Terraform state before updating the API token.",
+		)
+		return
+	}
+	matchesState, err := apiTokenMatchesState(ctx, *current, state)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Unable to verify API token identity",
+			err.Error(),
+		)
+		return
+	}
+	if !matchesState {
+		resp.Diagnostics.AddError(
+			"API token changed during update",
+			fmt.Sprintf(
+				"API token %q no longer matches the full observable identity stored in Terraform state. Refresh and review the change before retrying.",
+				oldName,
+			),
 		)
 		return
 	}
@@ -248,11 +330,38 @@ func (r *apiTokenResource) Update(
 	}
 
 	if err := r.client.Rename(ctx, oldName, newName); err != nil {
-		resp.Diagnostics.AddError(
-			"Unable to rename API token",
-			"Could not rename API token: "+err.Error(),
+		if cPanelMutationErrorIsDeterministic(err) {
+			resp.Diagnostics.AddError(
+				"Unable to rename API token",
+				"Could not rename API token: "+err.Error(),
+			)
+			return
+		}
+
+		applied, recoveryErr := r.reconcileTokenRename(
+			ctx,
+			oldName,
+			newName,
+			*current,
 		)
-		return
+		if recoveryErr != nil {
+			resp.Diagnostics.AddError(
+				"Unable to reconcile API token rename",
+				fmt.Sprintf(
+					"%v. Read-only recovery could not determine whether the rename was applied: %v",
+					err,
+					recoveryErr,
+				),
+			)
+			return
+		}
+		if !applied {
+			resp.Diagnostics.AddError(
+				"Unable to rename API token",
+				"Could not rename API token: "+err.Error(),
+			)
+			return
+		}
 	}
 
 	token, err := r.verifyToken(
@@ -262,7 +371,12 @@ func (r *apiTokenResource) Update(
 		false,
 	)
 	if err != nil {
-		rollbackErr := r.client.Rename(ctx, newName, oldName)
+		rollbackErr := r.rollbackTokenRename(
+			ctx,
+			*current,
+			oldName,
+			newName,
+		)
 		resp.Diagnostics.AddError(
 			"Unable to verify API token rename",
 			apiTokenMutationErrorDetail(err, rollbackErr),
@@ -278,6 +392,109 @@ func (r *apiTokenResource) Update(
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
+func (r *apiTokenResource) rollbackCreatedToken(
+	ctx context.Context,
+	name string,
+	expectedCreateTime int64,
+) error {
+	token, err := r.client.Get(ctx, name)
+	if err != nil {
+		return fmt.Errorf("read API token before rollback: %w", err)
+	}
+	if token == nil {
+		return nil
+	}
+	if expectedCreateTime == 0 || token.CreateTime != expectedCreateTime {
+		return fmt.Errorf(
+			"refuse to revoke API token %q because its creation time no longer matches the token created by Terraform",
+			name,
+		)
+	}
+
+	return r.client.Revoke(ctx, name)
+}
+
+func (r *apiTokenResource) reconcileTokenRename(
+	ctx context.Context,
+	oldName string,
+	newName string,
+	original apitoken.Token,
+) (bool, error) {
+	oldToken, err := r.client.Get(ctx, oldName)
+	if err != nil {
+		return false, fmt.Errorf("read old API token: %w", err)
+	}
+	newToken, err := r.client.Get(ctx, newName)
+	if err != nil {
+		return false, fmt.Errorf("read new API token: %w", err)
+	}
+	switch {
+	case oldToken != nil && newToken == nil:
+		return false, nil
+	case oldToken != nil && newToken != nil:
+		return false, fmt.Errorf(
+			"both API token names exist after the rename request",
+		)
+	case oldToken == nil && newToken == nil:
+		return false, fmt.Errorf(
+			"neither API token name exists after the rename request",
+		)
+	}
+	if !apiTokensHaveSameIdentity(original, *newToken) {
+		return false, fmt.Errorf(
+			"API token %q does not match the token previously managed as %q",
+			newName,
+			oldName,
+		)
+	}
+
+	return true, nil
+}
+
+func (r *apiTokenResource) rollbackTokenRename(
+	ctx context.Context,
+	original apitoken.Token,
+	oldName string,
+	newName string,
+) error {
+	oldToken, err := r.client.Get(ctx, oldName)
+	if err != nil {
+		return fmt.Errorf("read original API token name before rollback: %w", err)
+	}
+	newToken, err := r.client.Get(ctx, newName)
+	if err != nil {
+		return fmt.Errorf("read renamed API token before rollback: %w", err)
+	}
+	if oldToken != nil && newToken == nil {
+		return nil
+	}
+	if oldToken != nil || newToken == nil ||
+		!apiTokensHaveSameIdentity(original, *newToken) {
+		return fmt.Errorf(
+			"refuse to restore API token name because the current token inventory no longer matches the attempted rename",
+		)
+	}
+
+	return r.client.Rename(ctx, newName, oldName)
+}
+
+func apiTokensHaveSameIdentity(left, right apitoken.Token) bool {
+	leftFeatures := append([]string(nil), left.Features...)
+	rightFeatures := append([]string(nil), right.Features...)
+	leftWhitelistIPs := append([]string(nil), left.WhitelistIPs...)
+	rightWhitelistIPs := append([]string(nil), right.WhitelistIPs...)
+	slices.Sort(leftFeatures)
+	slices.Sort(rightFeatures)
+	slices.Sort(leftWhitelistIPs)
+	slices.Sort(rightWhitelistIPs)
+
+	return left.CreateTime == right.CreateTime &&
+		left.ExpiresAt == right.ExpiresAt &&
+		left.HasFullAccess == right.HasFullAccess &&
+		slices.Equal(leftFeatures, rightFeatures) &&
+		slices.Equal(leftWhitelistIPs, rightWhitelistIPs)
+}
+
 func (r *apiTokenResource) Delete(
 	ctx context.Context,
 	req resource.DeleteRequest,
@@ -289,12 +506,14 @@ func (r *apiTokenResource) Delete(
 		return
 	}
 
-	if !state.Token.IsNull() &&
-		!state.Token.IsUnknown() &&
-		state.Token.ValueString() == r.client.Auth.APIToken {
+	if err := validateAPITokenDeletion(
+		state,
+		r.client.Auth.APIToken,
+		r.activeTokenName,
+	); err != nil {
 		resp.Diagnostics.AddError(
 			"Refusing to revoke active provider token",
-			"The API token being deleted is also configuring this provider. Configure the provider with a different token before destroying this resource.",
+			err.Error(),
 		)
 		return
 	}
@@ -308,26 +527,135 @@ func (r *apiTokenResource) Delete(
 	if existing == nil {
 		return
 	}
-
-	if err := r.client.Revoke(ctx, name); err != nil {
+	matchesState, err := apiTokenMatchesState(ctx, *existing, state)
+	if err != nil {
 		resp.Diagnostics.AddError(
-			"Unable to revoke API token",
-			"Could not revoke API token: "+err.Error(),
+			"Unable to verify API token identity",
+			err.Error(),
+		)
+		return
+	}
+	if !matchesState {
+		resp.Diagnostics.AddError(
+			"Refusing to revoke changed API token",
+			fmt.Sprintf(
+				"API token %q no longer matches the full identity stored in Terraform state, including its creation time. Refresh and review the replacement before retrying.",
+				name,
+			),
 		)
 		return
 	}
 
-	remaining, err := r.client.Get(ctx, name)
-	if err != nil {
-		resp.Diagnostics.AddError("Unable to verify API token revocation", err.Error())
-		return
-	}
-	if remaining != nil {
+	revokeErr := r.client.Revoke(ctx, name)
+	remaining, verifyErr := r.client.Get(ctx, name)
+	if verifyErr != nil {
 		resp.Diagnostics.AddError(
 			"Unable to verify API token revocation",
-			fmt.Sprintf("API token %q still exists after revocation.", name),
+			fmt.Sprintf(
+				"Revoke response: %v. Follow-up read failed: %v",
+				revokeErr,
+				verifyErr,
+			),
+		)
+		return
+	}
+	if remaining == nil {
+		return
+	}
+
+	remainingMatchesState, matchErr := apiTokenMatchesState(
+		ctx,
+		*remaining,
+		state,
+	)
+	if matchErr != nil {
+		resp.Diagnostics.AddError(
+			"Unable to verify API token revocation",
+			matchErr.Error(),
+		)
+		return
+	}
+	if !remainingMatchesState {
+		resp.Diagnostics.AddError(
+			"API token replacement preserved",
+			fmt.Sprintf(
+				"API token %q exists after the revocation attempt but no longer matches the token stored in Terraform state. Terraform will not revoke the replacement.",
+				name,
+			),
+		)
+		return
+	}
+	if revokeErr != nil {
+		resp.Diagnostics.AddError(
+			"Unable to revoke API token",
+			"Could not revoke API token: "+revokeErr.Error(),
+		)
+		return
+	}
+
+	resp.Diagnostics.AddError(
+		"Unable to verify API token revocation",
+		fmt.Sprintf(
+			"API token %q still exists after cPanel reported a successful revocation.",
+			name,
+		),
+	)
+}
+
+func apiTokenMatchesState(
+	ctx context.Context,
+	token apitoken.Token,
+	state APITokenResourceModel,
+) (bool, error) {
+	if state.Name.IsNull() || state.Name.IsUnknown() ||
+		state.ExpiresAt.IsNull() || state.ExpiresAt.IsUnknown() ||
+		state.CreatedAt.IsNull() || state.CreatedAt.IsUnknown() ||
+		state.HasFullAccess.IsNull() || state.HasFullAccess.IsUnknown() ||
+		state.Features.IsNull() || state.Features.IsUnknown() ||
+		state.WhitelistIPs.IsNull() || state.WhitelistIPs.IsUnknown() {
+		return false, fmt.Errorf(
+			"API token state does not contain a complete observable identity; refresh the state before mutating the token",
 		)
 	}
+
+	var features []string
+	diagnostics := state.Features.ElementsAs(ctx, &features, false)
+	if diagnostics.HasError() {
+		return false, fmt.Errorf(
+			"decode API token features from state: %v",
+			diagnostics,
+		)
+	}
+	var whitelistIPs []string
+	diagnostics = state.WhitelistIPs.ElementsAs(
+		ctx,
+		&whitelistIPs,
+		false,
+	)
+	if diagnostics.HasError() {
+		return false, fmt.Errorf(
+			"decode API token IP restrictions from state: %v",
+			diagnostics,
+		)
+	}
+
+	expectedAccess := 0
+	if state.HasFullAccess.ValueBool() {
+		expectedAccess = 1
+	}
+	slices.Sort(features)
+	slices.Sort(whitelistIPs)
+	tokenFeatures := append([]string(nil), token.Features...)
+	tokenWhitelistIPs := append([]string(nil), token.WhitelistIPs...)
+	slices.Sort(tokenFeatures)
+	slices.Sort(tokenWhitelistIPs)
+
+	return token.Name == state.Name.ValueString() &&
+		token.CreateTime == state.CreatedAt.ValueInt64() &&
+		token.ExpiresAt.ValueOrZero() == state.ExpiresAt.ValueInt64() &&
+		token.HasFullAccess == expectedAccess &&
+		slices.Equal(tokenFeatures, features) &&
+		slices.Equal(tokenWhitelistIPs, whitelistIPs), nil
 }
 
 func (r *apiTokenResource) ImportState(
@@ -368,6 +696,82 @@ func (r *apiTokenResource) Configure(
 	}
 
 	r.client = client
+	activeTokenName, ok := providerData["api_token_name"].(string)
+	if !ok {
+		resp.Diagnostics.AddError(
+			"Unexpected API Token Name Type",
+			fmt.Sprintf(
+				"Expected string, got: %T.",
+				providerData["api_token_name"],
+			),
+		)
+		return
+	}
+	r.activeTokenName = activeTokenName
+}
+
+func validateAPITokenDeletion(
+	state APITokenResourceModel,
+	activeTokenSecret string,
+	activeTokenName string,
+) error {
+	return validateAPITokenMutation(
+		state,
+		activeTokenSecret,
+		activeTokenName,
+		"destroying",
+	)
+}
+
+func validateAPITokenRename(
+	state APITokenResourceModel,
+	activeTokenSecret string,
+	activeTokenName string,
+) error {
+	return validateAPITokenMutation(
+		state,
+		activeTokenSecret,
+		activeTokenName,
+		"renaming",
+	)
+}
+
+func validateAPITokenMutation(
+	state APITokenResourceModel,
+	activeTokenSecret string,
+	activeTokenName string,
+	action string,
+) error {
+	name := state.Name.ValueString()
+	if activeTokenName != "" && name == activeTokenName {
+		return fmt.Errorf(
+			"API token %q is declared as the token configuring this provider; configure the provider with a different token and update api_token_name or CPANEL_API_TOKEN_NAME before %s this resource",
+			name,
+			action,
+		)
+	}
+
+	if !state.Token.IsNull() && !state.Token.IsUnknown() {
+		if state.Token.ValueString() == activeTokenSecret {
+			return fmt.Errorf(
+				"API token %q is also configuring this provider; configure the provider with a different token before %s this resource",
+				name,
+				action,
+			)
+		}
+
+		return nil
+	}
+
+	if activeTokenName == "" {
+		return fmt.Errorf(
+			"API token %q was imported, so cPanel cannot return its secret and Terraform cannot determine whether it configures this provider; configure api_token_name or CPANEL_API_TOKEN_NAME with the active provider token name before %s this resource",
+			name,
+			action,
+		)
+	}
+
+	return nil
 }
 
 func (r *apiTokenResource) verifyToken(

@@ -2,6 +2,8 @@ package provider
 
 import (
 	"context"
+	"os"
+
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
@@ -9,7 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"os"
+
 	"terraform-provider-cpanel/internal/cpanel"
 	"terraform-provider-cpanel/internal/cpanel/apachehandler"
 	"terraform-provider-cpanel/internal/cpanel/apitoken"
@@ -89,6 +91,11 @@ func (p *cpanelProvider) Schema(_ context.Context, _ provider.SchemaRequest, res
 				Description:         "The cPanel API token. May also be set with CPANEL_API_TOKEN.",
 				MarkdownDescription: "The cPanel API token. May also be set with `CPANEL_API_TOKEN`.",
 			},
+			"api_token_name": schema.StringAttribute{
+				Optional:            true,
+				Description:         "The cPanel name of the API token configuring this provider. May also be set with CPANEL_API_TOKEN_NAME and protects active or imported API token resources from unsafe rename or destruction.",
+				MarkdownDescription: "The cPanel name of the API token configuring this provider. May also be set with `CPANEL_API_TOKEN_NAME` and protects active or imported API token resources from unsafe rename or destruction.",
+			},
 			"host": schema.StringAttribute{
 				Optional:            true,
 				Description:         "The HTTPS cPanel account API endpoint, usually including port 2083. May also be set with CPANEL_HOST.",
@@ -128,6 +135,15 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		)
 	}
 
+	if config.ApiTokenName.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("api_token_name"),
+			"Unknown cpanel API Token Name",
+			"The provider cannot safely manage imported cPanel API tokens while the active token name is unknown. "+
+				"Either target apply the source of the value first, set the value statically in the configuration, or use the CPANEL_API_TOKEN_NAME environment variable.",
+		)
+	}
+
 	if config.Host.IsUnknown() {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("host"),
@@ -146,6 +162,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 
 	username := os.Getenv("CPANEL_USERNAME")
 	apiToken := os.Getenv("CPANEL_API_TOKEN")
+	apiTokenName := os.Getenv("CPANEL_API_TOKEN_NAME")
 	host := os.Getenv("CPANEL_HOST")
 
 	if !config.Username.IsNull() {
@@ -154,6 +171,10 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 
 	if !config.ApiToken.IsNull() {
 		apiToken = config.ApiToken.ValueString()
+	}
+
+	if !config.ApiTokenName.IsNull() {
+		apiTokenName = config.ApiTokenName.ValueString()
 	}
 
 	if !config.Host.IsNull() {
@@ -284,6 +305,7 @@ func (p *cpanelProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	resp.ResourceData = map[string]interface{}{
 		"apachehandler":      apacheHandlerClient,
 		"apitoken":           apiTokenClient,
+		"api_token_name":     apiTokenName,
 		"boxtrapper":         boxTrapperClient,
 		"calendar":           calendarClient,
 		"contactinformation": contactInformationClient,
@@ -436,7 +458,8 @@ func (p *cpanelProvider) Resources(_ context.Context) []func() resource.Resource
 
 // cpanelProviderModel maps provider schema data to a Go type.
 type cpanelProviderModel struct {
-	Username types.String `tfsdk:"username"`
-	ApiToken types.String `tfsdk:"api_token"`
-	Host     types.String `tfsdk:"host"`
+	Username     types.String `tfsdk:"username"`
+	ApiToken     types.String `tfsdk:"api_token"`
+	ApiTokenName types.String `tfsdk:"api_token_name"`
+	Host         types.String `tfsdk:"host"`
 }

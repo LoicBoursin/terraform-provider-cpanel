@@ -21,5 +21,6 @@ provider "cpanel" {}
 ### Optional
 
 - `api_token` (String, Sensitive) The cPanel API token. May also be set with `CPANEL_API_TOKEN`.
+- `api_token_name` (String) The cPanel name of the API token configuring this provider. May also be set with `CPANEL_API_TOKEN_NAME` and protects active or imported API token resources from unsafe rename or destruction.
 - `host` (String) The HTTPS cPanel account API endpoint, usually including port `2083`. May also be set with `CPANEL_HOST`.
 - `username` (String) The cPanel account username. May also be set with `CPANEL_USERNAME`.
