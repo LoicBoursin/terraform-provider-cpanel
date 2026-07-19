@@ -683,6 +683,54 @@ func TestFTPAccountDataSourceSchemaDoesNotExposePassword(t *testing.T) {
 	}
 }
 
+func TestPasswordResourcesUseWriteOnlyVersionedSecrets(t *testing.T) {
+	t.Parallel()
+
+	resources := map[string]frameworkresource.Resource{
+		"Directory Privacy user": NewDirectoryPrivacyUserResource(),
+		"email account":          NewEmailAccountResource(),
+		"FTP account":            NewFTPAccountResource(),
+		"MySQL user":             NewMySQLUserResource(),
+		"PostgreSQL user":        NewPostgreSQLUserResource(),
+	}
+	for name, resourceUnderTest := range resources {
+		name := name
+		resourceUnderTest := resourceUnderTest
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var response frameworkresource.SchemaResponse
+			resourceUnderTest.Schema(
+				t.Context(),
+				frameworkresource.SchemaRequest{},
+				&response,
+			)
+			if response.Diagnostics.HasError() {
+				t.Fatalf("Schema() diagnostics: %v", response.Diagnostics)
+			}
+
+			password, ok := response.Schema.Attributes["password"].(resourceschema.StringAttribute)
+			if !ok ||
+				!password.Optional ||
+				!password.Sensitive ||
+				!password.WriteOnly {
+				t.Fatal("password must be optional, sensitive, and write-only")
+			}
+			passwordVersion, ok := response.Schema.Attributes["password_version"].(resourceschema.Int64Attribute)
+			if !ok || !passwordVersion.Optional {
+				t.Fatal("password_version must be an optional integer")
+			}
+			deleteOnDestroy, ok := response.Schema.Attributes["delete_on_destroy"].(resourceschema.BoolAttribute)
+			if !ok ||
+				!deleteOnDestroy.Optional ||
+				!deleteOnDestroy.Computed ||
+				deleteOnDestroy.Default == nil {
+				t.Fatal("delete_on_destroy must be optional, computed, and defaulted")
+			}
+		})
+	}
+}
+
 func TestFTPAccountDefaultsToPreservingHomeDirectory(t *testing.T) {
 	t.Parallel()
 
