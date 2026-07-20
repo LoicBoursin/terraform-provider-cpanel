@@ -2,7 +2,10 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -12,7 +15,15 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
+	cpanelapi "terraform-provider-cpanel/internal/cpanel"
 	"terraform-provider-cpanel/internal/cpanel/versioncontrol"
+)
+
+const (
+	gitRepositoryDeleteRetryAttempts  = 31
+	gitRepositoryCloneReadyAttempts   = 61
+	gitRepositoryCloneStableReadCount = 6
+	gitRepositoryOperationRetryDelay  = 2 * time.Second
 )
 
 var (
@@ -23,11 +34,47 @@ var (
 )
 
 func NewGitRepositoryResource() resource.Resource {
-	return &gitRepositoryResource{}
+	return &gitRepositoryResource{
+		waitForDeleteRetry: waitForGitRepositoryOperationRetry,
+		waitForCloneRetry:  waitForGitRepositoryOperationRetry,
+	}
 }
 
 type gitRepositoryResource struct {
-	client *versioncontrol.Client
+	client             gitRepositoryClient
+	waitForDeleteRetry func(context.Context) error
+	waitForCloneRetry  func(context.Context) error
+}
+
+func waitForGitRepositoryOperationRetry(ctx context.Context) error {
+	timer := time.NewTimer(gitRepositoryOperationRetryDelay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+type gitRepositoryClient interface {
+	Get(
+		context.Context,
+		string,
+	) (*versioncontrol.Repository, error)
+	RootExists(context.Context, string) (bool, error)
+	Create(
+		context.Context,
+		versioncontrol.Definition,
+	) (*versioncontrol.Repository, error)
+	Update(
+		context.Context,
+		string,
+		string,
+	) (*versioncontrol.Repository, error)
+	Delete(context.Context, string) error
+	DeleteDirectory(context.Context, string) error
 }
 
 func (r *gitRepositoryResource) Metadata(
@@ -207,7 +254,10 @@ func (r *gitRepositoryResource) Read(
 		state.RepositoryRoot.ValueString(),
 	)
 	if err != nil {
-		resp.Diagnostics.AddError("Unable to read Git repository", err.Error())
+		resp.Diagnostics.AddError(
+			"Unable to read Git repository",
+			gitRepositoryReadError(err).Error(),
+		)
 		return
 	}
 	if repository == nil {
@@ -247,7 +297,10 @@ func (r *gitRepositoryResource) Create(
 
 	existing, err := r.client.Get(ctx, definition.RepositoryRoot)
 	if err != nil {
-		resp.Diagnostics.AddError("Unable to read Git repository", err.Error())
+		resp.Diagnostics.AddError(
+			"Unable to read Git repository",
+			gitRepositoryReadError(err).Error(),
+		)
 		return
 	}
 	if existing != nil {
@@ -280,22 +333,61 @@ func (r *gitRepositoryResource) Create(
 		return
 	}
 
-	if _, err := r.client.Create(ctx, definition); err != nil {
-		resp.Diagnostics.AddError(
-			"Unable to create Git repository",
-			gitRepositoryCreationError(
-				err,
-				definition.SourceRepositoryURL,
-			).Error(),
-		)
-		return
+	created, err := r.client.Create(ctx, definition)
+	if err != nil {
+		if cPanelMutationErrorIsDeterministic(err) {
+			resp.Diagnostics.AddError(
+				"Unable to create Git repository",
+				gitRepositoryCreationError(
+					err,
+					definition.SourceRepositoryURL,
+				).Error(),
+			)
+			return
+		}
+
+		repository, reconcileErr := r.verifyRepository(ctx, definition)
+		if reconcileErr != nil {
+			resp.Diagnostics.AddError(
+				"Unable to reconcile Git repository creation",
+				fmt.Sprintf(
+					"%s Reconciliation also failed: %v",
+					createMutationErrorDetail(
+						err,
+						"Git repository creation",
+						fmt.Sprintf(
+							"Git repository %q",
+							definition.RepositoryRoot,
+						),
+					),
+					reconcileErr,
+				),
+			)
+			return
+		}
+
+		created = repository
+	}
+	if created == nil {
+		repository, verifyErr := r.verifyRepository(ctx, definition)
+		if verifyErr != nil {
+			resp.Diagnostics.AddError(
+				"Unable to create Git repository",
+				fmt.Sprintf(
+					"cPanel reported a successful Git repository creation without returning the created repository, and the repository could not be verified: %v. Nothing was removed automatically because ownership could not be confirmed.",
+					verifyErr,
+				),
+			)
+			return
+		}
+		created = repository
 	}
 
-	repository, err := r.verifyRepository(ctx, definition)
+	repository, err := r.verifyCreatedRepository(ctx, definition)
 	if err != nil {
 		rollbackErr := r.deleteRepositoryAndContents(
 			ctx,
-			definition.RepositoryRoot,
+			*created,
 		)
 		resp.Diagnostics.AddError(
 			"Unable to verify Git repository",
@@ -310,7 +402,7 @@ func (r *gitRepositoryResource) Create(
 	if resp.Diagnostics.HasError() {
 		rollbackErr := r.deleteRepositoryAndContents(
 			ctx,
-			definition.RepositoryRoot,
+			*repository,
 		)
 		resp.Diagnostics.AddError(
 			"Unable to decode Git repository",
@@ -348,7 +440,10 @@ func (r *gitRepositoryResource) Update(
 		state.RepositoryRoot.ValueString(),
 	)
 	if err != nil {
-		resp.Diagnostics.AddError("Unable to read Git repository", err.Error())
+		resp.Diagnostics.AddError(
+			"Unable to read Git repository",
+			gitRepositoryReadError(err).Error(),
+		)
 		return
 	}
 	if current == nil {
@@ -358,8 +453,25 @@ func (r *gitRepositoryResource) Update(
 		)
 		return
 	}
+	previous, err := gitRepositoryIdentityFromResourceModel(state)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Unable to identify Git repository before update",
+			err.Error(),
+		)
+		return
+	}
+	if !gitRepositoryIdentitiesEqual(*current, previous) {
+		resp.Diagnostics.AddError(
+			"Git repository changed before update",
+			"The remote Git repository no longer matches Terraform state, so the provider refuses to update it. Refresh and review the drift before retrying.",
+		)
+		return
+	}
 
 	nameChanged := current.Name != definition.Name
+	attempted := previous
+	attempted.Name = definition.Name
 	if nameChanged {
 		if _, err := r.client.Update(
 			ctx,
@@ -374,14 +486,14 @@ func (r *gitRepositoryResource) Update(
 		}
 	}
 
-	repository, err := r.verifyRepository(ctx, definition)
+	repository, err := r.verifyRepositoryIdentity(ctx, attempted)
 	if err != nil {
 		var rollbackErr error
 		if nameChanged {
-			_, rollbackErr = r.client.Update(
+			rollbackErr = r.restoreGitRepositoryName(
 				ctx,
-				current.RepositoryRoot,
-				current.Name,
+				previous,
+				attempted,
 			)
 		}
 		resp.Diagnostics.AddError(
@@ -415,32 +527,21 @@ func (r *gitRepositoryResource) Delete(
 		return
 	}
 
-	repositoryRoot := state.RepositoryRoot.ValueString()
-	if err := r.deleteRepositoryAndContents(ctx, repositoryRoot); err != nil {
-		resp.Diagnostics.AddError("Unable to delete Git repository", err.Error())
-		return
-	}
-
-	remaining, err := r.client.Get(ctx, repositoryRoot)
+	expected, err := gitRepositoryIdentityFromResourceModel(state)
 	if err != nil {
 		resp.Diagnostics.AddError(
-			"Unable to verify Git repository deletion",
+			"Unable to identify Git repository for deletion",
 			err.Error(),
 		)
 		return
 	}
-	if remaining != nil {
-		resp.Diagnostics.AddError(
-			"Unable to verify Git repository deletion",
-			fmt.Sprintf(
-				"Git repository %q still exists after deletion.",
-				repositoryRoot,
-			),
-		)
+
+	if err := r.deleteRepositoryAndContents(ctx, expected); err != nil {
+		resp.Diagnostics.AddError("Unable to delete Git repository", err.Error())
 		return
 	}
 
-	rootExists, err := r.client.RootExists(ctx, repositoryRoot)
+	rootExists, err := r.client.RootExists(ctx, expected.RepositoryRoot)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Unable to verify Git repository directory deletion",
@@ -453,7 +554,7 @@ func (r *gitRepositoryResource) Delete(
 			"Unable to verify Git repository directory deletion",
 			fmt.Sprintf(
 				"Directory %q still exists after destructive repository deletion.",
-				repositoryRoot,
+				expected.RepositoryRoot,
 			),
 		)
 	}
@@ -461,23 +562,174 @@ func (r *gitRepositoryResource) Delete(
 
 func (r *gitRepositoryResource) deleteRepositoryAndContents(
 	ctx context.Context,
-	repositoryRoot string,
+	expected versioncontrol.Repository,
 ) error {
-	current, err := r.client.Get(ctx, repositoryRoot)
+	current, err := r.client.Get(ctx, expected.RepositoryRoot)
 	if err != nil {
-		return fmt.Errorf("read Git repository before deletion: %w", err)
+		return gitRepositoryReadError(err)
 	}
-	if current != nil {
-		if err := r.client.Delete(ctx, repositoryRoot); err != nil {
-			return fmt.Errorf("unregister Git repository: %w", err)
+	if current == nil {
+		return fmt.Errorf(
+			"git repository %q is no longer registered; its directory was left intact because repository ownership could not be confirmed",
+			expected.RepositoryRoot,
+		)
+	}
+	if !gitRepositoryIdentitiesEqual(*current, expected) {
+		return fmt.Errorf(
+			"git repository %q no longer matches the repository recorded by Terraform; refresh state and inspect the remote repository before retrying destructive deletion",
+			expected.RepositoryRoot,
+		)
+	}
+
+	for attempt := 1; ; attempt++ {
+		deleteErr := r.client.Delete(ctx, expected.RepositoryRoot)
+
+		remaining, readErr := r.client.Get(ctx, expected.RepositoryRoot)
+		if readErr != nil {
+			if deleteErr != nil {
+				return fmt.Errorf(
+					"unregister Git repository: %v; verify Git repository removal: %w",
+					deleteErr,
+					gitRepositoryReadError(readErr),
+				)
+			}
+
+			return fmt.Errorf(
+				"verify Git repository removal: %w",
+				gitRepositoryReadError(readErr),
+			)
+		}
+		if remaining == nil {
+			break
+		}
+		if !gitRepositoryIdentitiesEqual(*remaining, expected) {
+			return fmt.Errorf(
+				"git repository %q changed identity while Terraform was unregistering it; the repository directory was left intact",
+				expected.RepositoryRoot,
+			)
+		}
+		if !gitRepositoryDeletionHasPendingTasks(deleteErr) ||
+			attempt >= gitRepositoryDeleteRetryAttempts {
+			if deleteErr != nil {
+				return fmt.Errorf(
+					"unregister Git repository: %w",
+					deleteErr,
+				)
+			}
+
+			return fmt.Errorf(
+				"git repository %q is still registered after cPanel reported a successful deletion; the repository directory was left intact",
+				expected.RepositoryRoot,
+			)
+		}
+		if r.waitForDeleteRetry != nil {
+			if err := r.waitForDeleteRetry(ctx); err != nil {
+				return fmt.Errorf(
+					"wait to retry Git repository deletion: %w",
+					err,
+				)
+			}
 		}
 	}
 
-	if err := r.client.DeleteDirectory(ctx, repositoryRoot); err != nil {
+	if err := r.client.DeleteDirectory(ctx, expected.RepositoryRoot); err != nil {
 		return fmt.Errorf("delete Git repository directory: %w", err)
 	}
 
 	return nil
+}
+
+func gitRepositoryDeletionHasPendingTasks(err error) bool {
+	var apiError *cpanelapi.APIError
+	if !errors.As(err, &apiError) ||
+		apiError.API != "UAPI" ||
+		apiError.Module != "VersionControl" ||
+		apiError.Function != "delete" {
+		return false
+	}
+
+	for _, message := range apiError.Messages {
+		if strings.HasSuffix(
+			message,
+			" can not be deleted because there are tasks pending.",
+		) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func gitRepositoryIdentityFromResourceModel(
+	model GitRepositoryResourceModel,
+) (versioncontrol.Repository, error) {
+	required := map[string]types.String{
+		"name":                     model.Name,
+		"repository_root":          model.RepositoryRoot,
+		"absolute_repository_root": model.AbsoluteRepositoryRoot,
+		"type":                     model.Type,
+	}
+	for attributeName, value := range required {
+		if value.IsNull() || value.IsUnknown() || value.ValueString() == "" {
+			return versioncontrol.Repository{}, fmt.Errorf(
+				"git repository identity attribute %q is unavailable; refresh Terraform state before retrying destructive deletion",
+				attributeName,
+			)
+		}
+	}
+
+	sourceRepositoryURL, err := gitRepositoryOptionalIdentityValue(
+		"source_repository_url",
+		model.SourceRepositoryURL,
+	)
+	if err != nil {
+		return versioncontrol.Repository{}, err
+	}
+	sourceRepositoryName, err := gitRepositoryOptionalIdentityValue(
+		"source_repository_name",
+		model.SourceRepositoryName,
+	)
+	if err != nil {
+		return versioncontrol.Repository{}, err
+	}
+
+	return versioncontrol.Repository{
+		Name:                 model.Name.ValueString(),
+		RepositoryRoot:       model.RepositoryRoot.ValueString(),
+		AbsoluteRoot:         model.AbsoluteRepositoryRoot.ValueString(),
+		Type:                 model.Type.ValueString(),
+		SourceRepositoryName: sourceRepositoryName,
+		SourceRepositoryURL:  sourceRepositoryURL,
+	}, nil
+}
+
+func gitRepositoryOptionalIdentityValue(
+	attributeName string,
+	value types.String,
+) (string, error) {
+	if value.IsUnknown() {
+		return "", fmt.Errorf(
+			"git repository identity attribute %q is unknown; refresh Terraform state before retrying destructive deletion",
+			attributeName,
+		)
+	}
+	if value.IsNull() {
+		return "", nil
+	}
+
+	return value.ValueString(), nil
+}
+
+func gitRepositoryIdentitiesEqual(
+	actual versioncontrol.Repository,
+	expected versioncontrol.Repository,
+) bool {
+	return actual.Name == expected.Name &&
+		actual.RepositoryRoot == expected.RepositoryRoot &&
+		actual.AbsoluteRoot == expected.AbsoluteRoot &&
+		actual.Type == expected.Type &&
+		actual.SourceRepositoryName == expected.SourceRepositoryName &&
+		actual.SourceRepositoryURL == expected.SourceRepositoryURL
 }
 
 func (r *gitRepositoryResource) ImportState(
@@ -544,7 +796,7 @@ func (r *gitRepositoryResource) verifyRepository(
 ) (*versioncontrol.Repository, error) {
 	repository, err := r.client.Get(ctx, expected.RepositoryRoot)
 	if err != nil {
-		return nil, fmt.Errorf("read Git repositories after mutation: %w", err)
+		return nil, gitRepositoryReadError(err)
 	}
 	if repository == nil {
 		return nil, fmt.Errorf(
@@ -552,8 +804,22 @@ func (r *gitRepositoryResource) verifyRepository(
 			expected.RepositoryRoot,
 		)
 	}
+	if err := validateGitRepositoryDefinitionMatch(
+		*repository,
+		expected,
+	); err != nil {
+		return nil, err
+	}
+
+	return repository, nil
+}
+
+func validateGitRepositoryDefinitionMatch(
+	repository versioncontrol.Repository,
+	expected versioncontrol.Definition,
+) error {
 	if repository.Name != expected.Name {
-		return nil, fmt.Errorf(
+		return fmt.Errorf(
 			"git repository %q name is %q; expected %q",
 			expected.RepositoryRoot,
 			repository.Name,
@@ -561,8 +827,81 @@ func (r *gitRepositoryResource) verifyRepository(
 		)
 	}
 	if repository.SourceRepositoryURL != expected.SourceRepositoryURL {
-		return nil, fmt.Errorf(
+		return fmt.Errorf(
 			"git repository %q source URL does not match the configured value",
+			expected.RepositoryRoot,
+		)
+	}
+
+	return nil
+}
+
+func (r *gitRepositoryResource) verifyCreatedRepository(
+	ctx context.Context,
+	expected versioncontrol.Definition,
+) (*versioncontrol.Repository, error) {
+	if expected.SourceRepositoryURL == "" {
+		return r.verifyRepository(ctx, expected)
+	}
+
+	stableReads := 0
+	for attempt := 1; attempt <= gitRepositoryCloneReadyAttempts; attempt++ {
+		repository, err := r.client.Get(ctx, expected.RepositoryRoot)
+		if err != nil {
+			return nil, gitRepositoryReadError(err)
+		}
+		if repository == nil {
+			stableReads = 0
+		} else {
+			if err := validateGitRepositoryDefinitionMatch(
+				*repository,
+				expected,
+			); err != nil {
+				return nil, err
+			}
+			stableReads++
+			if stableReads >= gitRepositoryCloneStableReadCount {
+				return repository, nil
+			}
+		}
+
+		if attempt == gitRepositoryCloneReadyAttempts {
+			break
+		}
+		if r.waitForCloneRetry != nil {
+			if err := r.waitForCloneRetry(ctx); err != nil {
+				return nil, fmt.Errorf(
+					"wait for Git source clone inventory stabilization: %w",
+					err,
+				)
+			}
+		}
+	}
+
+	return nil, fmt.Errorf(
+		"git repository %q did not remain visible for %d consecutive inventory reads after the source clone",
+		expected.RepositoryRoot,
+		gitRepositoryCloneStableReadCount,
+	)
+}
+
+func (r *gitRepositoryResource) verifyRepositoryIdentity(
+	ctx context.Context,
+	expected versioncontrol.Repository,
+) (*versioncontrol.Repository, error) {
+	repository, err := r.client.Get(ctx, expected.RepositoryRoot)
+	if err != nil {
+		return nil, gitRepositoryReadError(err)
+	}
+	if repository == nil {
+		return nil, fmt.Errorf(
+			"git repository %q was not found after mutation",
+			expected.RepositoryRoot,
+		)
+	}
+	if !gitRepositoryIdentitiesEqual(*repository, expected) {
+		return nil, fmt.Errorf(
+			"git repository %q returned unexpected identity after mutation",
 			expected.RepositoryRoot,
 		)
 	}
@@ -570,12 +909,71 @@ func (r *gitRepositoryResource) verifyRepository(
 	return repository, nil
 }
 
+func (r *gitRepositoryResource) restoreGitRepositoryName(
+	ctx context.Context,
+	previous versioncontrol.Repository,
+	attempted versioncontrol.Repository,
+) error {
+	current, err := r.client.Get(ctx, attempted.RepositoryRoot)
+	if err != nil {
+		return fmt.Errorf(
+			"read Git repository before name rollback: %w",
+			gitRepositoryReadError(err),
+		)
+	}
+	if current == nil {
+		return fmt.Errorf(
+			"git repository %q no longer exists during name rollback",
+			attempted.RepositoryRoot,
+		)
+	}
+	if gitRepositoryIdentitiesEqual(*current, previous) {
+		return nil
+	}
+	if !gitRepositoryIdentitiesEqual(*current, attempted) {
+		return fmt.Errorf(
+			"git repository %q changed after the attempted update; refusing to overwrite the concurrent state",
+			attempted.RepositoryRoot,
+		)
+	}
+
+	mutationErr := error(nil)
+	if _, err := r.client.Update(
+		ctx,
+		previous.RepositoryRoot,
+		previous.Name,
+	); err != nil {
+		mutationErr = err
+	}
+	restored, readErr := r.client.Get(ctx, previous.RepositoryRoot)
+	if readErr != nil {
+		return errors.Join(
+			mutationErr,
+			fmt.Errorf(
+				"read Git repository after name rollback: %w",
+				gitRepositoryReadError(readErr),
+			),
+		)
+	}
+	if restored == nil || !gitRepositoryIdentitiesEqual(*restored, previous) {
+		return errors.Join(
+			mutationErr,
+			fmt.Errorf(
+				"git repository %q did not return to its previous identity",
+				previous.RepositoryRoot,
+			),
+		)
+	}
+
+	return nil
+}
+
 func gitRepositoryMutationErrorDetail(
 	mutationErr error,
 	rollbackErr error,
 ) string {
 	if rollbackErr == nil {
-		return mutationErr.Error() + ". The previous remote state was restored."
+		return mutationErr.Error() + ". Automatic rollback completed."
 	}
 
 	return fmt.Sprintf(
