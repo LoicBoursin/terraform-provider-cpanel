@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.0 - 2026-07-20
 
 ### Breaking changes
 
@@ -155,6 +155,9 @@
   `-parallelism=1`.
 - Send mutations with POST, honor Terraform cancellation, and enforce request
   timeouts and response-size limits.
+- Reconcile ambiguous DNS record and cron job updates only when a follow-up
+  inventory attributes one exact requested object without retaining the
+  previous definition.
 - Restore persisted locale and raw-log singleton baselines from an acceptance
   `EXIT` finalizer before cleaning prefix-addressable test artifacts.
 - Restore and verify the complete account notification preference baseline
@@ -166,8 +169,11 @@
 - Make PostgreSQL user names replacement-only, keep passwords write-only and
   versioned, preserve remote users by default, and verify lifecycle mutations
   with follow-up reads.
-- Verify PostgreSQL privilege changes and require inspection and re-import
-  after partial non-atomic failures instead of attempting automatic rollback.
+- Migrate `0.1.0` cron job and PostgreSQL database state to the `1.0.0`
+  schemas without retaining `last_updated` or deleting remote objects.
+- Verify MySQL and PostgreSQL privilege changes and require inspection and
+  re-import after partial non-atomic failures instead of attempting automatic
+  rollback.
 - Complete the full cPanel 134.0 build 45 acceptance matrix with
   Terraform `1.14.9` and `1.15.8`, including singleton restoration and exact
   post-suite cleanup verification.
