@@ -28,7 +28,7 @@ set -euo pipefail
 [[ "${CPANEL_EXPECTED_TEST_USERNAME}" == "test-account" ]]
 [[ "${CPANEL_EXPECTED_VERSION}" == "999.1 (build 2)" ]]
 [[ "${CPANEL_ACCEPT_DESTRUCTIVE}" == "1" ]]
-[[ "$(stat -f '%Lp' "${CPANEL_BASELINE_FILE}" 2>/dev/null || stat -c '%a' "${CPANEL_BASELINE_FILE}")" == "600" ]]
+[[ "$(stat -c '%a' "${CPANEL_BASELINE_FILE}" 2>/dev/null || stat -f '%Lp' "${CPANEL_BASELINE_FILE}")" == "600" ]]
 grep -q '^CPANEL_EXPECTED_LOCALE=' "${CPANEL_BASELINE_FILE}"
 grep -q '^CPANEL_ALLOW_GPG_KEYPAIR_DELETE=1$' "${CPANEL_BASELINE_FILE}"
 [[ "${1:-}" == "fixture-argument" ]]

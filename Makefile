@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := test
 
 TOOLS_DIR ?= $(CURDIR)/.git/tools
+RACE_CGO_ENABLED ?= $(if $(filter darwin,$(shell go env GOOS)),0,1)
 
 .PHONY: test
 test:
@@ -8,7 +9,7 @@ test:
 
 .PHONY: test-race
 test-race:
-	CGO_ENABLED=0 go test -race ./... $(TESTARGS)
+	CGO_ENABLED=$(RACE_CGO_ENABLED) go test -race ./... $(TESTARGS)
 
 .PHONY: smoke-test
 smoke-test:
@@ -49,7 +50,7 @@ verify: check-tools
 	go mod tidy -diff
 	go mod verify
 	CGO_ENABLED=0 go build ./...
-	CGO_ENABLED=0 go test -race ./...
+	CGO_ENABLED=$(RACE_CGO_ENABLED) go test -race ./...
 	go vet ./...
 	$(TOOLS_DIR)/golangci-lint run ./...
 	$(TOOLS_DIR)/govulncheck ./...
