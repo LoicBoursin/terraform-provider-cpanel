@@ -105,7 +105,7 @@ CPANEL_API_TOKEN=token
 CPANEL_API_TOKEN_NAME=terraform-provider-acceptance
 CPANEL_EXPECTED_TEST_HOST=https://cpanel.example.com:2083
 CPANEL_EXPECTED_TEST_USERNAME=account
-CPANEL_EXPECTED_VERSION='134.0 (build 45)'
+CPANEL_EXPECTED_VERSION='134.0 (build 47)'
 CPANEL_ACCEPT_DESTRUCTIVE=1
 CPANEL_TEST_SSL_KEY_ID=
 ```
@@ -122,6 +122,14 @@ cPanel StatsBar API, so a server upgrade cannot silently run a destructive
 suite against an unvalidated release.
 `CPANEL_API_TOKEN_NAME` identifies the provider authentication token so
 imported API token resources cannot revoke it.
+
+GitHub Actions needs only four repository secrets: `CPANEL_HOST`,
+`CPANEL_USERNAME`, `CPANEL_API_TOKEN`, and `CPANEL_API_TOKEN_NAME`. The CI
+entry point derives the matching host and username guards and loads the tested
+cPanel version and the non-secret account baseline from
+[`scripts/cpanel-ci-baseline.env`](../scripts/cpanel-ci-baseline.env). No
+GitHub environment or additional `CPANEL_EXPECTED_*` secret or variable is
+required.
 
 Initialize the dedicated account once, and again whenever the host, username,
 or active API token changes:

@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0 - 2026-07-20
+## 1.0.0 - 2026-07-25
 
 ### Breaking changes
 
@@ -174,7 +174,7 @@
 - Verify MySQL and PostgreSQL privilege changes and require inspection and
   re-import after partial non-atomic failures instead of attempting automatic
   rollback.
-- Complete the full cPanel 134.0 build 45 acceptance matrix with
+- Complete the full cPanel 134.0 build 47 acceptance matrix with
   Terraform `1.14.9` and `1.15.8`, including singleton restoration and exact
   post-suite cleanup verification.
 

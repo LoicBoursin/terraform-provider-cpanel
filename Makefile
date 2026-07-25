@@ -57,6 +57,7 @@ verify: check-tools
 	bash -n scripts/*.sh
 	$(TOOLS_DIR)/shellcheck -x -P scripts scripts/*.sh
 	./scripts/test-cpanel-common.sh
+	./scripts/test-cpanel-ci-acceptance.sh
 	./scripts/test-cpanel-clean-api-tokens.sh
 	./scripts/test-cpanel-verify-test-account.sh
 	./scripts/test-validate-release-tag.sh

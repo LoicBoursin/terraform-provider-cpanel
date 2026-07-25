@@ -78,7 +78,6 @@ jobs:
       - generate
       - versions
     runs-on: ubuntu-latest
-    environment: cpanel-acceptance
     timeout-minutes: 120
     concurrency:
       group: cpanel-acceptance
@@ -108,18 +107,4 @@ jobs:
           CPANEL_USERNAME: ${{ secrets.CPANEL_USERNAME }}
           CPANEL_API_TOKEN: ${{ secrets.CPANEL_API_TOKEN }}
           CPANEL_API_TOKEN_NAME: ${{ secrets.CPANEL_API_TOKEN_NAME }}
-          CPANEL_EXPECTED_TEST_HOST: ${{ secrets.CPANEL_EXPECTED_TEST_HOST }}
-          CPANEL_EXPECTED_TEST_USERNAME: ${{ secrets.CPANEL_EXPECTED_TEST_USERNAME }}
-          CPANEL_EXPECTED_VERSION: ${{ vars.CPANEL_EXPECTED_VERSION }}
-          CPANEL_ACCEPT_DESTRUCTIVE: "1"
-          CPANEL_EXPECTED_LOCALE: ${{ vars.CPANEL_EXPECTED_LOCALE }}
-          CPANEL_EXPECTED_LOG_ARCHIVE: ${{ vars.CPANEL_EXPECTED_LOG_ARCHIVE }}
-          CPANEL_EXPECTED_LOG_PRUNE: ${{ vars.CPANEL_EXPECTED_LOG_PRUNE }}
-          CPANEL_EXPECTED_LOG_RETENTION: ${{ vars.CPANEL_EXPECTED_LOG_RETENTION }}
-          CPANEL_EXPECTED_NOTIFICATION_PREFERENCES: ${{ vars.CPANEL_EXPECTED_NOTIFICATION_PREFERENCES }}
-          CPANEL_EXPECTED_SPAM_PREFERENCES: ${{ vars.CPANEL_EXPECTED_SPAM_PREFERENCES }}
-          CPANEL_EXPECTED_GPG_PUBLIC_COUNT: ${{ vars.CPANEL_EXPECTED_GPG_PUBLIC_COUNT }}
-          CPANEL_EXPECTED_GPG_SECRET_COUNT: ${{ vars.CPANEL_EXPECTED_GPG_SECRET_COUNT }}
-          CPANEL_EXPECTED_SSH_PUBLIC_COUNT: ${{ vars.CPANEL_EXPECTED_SSH_PUBLIC_COUNT }}
-          CPANEL_ALLOW_GPG_KEYPAIR_DELETE: "1"
-        run: ./scripts/test-acceptance.sh
+        run: ./scripts/cpanel-ci-acceptance.sh

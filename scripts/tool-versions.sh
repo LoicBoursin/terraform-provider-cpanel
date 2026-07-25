@@ -12,6 +12,7 @@ syft_version="1.48.0"
 terraform_previous_version="1.14.9"
 terraform_current_version="1.15.8"
 terraform_test_versions_json="[\"${terraform_previous_version}\",\"${terraform_current_version}\"]"
+cpanel_test_version="134.0 (build 47)"
 
 gitleaks_checksum_darwin_amd64="dfe101a4db2255fc85120ac7f3d25e4342c3c20cf749f2c20a18081af1952709"
 gitleaks_checksum_darwin_arm64="b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5"
