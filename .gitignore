@@ -24,6 +24,15 @@ website/node_modules
 *.iml
 *.test
 *.iml
+.env.acceptance.local
+.env.acceptance.*
+!.env.acceptance.example
+acceptance-artifacts.txt
+acceptance-baseline.env
+acceptance.env
+*-acceptance-artifacts.txt
+*-acceptance-baseline.env
+*-acceptance.env
 
 website/vendor
 

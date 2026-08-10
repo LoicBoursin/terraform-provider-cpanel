@@ -1,84 +1,166 @@
 # Terraform Provider cPanel
 
-## Available Resources
+Terraform provider for managing account-level API tokens, cron jobs, DNS
+records, Dynamic DNS domains, account locale, account notification preferences,
+documented SpamAssassin preferences,
+web domains, HTTP redirects,
+email accounts, calendar delegations, account-level filters and mailbox-level
+filters, stored SSL certificates and
+certificate signing requests, public-only OpenPGP keys, read-only public
+OpenSSH keys, Passenger
+applications, raw access log settings, ModSecurity settings, filesystem
+directories and UTF-8 text files, directory indexes and privacy, Git
+repositories, custom MIME types, Apache handlers, forwarders, autoresponders,
+BoxTrapper settings, Mailman mailing lists, FTP accounts, and MySQL, MariaDB,
+and PostgreSQL users and databases, remote MySQL hosts, plus website IP blocks
+and email routing, through the cPanel API.
 
-The whole list of resources has not been implemented yet. The following resources are available:
+## Status
 
-- Cron Jobs
-- PostgreSQL Databases & Users
+Version `0.1.0` is the latest published release. The current source tree is
+prepared for version `1.0.0` and tested against o2switch cPanel `134.0` build
+`47`.
 
-Feel free to open an issue or a pull request to implement new resources.
+The supported versions and API policy are documented in
+[`docs/compatibility.md`](docs/compatibility.md).
+## Supported resources
+
+- `cpanel_account_email_filter`
+- `cpanel_addon_domain`
+- `cpanel_apache_handler`
+- `cpanel_api_token`
+- `cpanel_boxtrapper_settings`
+- `cpanel_calendar_delegate`
+- `cpanel_cron_job`
+- `cpanel_directory_index`
+- `cpanel_directory_privacy`
+- `cpanel_directory_privacy_user`
+- `cpanel_dns_record`
+- `cpanel_domain_alias`
+- `cpanel_dynamic_dns`
+- `cpanel_email_account`
+- `cpanel_email_account_suspension`
+- `cpanel_email_auto_responder`
+- `cpanel_email_domain_forwarder`
+- `cpanel_email_filter`
+- `cpanel_email_forwarder`
+- `cpanel_email_mailing_list`
+- `cpanel_email_routing`
+- `cpanel_filesystem_directory`
+- `cpanel_filesystem_text_file`
+- `cpanel_ftp_account`
+- `cpanel_gpg_public_key`
+- `cpanel_git_repository`
+- `cpanel_ip_block`
+- `cpanel_locale`
+- `cpanel_log_settings`
+- `cpanel_notification_preferences`
+- `cpanel_mime_type`
+- `cpanel_modsecurity_domain`
+- `cpanel_mysql_database`
+- `cpanel_mysql_remote_host`
+- `cpanel_mysql_user`
+- `cpanel_passenger_application`
+- `cpanel_postgresql_database`
+- `cpanel_postgresql_user`
+- `cpanel_redirect`
+- `cpanel_spam_preference`
+- `cpanel_ssl_certificate`
+- `cpanel_ssl_csr`
+- `cpanel_subdomain`
+
+Matching data sources are available for each resource family.
+
+Additional read-only account data sources:
+
+- `cpanel_account_capabilities`
+- `cpanel_calendar_delegates`
+- `cpanel_dav_users`
+- `cpanel_domains`
+- `cpanel_email_accounts`
+- `cpanel_email_auto_responders`
+- `cpanel_email_domain_forwarders`
+- `cpanel_email_domains`
+- `cpanel_email_mailing_lists`
+- `cpanel_email_routings`
+- `cpanel_mysql_databases`
+- `cpanel_mysql_remote_hosts`
+- `cpanel_mysql_restrictions`
+- `cpanel_mysql_users`
+- `cpanel_resource_usage`
+- `cpanel_ssh_public_key`
+- `cpanel_ssh_public_keys`
+- `cpanel_ssl_certificates`
+- `cpanel_ssl_csrs`
+- `cpanel_ssl_installed_hosts`
+- `cpanel_ssl_keys`
 
 ## Requirements
 
-- [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.4
-- [Go](https://golang.org/doc/install) >= 1.20
+- Terraform CLI `1.14.x` or `1.15.x`
+- Go `1.26.x` for development
+- cPanel `134.x` over HTTPS with API Tokens, Cron, DNS Zone Editor, Dynamic
+  DNS, domains, Redirects, Index Manager, Directory Privacy, MIME Types,
+  Apache Handlers, ModSecurity, Git Version Control, Passenger Applications,
+  SSL Manager with an existing RSA key, File Manager, account locales, Raw
+  Access log settings, Contact Information notification preferences,
+  SpamAssassin user preferences,
+  public-key GPG import and inventory, public SSH key inventory, email
+  accounts,
+  BoxTrapper, account-level and mailbox-level filters, forwarders and
+  autoresponders, email routing, CalDAV
+  calendar delegation, Mailman mailing lists, FTP accounts, MySQL or MariaDB
+  with remote-host access, and PostgreSQL enabled, plus the IP Blocker feature
 
-## Building The Provider
+## Configuration
 
-1. Clone the repository
-1. Enter the repository directory
-1. Build the provider using the Go `install` command:
+Keep credentials outside Terraform configuration:
+
+```shell
+export CPANEL_HOST="https://cpanel.example.com:2083"
+export CPANEL_USERNAME="account"
+export CPANEL_API_TOKEN="token"
+export CPANEL_API_TOKEN_NAME="terraform-provider"
+```
+
+Then configure the provider without embedding secrets:
+
+```terraform
+provider "cpanel" {}
+```
+
+The same values can be supplied through the `host`, `username`, `api_token`,
+and `api_token_name` provider attributes when required. `api_token` is
+sensitive, but Terraform configuration and state must still be protected.
+`api_token_name` lets the provider refuse to rename or revoke its own
+authentication token and is required before renaming or destroying an imported
+`cpanel_api_token` resource.
+
+The provider serializes cPanel requests internally. Standard `terraform plan`
+and `terraform apply` commands are supported; no manual `-parallelism=1` flag
+is required.
+
+## Development
+
+Build and run the local test suite:
 
 ```shell
 go install
+make tools
+make verify
 ```
 
-## Adding Dependencies
-
-This provider uses [Go modules](https://github.com/golang/go/wiki/Modules).
-Please see the Go documentation for the most up to date information about using Go modules.
-
-To add a new dependency `github.com/author/dependency` to your Terraform provider:
-
-```shell
-go get github.com/author/dependency
-go mod tidy
-```
-
-Then commit the changes to `go.mod` and `go.sum`.
-
-## Using the provider
-
-You **MUST** disable parallelism when using the provider, because cPanel's API does not support concurrent requests. 
-To do so, you can run the defined commands:
-
-```shell
-make plan
-```
-
-```shell
-make apply
-```
-
-
-Or you can manually:
-- Set an environment variable: `export TF_CLI_ARGS_apply="-parallelism=1"`
-- Set a CLI flag: `terraform apply -parallelism=1`
-
-## Developing the Provider
-
-If you wish to work on the provider, you'll first need [Go](http://www.golang.org) installed on your machine (see [Requirements](#requirements) above).
-
-To compile the provider, run `go install`. This will build the provider and put the provider binary in the `$GOPATH/bin` directory.
-
-To generate or update documentation, run:
+Generate Registry documentation:
 
 ```shell
 make generate-documentation
 ```
 
-To lint the code, run:
+Run the destructive cPanel acceptance suite:
 
 ```shell
-make lint
+make test-acceptance
 ```
 
-In order to run the full suite of Acceptance tests, run:
-
-```shell
-make test
-```
-
-*Note:* Acceptance tests create real resources, and requires a real cPanel account to run. Please be aware of the costs associated with running acceptance tests. For more information, refer to the [Acceptance Testing](https://www.terraform.io/docs/extend/testing/acceptance-tests/index.html) documentation.
-
+Acceptance credentials, cleanup rules, and release validation are documented
+in [`docs/development.md`](docs/development.md).

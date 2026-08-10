@@ -1,0 +1,1 @@
+terraform import cpanel_boxtrapper_settings.support support@example.com

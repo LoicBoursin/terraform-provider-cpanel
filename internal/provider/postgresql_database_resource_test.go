@@ -1,67 +1,232 @@
 package provider
 
 import (
+	"fmt"
 	"testing"
 
+	frameworkresource "github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
+func TestPostgreSQLDatabaseDeletePreservesRemoteDatabaseByDefault(
+	t *testing.T,
+) {
+	t.Parallel()
+
+	schemaResponse := &frameworkresource.SchemaResponse{}
+	NewPostgreSQLDatabaseResource().Schema(
+		t.Context(),
+		frameworkresource.SchemaRequest{},
+		schemaResponse,
+	)
+	if schemaResponse.Diagnostics.HasError() {
+		t.Fatalf("Schema() diagnostics: %v", schemaResponse.Diagnostics)
+	}
+	state := tfsdk.State{Schema: schemaResponse.Schema}
+	diagnostics := state.Set(t.Context(), &PostgreSQLDatabaseModel{
+		Name:            types.StringValue("account_database"),
+		Users:           types.SetValueMust(types.StringType, nil),
+		DeleteOnDestroy: types.BoolValue(false),
+	})
+	if diagnostics.HasError() {
+		t.Fatalf("State.Set() diagnostics: %v", diagnostics)
+	}
+
+	response := &frameworkresource.DeleteResponse{}
+	(&postgreSQLDatabaseResource{}).Delete(
+		t.Context(),
+		frameworkresource.DeleteRequest{State: state},
+		response,
+	)
+	if response.Diagnostics.HasError() {
+		t.Fatalf("Delete() diagnostics: %v", response.Diagnostics)
+	}
+	if response.Diagnostics.WarningsCount() != 1 {
+		t.Fatalf(
+			"Delete() warning count = %d, want 1",
+			response.Diagnostics.WarningsCount(),
+		)
+	}
+}
+
 func TestAccPostgreSQLDatabaseResource(t *testing.T) {
+	const resourceName = "cpanel_postgresql_database.test"
+
+	databaseName := testAccPostgreSQLName("d")
+	renamedDatabaseName := testAccRegisterArtifact(databaseName + "r")
+	firstUserName := testAccPostgreSQLName("du")
+	secondUserName := testAccPostgreSQLName("du")
+
 	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy: resource.ComposeAggregateTestCheckFunc(
+			testAccCheckPostgreSQLDatabasesDestroyed(
+				databaseName,
+				renamedDatabaseName,
+			),
+			testAccCheckPostgreSQLUsersDestroyed(
+				firstUserName,
+				secondUserName,
+			),
+		),
 		Steps: []resource.TestStep{
-			// Create and Read testing
 			{
-				Config: providerConfig + `
-					resource "cpanel_postgresql_database" "database_create" {
-						name = "sc1bolo8774_database_create"
-						users = ["sc1bolo8774_user_read"]
-					}
-				`,
+				Config: testAccPostgreSQLDatabaseResourceConfig(
+					databaseName,
+					firstUserName,
+					secondUserName,
+					[]string{"first"},
+				),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("cpanel_postgresql_database.database_create", "name", "sc1bolo8774_database_create"),
-					resource.TestCheckResourceAttr("cpanel_postgresql_database.database_create", "users.#", "1"),
-					resource.TestCheckResourceAttr("cpanel_postgresql_database.database_create", "users.0", "sc1bolo8774_user_read"),
-					resource.TestCheckResourceAttrSet("cpanel_postgresql_database.database_create", "last_updated"),
+					resource.TestCheckResourceAttr(resourceName, "name", databaseName),
+					resource.TestCheckResourceAttr(resourceName, "users.#", "1"),
+					resource.TestCheckTypeSetElemAttr(resourceName, "users.*", firstUserName),
+					testAccCheckPostgreSQLDatabaseExists(databaseName, firstUserName),
 				),
 			},
-			// ImportState testing
 			{
-				Config: providerConfig + `
-					resource "cpanel_postgresql_database" "database_import" {
-						name = "sc1bolo8774_database_import"
-						users = ["sc1bolo8774_user_read"]
-					}
-				`,
-			},
-			{
-				ResourceName:                         "cpanel_postgresql_database.database_import",
-				ImportStateId:                        "sc1bolo8774_database_import",
+				ResourceName:                         resourceName,
+				ImportStateId:                        databaseName,
 				ImportState:                          true,
 				ImportStateVerify:                    true,
 				ImportStateVerifyIdentifierAttribute: "name",
-				ImportStateVerifyIgnore:              []string{"last_updated"},
+				ImportStateVerifyIgnore:              []string{"delete_on_destroy"},
 			},
-			// Update and Read testing
 			{
-				Config: providerConfig + `
-					resource "cpanel_postgresql_user" "user_new" {
-						name = "sc1bolo8774_user_new"
-						password = "KZ8NDJS72JRBDSIZ982NEDNS"
-					}
-
-					resource "cpanel_postgresql_database" "database_update" {
-						name = "sc1bolo8774_database_update"
-						users = ["sc1bolo8774_user_new"]
-					}
-				`,
+				Config: testAccPostgreSQLDatabaseResourceConfig(
+					databaseName,
+					firstUserName,
+					secondUserName,
+					[]string{"first", "second"},
+				),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("cpanel_postgresql_database.database_update", "name", "sc1bolo8774_database_update"),
-					resource.TestCheckResourceAttr("cpanel_postgresql_database.database_update", "users.#", "1"),
-					resource.TestCheckResourceAttr("cpanel_postgresql_database.database_update", "users.0", "sc1bolo8774_user_new"),
-					resource.TestCheckResourceAttrSet("cpanel_postgresql_database.database_update", "last_updated"),
+					resource.TestCheckResourceAttr(resourceName, "users.#", "2"),
+					resource.TestCheckTypeSetElemAttr(resourceName, "users.*", firstUserName),
+					resource.TestCheckTypeSetElemAttr(resourceName, "users.*", secondUserName),
+					testAccCheckPostgreSQLDatabaseExists(
+						databaseName,
+						firstUserName,
+						secondUserName,
+					),
+				),
+			},
+			{
+				Config: testAccPostgreSQLDatabaseResourceConfig(
+					databaseName,
+					firstUserName,
+					secondUserName,
+					[]string{"second"},
+				),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "users.#", "1"),
+					resource.TestCheckTypeSetElemAttr(resourceName, "users.*", secondUserName),
+					testAccCheckPostgreSQLDatabaseExists(databaseName, secondUserName),
+				),
+			},
+			{
+				Config: testAccPostgreSQLDatabaseResourceConfig(
+					databaseName,
+					firstUserName,
+					secondUserName,
+					[]string{},
+				),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "users.#", "0"),
+					testAccCheckPostgreSQLDatabaseExists(databaseName),
+				),
+			},
+			{
+				ResourceName:                         resourceName,
+				ImportStateId:                        databaseName,
+				ImportState:                          true,
+				ImportStateVerify:                    true,
+				ImportStateVerifyIdentifierAttribute: "name",
+				ImportStateVerifyIgnore:              []string{"delete_on_destroy"},
+			},
+			{
+				Config: testAccPostgreSQLDatabaseResourceConfig(
+					renamedDatabaseName,
+					firstUserName,
+					secondUserName,
+					[]string{"second"},
+				),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "name", renamedDatabaseName),
+					resource.TestCheckTypeSetElemAttr(resourceName, "users.*", secondUserName),
+					testAccCheckPostgreSQLDatabaseExists(renamedDatabaseName, secondUserName),
+				),
+			},
+			{
+				PreConfig: func() {
+					testAccDeletePostgreSQLDatabase(t, renamedDatabaseName)
+				},
+				RefreshState:       true,
+				ExpectNonEmptyPlan: true,
+			},
+			{
+				Config: testAccPostgreSQLDatabaseResourceConfig(
+					renamedDatabaseName,
+					firstUserName,
+					secondUserName,
+					[]string{"second"},
+				),
+				Check: testAccCheckPostgreSQLDatabaseExists(
+					renamedDatabaseName,
+					secondUserName,
 				),
 			},
 		},
 	})
+}
+
+func testAccPostgreSQLDatabaseResourceConfig(
+	databaseName string,
+	firstUserName string,
+	secondUserName string,
+	databaseUsers []string,
+) string {
+	userReferences := make([]string, 0, len(databaseUsers))
+	for _, databaseUser := range databaseUsers {
+		userReferences = append(
+			userReferences,
+			fmt.Sprintf("cpanel_postgresql_user.%s.name", databaseUser),
+		)
+	}
+
+	return providerConfig + fmt.Sprintf(`
+resource "cpanel_postgresql_user" "first" {
+  name             = %q
+  password         = "P8!firstDatabaseUser-2026"
+  password_version = 1
+  delete_on_destroy = true
+}
+
+resource "cpanel_postgresql_user" "second" {
+  name             = %q
+  password         = "R9!secondDatabaseUser-2026"
+  password_version = 1
+  delete_on_destroy = true
+}
+
+resource "cpanel_postgresql_database" "test" {
+  name              = %q
+  users             = [%s]
+  delete_on_destroy = true
+}
+`, firstUserName, secondUserName, databaseName, joinTestAccReferences(userReferences))
+}
+
+func joinTestAccReferences(references []string) string {
+	result := ""
+	for index, reference := range references {
+		if index > 0 {
+			result += ", "
+		}
+		result += reference
+	}
+
+	return result
 }

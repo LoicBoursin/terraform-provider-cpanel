@@ -3,9 +3,11 @@ package provider
 import (
 	"context"
 	"fmt"
+
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
 	"terraform-provider-cpanel/internal/cpanel/postgresql"
 )
 
@@ -60,20 +62,20 @@ func (d *postgreSQLDatabaseDataSource) Metadata(_ context.Context, req datasourc
 // Schema defines the schema for the data source.
 func (d *postgreSQLDatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description:         "Looks up a cPanel PostgreSQL database and its privileged users.",
+		MarkdownDescription: "Looks up a cPanel PostgreSQL database and its privileged users.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Required:            true,
-				Description:         "The database name.",
-				MarkdownDescription: "The database name.",
+				Description:         "The PostgreSQL database name, including the cPanel account prefix.",
+				MarkdownDescription: "The PostgreSQL database name, including the cPanel account prefix.",
+				Validators:          postgreSQLNameValidators(),
 			},
-			"users": schema.ListAttribute{
+			"users": schema.SetAttribute{
 				ElementType:         types.StringType,
-				Description:         "The database users.",
-				MarkdownDescription: "The database users.",
-				Optional:            true,
-			},
-			"last_updated": schema.StringAttribute{
-				Computed: true,
+				Description:         "The PostgreSQL users that currently have all privileges on the database.",
+				MarkdownDescription: "The PostgreSQL users that currently have all privileges on the database.",
+				Computed:            true,
 			},
 		},
 	}
@@ -81,7 +83,7 @@ func (d *postgreSQLDatabaseDataSource) Schema(_ context.Context, _ datasource.Sc
 
 // Read refreshes the Terraform state with the latest data.
 func (d *postgreSQLDatabaseDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
-	var config PostgreSQLDatabaseModel
+	var config PostgreSQLDatabaseDataSourceModel
 
 	// Read Terraform configuration data into the state
 	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
@@ -89,8 +91,15 @@ func (d *postgreSQLDatabaseDataSource) Read(ctx context.Context, req datasource.
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	if err := validatePostgreSQLAccountName(d.client.Auth.Username, config.Name.ValueString()); err != nil {
+		resp.Diagnostics.AddError(
+			"Invalid PostgreSQL database name",
+			err.Error(),
+		)
+		return
+	}
 
-	databases, err := d.client.GetDatabases()
+	databases, err := d.client.GetDatabases(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			fmt.Sprintf("Unable to Read PostgreSQL databases: %s", err),
@@ -99,8 +108,19 @@ func (d *postgreSQLDatabaseDataSource) Read(ctx context.Context, req datasource.
 		return
 	}
 
-	state := PostgreSQLDatabaseAPIToModel(databases, config.Name.ValueString())
+	state, diagnostics := PostgreSQLDatabaseAPIToModel(ctx, databases, config.Name.ValueString())
+	resp.Diagnostics.Append(diagnostics...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if state == nil {
+		resp.Diagnostics.AddError(
+			"PostgreSQL database not found",
+			fmt.Sprintf("No PostgreSQL database named %q exists.", config.Name.ValueString()),
+		)
+		return
+	}
 
 	// Save data into Terraform state
-	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
 }

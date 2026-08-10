@@ -1,1 +1,0 @@
-terraform import cpanel_postgresql_user.user sc1john1234_user

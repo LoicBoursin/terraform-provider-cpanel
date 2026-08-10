@@ -4,35 +4,35 @@ import "terraform-provider-cpanel/internal/cpanel"
 
 type UserDataSourceModel struct {
 	cpanel.UAPIDataSourceModel
-	Data []string `tfsdk:"data"`
+	Data []string `json:"data" tfsdk:"data"`
 }
 
 type UserCreateModel struct {
-	Name     string `tfsdk:"name"`
-	Password string `tfsdk:"password"`
+	Name     string `json:"name" tfsdk:"name"`
+	Password string `json:"password" tfsdk:"password"`
 }
 
 type UserDeleteModel struct {
-	Name string `tfsdk:"name"`
+	Name string `json:"name" tfsdk:"name"`
 }
 
 type UserGrantAllPrivilegesModel struct {
-	Database string `tfsdk:"database"`
-	User     string `tfsdk:"user"`
+	Database string `json:"database" tfsdk:"database"`
+	User     string `json:"user" tfsdk:"user"`
 }
 
 type UserRenameModel struct {
-	NewName  string `tfsdk:"new_name"`
-	OldName  string `tfsdk:"old_name"`
-	Password string `tfsdk:"password"`
+	NewName  string `json:"new_name" tfsdk:"new_name"`
+	OldName  string `json:"old_name" tfsdk:"old_name"`
+	Password string `json:"password" tfsdk:"password"`
 }
 
 type UserRevokeAllPrivilegesModel struct {
-	Database string `tfsdk:"database"`
-	User     string `tfsdk:"user"`
+	Database string `json:"database" tfsdk:"database"`
+	User     string `json:"user" tfsdk:"user"`
 }
 
 type UserSetPasswordModel struct {
-	Password string `tfsdk:"password"`
-	User     string `tfsdk:"user"`
+	Password string `json:"password" tfsdk:"password"`
+	User     string `json:"user" tfsdk:"user"`
 }

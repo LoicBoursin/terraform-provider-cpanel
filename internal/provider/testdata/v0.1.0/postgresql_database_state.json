@@ -1,0 +1,11 @@
+{
+  "schema_version": 0,
+  "attributes": {
+    "name": "account_database",
+    "users": [
+      "account_second",
+      "account_first"
+    ],
+    "last_updated": "2024-02-10T00:00:00Z"
+  }
+}

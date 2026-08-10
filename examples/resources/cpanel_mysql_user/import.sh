@@ -1,0 +1,1 @@
+terraform import cpanel_mysql_user.user sc1john1234_user

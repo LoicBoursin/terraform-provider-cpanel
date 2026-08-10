@@ -1,0 +1,1 @@
+terraform import cpanel_filesystem_directory.assets public_html/assets

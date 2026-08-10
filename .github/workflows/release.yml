@@ -1,41 +1,141 @@
-# Terraform Provider release workflow.
 name: Release
 
-# This GitHub action creates a release when a tag that matches the pattern
-# "v*" (e.g. v0.1.0) is created.
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
-# Releases need permissions to read and write the repository contents.
-# GitHub considers creating releases and uploading assets as writing contents.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  goreleaser:
+  versions:
+    name: Load supported versions
     runs-on: ubuntu-latest
+    outputs:
+      terraform: ${{ steps.versions.outputs.terraform }}
+      terraform_current: ${{ steps.versions.outputs.terraform_current }}
     steps:
-      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: versions
+        run: |
+          source scripts/tool-versions.sh
+          {
+            echo "terraform=${terraform_test_versions_json}"
+            echo "terraform_current=${terraform_current_version}"
+          } >> "${GITHUB_OUTPUT}"
+
+  quality:
+    name: Validate release source
+    needs: versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Allow goreleaser to access older tag information.
           fetch-depth: 0
-      - uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+      - name: Validate release tag
+        run: ./scripts/validate-release-tag.sh "${GITHUB_REF_NAME}"
+      - name: Require a tag reachable from main
+        run: |
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "${GITHUB_SHA}" origin/main
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: 'go.mod'
+          go-version-file: go.mod
           cache: true
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ needs.versions.outputs.terraform_current }}
+          terraform_wrapper: false
+      - run: go mod download
+      - run: make tools
+      - run: make verify
+      - run: make release-reproducibility
+
+  acceptance:
+    name: Acceptance tests (Terraform ${{ matrix.terraform }})
+    needs:
+      - quality
+      - versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    concurrency:
+      group: cpanel-acceptance
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        terraform: ${{ fromJSON(needs.versions.outputs.terraform) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ matrix.terraform }}
+          terraform_wrapper: false
+      - env:
+          CPANEL_HOST: ${{ secrets.CPANEL_HOST }}
+          CPANEL_USERNAME: ${{ secrets.CPANEL_USERNAME }}
+          CPANEL_API_TOKEN: ${{ secrets.CPANEL_API_TOKEN }}
+          CPANEL_API_TOKEN_NAME: ${{ secrets.CPANEL_API_TOKEN_NAME }}
+        run: ./scripts/cpanel-ci-acceptance.sh
+
+  release:
+    name: Sign and publish
+    needs:
+      - quality
+      - acceptance
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Load pinned tool versions
+        id: tool_versions
+        run: |
+          source scripts/tool-versions.sh
+          {
+            echo "goreleaser=v${goreleaser_version}"
+            echo "syft=v${syft_version}"
+          } >> "${GITHUB_OUTPUT}"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Download Syft
+        id: syft
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          syft-version: ${{ steps.tool_versions.outputs.syft }}
+      - name: Add Syft to PATH
+        run: |
+          mkdir -p "${RUNNER_TEMP}/bin"
+          ln -s "${{ steps.syft.outputs.cmd }}" "${RUNNER_TEMP}/bin/syft"
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
       - name: Import GPG key
-        uses: crazy-max/ghaction-import-gpg@01dd5d3ca463c7f10f7f4f7b4f177225ac661ee4 # v6.1.0
         id: import_gpg
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.PASSPHRASE }}
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@7ec5c2b0c6cdda6e8bbb49444bc797dd33d74dd8 # v5.0.0
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
+          distribution: goreleaser
+          version: ${{ steps.tool_versions.outputs.goreleaser }}
           args: release --clean
         env:
-          # GitHub sets the GITHUB_TOKEN secret automatically.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
+      - name: Verify published release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/verify-published-release.sh "${GITHUB_REF_NAME}"

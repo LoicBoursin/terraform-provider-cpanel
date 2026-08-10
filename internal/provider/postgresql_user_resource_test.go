@@ -1,63 +1,96 @@
 package provider
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
 func TestAccPostgreSQLUserResource(t *testing.T) {
-	var password = "kgwFvr4Itufg5Im"
-	var passwordNew = "KZ8NDJS72JRBDSIZ982NEDNS"
+	const (
+		resourceName = "cpanel_postgresql_user.test"
+		passwordOne  = "G7!vr4Itufg5Im-2026"
+		passwordTwo  = "KZ8!DJS72JRBDSIZ-2026"
+	)
+
+	name := testAccPostgreSQLName("u")
+	renamedName := testAccRegisterArtifact(name + "r")
 
 	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy: testAccCheckPostgreSQLUsersDestroyed(
+			name,
+			renamedName,
+		),
 		Steps: []resource.TestStep{
-			// Create and Read testing
 			{
-				Config: providerConfig + `
-					resource "cpanel_postgresql_user" "user_create" {
-						name = "sc1bolo8774_user_create"
-						password = "` + password + `"
-					}
-				`,
+				Config: testAccPostgreSQLUserResourceConfig(name, passwordOne),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("cpanel_postgresql_user.user_create", "name", "sc1bolo8774_user_create"),
-					resource.TestCheckResourceAttr("cpanel_postgresql_user.user_create", "password", password),
-					resource.TestCheckResourceAttrSet("cpanel_postgresql_user.user_create", "last_updated"),
+					resource.TestCheckResourceAttr(resourceName, "name", name),
+					resource.TestCheckResourceAttr(
+						resourceName,
+						"password_version",
+						fmt.Sprintf("%d", testAccPasswordVersion(passwordOne)),
+					),
+					testAccCheckPostgreSQLUserExists(name),
 				),
 			},
-			// ImportState testing
 			{
-				Config: providerConfig + `
-					resource "cpanel_postgresql_user" "user_import" {
-						name = "sc1bolo8774_user_import"
-						password = "` + password + `"
-					}
-				`,
-			},
-			{
-				ResourceName:                         "cpanel_postgresql_user.user_import",
-				ImportStateId:                        "sc1bolo8774_user_import",
+				ResourceName:                         resourceName,
+				ImportStateId:                        name,
 				ImportState:                          true,
 				ImportStateVerify:                    true,
 				ImportStateVerifyIdentifierAttribute: "name",
-				ImportStateVerifyIgnore:              []string{"password", "last_updated"},
+				ImportStateVerifyIgnore: []string{
+					"password",
+					"password_version",
+					"delete_on_destroy",
+				},
 			},
-			// Update Read testing
 			{
-				Config: providerConfig + `
-					resource "cpanel_postgresql_user" "user_update" {
-						name = "sc1bolo8774_user_update"
-						password = "` + passwordNew + `"
-					}
-				`,
+				Config: testAccPostgreSQLUserResourceConfig(name, passwordTwo),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("cpanel_postgresql_user.user_update", "name", "sc1bolo8774_user_update"),
-					resource.TestCheckResourceAttr("cpanel_postgresql_user.user_update", "password", passwordNew),
-					resource.TestCheckResourceAttrSet("cpanel_postgresql_user.user_update", "last_updated"),
+					resource.TestCheckResourceAttr(resourceName, "name", name),
+					resource.TestCheckResourceAttr(
+						resourceName,
+						"password_version",
+						fmt.Sprintf("%d", testAccPasswordVersion(passwordTwo)),
+					),
+					testAccCheckPostgreSQLUserExists(name),
 				),
+			},
+			{
+				Config: testAccPostgreSQLUserResourceConfig(renamedName, passwordTwo),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "name", renamedName),
+					testAccCheckPostgreSQLUserExists(renamedName),
+					testAccCheckPostgreSQLUsersDestroyed(name),
+				),
+			},
+			{
+				PreConfig: func() {
+					testAccDeletePostgreSQLUser(t, renamedName)
+				},
+				RefreshState:       true,
+				ExpectNonEmptyPlan: true,
+			},
+			{
+				Config: testAccPostgreSQLUserResourceConfig(renamedName, passwordTwo),
+				Check:  testAccCheckPostgreSQLUserExists(renamedName),
 			},
 		},
 	})
+}
+
+func testAccPostgreSQLUserResourceConfig(name, password string) string {
+	return providerConfig + fmt.Sprintf(`
+resource "cpanel_postgresql_user" "test" {
+  name              = %q
+  password          = %q
+  password_version  = %d
+  delete_on_destroy = true
+}
+`, name, password, testAccPasswordVersion(password))
 }

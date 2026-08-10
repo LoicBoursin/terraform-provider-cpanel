@@ -1,0 +1,1 @@
+terraform import cpanel_directory_index.downloads public_html/downloads
