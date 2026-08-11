@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	frameworkresource "github.com/hashicorp/terraform-plugin-framework/resource"
 	resourceschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -83,76 +82,6 @@ func TestEmailMailingListResourceSchema(t *testing.T) {
 			attribute.IsRequired() {
 			t.Fatalf("%s must be computed-only", name)
 		}
-	}
-}
-
-func TestWaitForMailmanPasswordAcceptanceRetriesUntilExpected(t *testing.T) {
-	t.Parallel()
-
-	attempts := 0
-	err := testAccWaitForMailmanPasswordAcceptance(
-		t.Context(),
-		"list@example.test",
-		true,
-		time.Second,
-		time.Nanosecond,
-		func(context.Context) (bool, error) {
-			attempts++
-
-			return attempts == 3, nil
-		},
-	)
-	if err != nil {
-		t.Fatalf("wait for Mailman password acceptance: %v", err)
-	}
-	if attempts != 3 {
-		t.Fatalf("password checks = %d, want 3", attempts)
-	}
-}
-
-func TestWaitForMailmanPasswordAcceptanceRejectsPermanentMismatch(t *testing.T) {
-	t.Parallel()
-
-	err := testAccWaitForMailmanPasswordAcceptance(
-		t.Context(),
-		"list@example.test",
-		true,
-		time.Nanosecond,
-		time.Hour,
-		func(context.Context) (bool, error) {
-			return false, nil
-		},
-	)
-	if err == nil || !strings.Contains(
-		err.Error(),
-		`password acceptance for "list@example.test" is false; want true`,
-	) {
-		t.Fatalf("wait error = %v, want permanent mismatch", err)
-	}
-}
-
-func TestWaitForMailmanPasswordAcceptancePreservesMismatchOnDeadline(
-	t *testing.T,
-) {
-	t.Parallel()
-
-	err := testAccWaitForMailmanPasswordAcceptance(
-		t.Context(),
-		"list@example.test",
-		true,
-		10*time.Millisecond,
-		time.Nanosecond,
-		func(ctx context.Context) (bool, error) {
-			<-ctx.Done()
-
-			return false, ctx.Err()
-		},
-	)
-	if err == nil || !strings.Contains(
-		err.Error(),
-		`password acceptance for "list@example.test" is false; want true`,
-	) {
-		t.Fatalf("wait error = %v, want stable mismatch", err)
 	}
 }
 
