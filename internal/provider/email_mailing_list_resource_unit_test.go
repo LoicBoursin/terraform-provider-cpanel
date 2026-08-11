@@ -131,6 +131,31 @@ func TestWaitForMailmanPasswordAcceptanceRejectsPermanentMismatch(t *testing.T) 
 	}
 }
 
+func TestWaitForMailmanPasswordAcceptancePreservesMismatchOnDeadline(
+	t *testing.T,
+) {
+	t.Parallel()
+
+	err := testAccWaitForMailmanPasswordAcceptance(
+		t.Context(),
+		"list@example.test",
+		true,
+		10*time.Millisecond,
+		time.Nanosecond,
+		func(ctx context.Context) (bool, error) {
+			<-ctx.Done()
+
+			return false, ctx.Err()
+		},
+	)
+	if err == nil || !strings.Contains(
+		err.Error(),
+		`password acceptance for "list@example.test" is false; want true`,
+	) {
+		t.Fatalf("wait error = %v, want stable mismatch", err)
+	}
+}
+
 func TestEmailMailingListUpdateChangesPasswordInPlace(t *testing.T) {
 	t.Parallel()
 

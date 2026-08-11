@@ -3840,11 +3840,29 @@ func testAccWaitForMailmanPasswordAcceptance(
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	mismatchError := func(actual bool) error {
+		return fmt.Errorf(
+			"Mailman administrator password acceptance for %q is %t; want %t",
+			address,
+			actual,
+			expected,
+		)
+	}
+	lastActual := !expected
 	for {
+		if ctx.Err() != nil {
+			return mismatchError(lastActual)
+		}
+
 		actual, err := check(ctx)
 		if err != nil {
+			if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+				return mismatchError(lastActual)
+			}
+
 			return err
 		}
+		lastActual = actual
 		if actual == expected {
 			return nil
 		}
@@ -3854,12 +3872,7 @@ func testAccWaitForMailmanPasswordAcceptance(
 		case <-ctx.Done():
 			timer.Stop()
 
-			return fmt.Errorf(
-				"Mailman administrator password acceptance for %q is %t; want %t",
-				address,
-				actual,
-				expected,
-			)
+			return mismatchError(lastActual)
 		case <-timer.C:
 		}
 	}
