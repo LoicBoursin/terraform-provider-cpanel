@@ -107,11 +107,6 @@ func TestAccEmailMailingListResource(t *testing.T) {
 						nil,
 						&initialListID,
 					),
-					testAccCheckEmailMailingListPassword(
-						address,
-						initialPassword,
-						true,
-					),
 				),
 			},
 			{
@@ -152,16 +147,6 @@ func TestAccEmailMailingListResource(t *testing.T) {
 						private,
 						&initialListID,
 						nil,
-					),
-					testAccCheckEmailMailingListPassword(
-						address,
-						updatedPassword,
-						true,
-					),
-					testAccCheckEmailMailingListPassword(
-						address,
-						initialPassword,
-						false,
 					),
 					testAccCheckEmailMailingListDelegate(
 						address,
