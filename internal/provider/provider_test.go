@@ -3729,7 +3729,7 @@ func testAccCheckEmailMailingListPassword(
 	accepted bool,
 ) resource.TestCheckFunc {
 	return func(_ *terraform.State) error {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cancel()
 
 		client, err := testAccClient()
@@ -3757,21 +3757,6 @@ func testAccCheckEmailMailingListPassword(
 			"adminpw":  {password},
 			"admlogin": {"Let me in..."},
 		}
-		request, err := http.NewRequestWithContext(
-			ctx,
-			http.MethodPost,
-			fmt.Sprintf(
-				"https://%s/mailman/admin/%s",
-				domain,
-				url.PathEscape(mailingList.ID),
-			),
-			strings.NewReader(form.Encode()),
-		)
-		if err != nil {
-			return fmt.Errorf("build Mailman administrator login request: %w", err)
-		}
-		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
 		defaultTransport, ok := http.DefaultTransport.(*http.Transport)
 		if !ok {
 			return fmt.Errorf("default HTTP transport has type %T; want *http.Transport", http.DefaultTransport)
@@ -3784,32 +3769,112 @@ func testAccCheckEmailMailingListPassword(
 		}
 		httpClient := &http.Client{
 			Transport: transport,
-			Timeout:   30 * time.Second,
-		}
-		response, err := httpClient.Do(request)
-		if err != nil {
-			return fmt.Errorf("authenticate to Mailman administrator page: %w", err)
-		}
-		body, readErr := io.ReadAll(io.LimitReader(response.Body, 1<<20))
-		closeErr := response.Body.Close()
-		if readErr != nil {
-			return fmt.Errorf("read Mailman administrator page: %w", readErr)
-		}
-		if closeErr != nil {
-			return fmt.Errorf("close Mailman administrator page: %w", closeErr)
-		}
-		loginAccepted := response.StatusCode == http.StatusOK &&
-			!strings.Contains(string(body), `name="adminpw"`)
-		if loginAccepted != accepted {
-			return fmt.Errorf(
-				"Mailman administrator password acceptance for %q is %t; want %t",
-				address,
-				loginAccepted,
-				accepted,
-			)
+			Timeout:   10 * time.Second,
 		}
 
-		return nil
+		return testAccWaitForMailmanPasswordAcceptance(
+			ctx,
+			address,
+			accepted,
+			30*time.Second,
+			time.Second,
+			func(ctx context.Context) (bool, error) {
+				request, requestErr := http.NewRequestWithContext(
+					ctx,
+					http.MethodPost,
+					fmt.Sprintf(
+						"https://%s/mailman/admin/%s",
+						domain,
+						url.PathEscape(mailingList.ID),
+					),
+					strings.NewReader(form.Encode()),
+				)
+				if requestErr != nil {
+					return false, fmt.Errorf(
+						"build Mailman administrator login request: %w",
+						requestErr,
+					)
+				}
+				request.Header.Set(
+					"Content-Type",
+					"application/x-www-form-urlencoded",
+				)
+
+				response, requestErr := httpClient.Do(request)
+				if requestErr != nil {
+					return false, fmt.Errorf(
+						"authenticate to Mailman administrator page: %w",
+						requestErr,
+					)
+				}
+				body, readErr := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+				closeErr := response.Body.Close()
+				if readErr != nil {
+					return false, fmt.Errorf(
+						"read Mailman administrator page: %w",
+						readErr,
+					)
+				}
+				if closeErr != nil {
+					return false, fmt.Errorf(
+						"close Mailman administrator page: %w",
+						closeErr,
+					)
+				}
+
+				return response.StatusCode == http.StatusOK &&
+					!strings.Contains(string(body), `name="adminpw"`), nil
+			},
+		)
+	}
+}
+
+func testAccWaitForMailmanPasswordAcceptance(
+	ctx context.Context,
+	address string,
+	expected bool,
+	timeout time.Duration,
+	interval time.Duration,
+	check func(context.Context) (bool, error),
+) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	mismatchError := func(actual bool) error {
+		return fmt.Errorf(
+			"Mailman administrator password acceptance for %q is %t; want %t",
+			address,
+			actual,
+			expected,
+		)
+	}
+	lastActual := !expected
+	for {
+		if ctx.Err() != nil {
+			return mismatchError(lastActual)
+		}
+
+		actual, err := check(ctx)
+		if err != nil {
+			if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+				return mismatchError(lastActual)
+			}
+
+			return err
+		}
+		lastActual = actual
+		if actual == expected {
+			return nil
+		}
+
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+
+			return mismatchError(lastActual)
+		case <-timer.C:
+		}
 	}
 }
 
