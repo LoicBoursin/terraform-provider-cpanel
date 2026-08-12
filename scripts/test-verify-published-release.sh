@@ -193,6 +193,15 @@ if [[ ! -f "${PUBLISHED_RELEASE_GPG_MARKER}" ]]; then
   exit 1
 fi
 
+if GITHUB_REF_NAME=v1.0.0 PATH="${fake_bin_directory}:${PATH}" \
+  "${script_directory}/verify-published-release.sh" '' \
+  >/dev/null 2>&1; then
+  printf 'Published release verification accepted an explicitly empty tag\n' >&2
+  exit 1
+fi
+GITHUB_REF_NAME=v1.0.0 PATH="${fake_bin_directory}:${PATH}" \
+  "${script_directory}/verify-published-release.sh" >/dev/null
+
 export PUBLISHED_RELEASE_GPG_FAIL=1
 if PATH="${fake_bin_directory}:${PATH}" \
   "${script_directory}/verify-published-release.sh" v1.0.0 \
