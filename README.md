@@ -17,9 +17,8 @@ and email routing, through the cPanel API.
 
 ## Status
 
-Version `0.1.0` is the latest published release. The current source tree is
-prepared for version `1.0.0` and tested against o2switch cPanel `134.0` build
-`47`.
+The current source tree is version `1.0.0` and is tested against o2switch
+cPanel `134.0` build `49`.
 
 The supported versions and API policy are documented in
 [`docs/compatibility.md`](docs/compatibility.md).

@@ -14,7 +14,7 @@ description: |-
 | Terraform provider protocol | `6.0` |
 | Go development toolchain | `1.26.x` |
 | cPanel & WHM | `134.x` |
-| Tested o2switch environment | cPanel `134.0` build `47` |
+| Tested o2switch environment | cPanel `134.0` build `49` |
 
 The provider supports the two most recent stable Terraform minor releases at
 the time of a provider release. Older Terraform versions may continue to work,
@@ -40,8 +40,8 @@ operations are outside its scope.
 
 ## Tested environment
 
-On July 25, 2026, the complete acceptance suite passed on the o2switch test
-account running cPanel `134.0` build `47` with Terraform `1.14.9` and `1.15.8`.
+On August 11, 2026, the complete acceptance suite passed on the o2switch test
+account running cPanel `134.0` build `49` with Terraform `1.14.9` and `1.15.8`.
 
 The test matrix covered:
 
