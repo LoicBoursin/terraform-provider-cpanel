@@ -4,7 +4,11 @@ set -euo pipefail
 
 script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repository_directory="$(cd "${script_directory}/.." && pwd)"
-tag="${1:-${GITHUB_REF_NAME:-}}"
+if (($# > 0)); then
+  tag="$1"
+else
+  tag="${GITHUB_REF_NAME:-}"
+fi
 repository="${GITHUB_REPOSITORY:-}"
 changelog="${CHANGELOG_PATH:-${repository_directory}/CHANGELOG.md}"
 

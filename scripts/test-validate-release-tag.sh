@@ -41,11 +41,14 @@ for tag in \
   v1.0.0+ \
   v1.0.0_rc1 \
   latest; do
-  if "${validator}" "${tag}" "${changelog}" >/dev/null 2>&1; then
+  if GITHUB_REF_NAME=v1.0.0 \
+    "${validator}" "${tag}" "${changelog}" >/dev/null 2>&1; then
     printf 'Expected invalid release tag to be rejected: %s\n' "${tag}" >&2
     exit 1
   fi
 done
+
+GITHUB_REF_NAME=v1.0.0 "${validator}"
 
 if "${validator}" v1.0.1 "${changelog}" >/dev/null 2>&1; then
   printf 'Expected a tag that differs from the changelog to be rejected\n' >&2
