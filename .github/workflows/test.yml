@@ -2,12 +2,7 @@ name: Tests
 
 on:
   pull_request:
-  push:
-    branches:
-      - main
   workflow_dispatch:
-  schedule:
-    - cron: "17 4 * * 1"
 
 permissions:
   contents: read
@@ -72,7 +67,7 @@ jobs:
 
   acceptance:
     name: Acceptance tests (Terraform ${{ matrix.terraform }})
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    if: github.event_name == 'workflow_dispatch'
     needs:
       - quality
       - generate
