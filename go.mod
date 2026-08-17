@@ -2,7 +2,7 @@ module terraform-provider-cpanel
 
 go 1.26.0
 
-toolchain go1.26.5
+toolchain go1.26.6
 
 require (
 	github.com/ProtonMail/go-crypto v1.4.1
